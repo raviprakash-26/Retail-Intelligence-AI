@@ -1,0 +1,467 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Dark mode is class-driven (next-themes toggles `.dark` on <html>) so the
+   user's explicit choice always beats the OS preference. */
+@custom-variant dark (&:is(.dark *));
+
+/* =============================================================================
+   RETAIL INTELLIGENCE AI — DESIGN TOKENS
+   =============================================================================
+   The palette is built in OKLCH so that lightness is perceptually uniform:
+   every surface step is a real, even step to the eye, and the dark theme is
+   derived by moving lightness rather than by hand-picking hex values that
+   drift in hue.
+
+   Brand hue 264 is a deep indigo-navy — the colour banks and ledgers have
+   used for a century, pushed cool and modern. Hue 190 (teal) carries the
+   "intelligence" half of the product and is reserved for AI surfaces so that
+   AI-generated content is always visually distinguishable from recorded fact.
+
+   Semantic colours are never used decoratively. In a financial product, green
+   means money in and red means money out; using them for anything else makes
+   a dashboard lie at a glance.
+   ============================================================================= */
+
+:root {
+  --radius: 0.75rem;
+
+  /* --- Surfaces ------------------------------------------------------- */
+  --background: oklch(0.994 0.002 265);
+  --foreground: oklch(0.215 0.021 265);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.215 0.021 265);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.215 0.021 265);
+
+  /* --- Brand ---------------------------------------------------------- */
+  --primary: oklch(0.448 0.152 264);
+  --primary-foreground: oklch(0.985 0.004 265);
+  --primary-muted: oklch(0.955 0.023 264);
+
+  --secondary: oklch(0.965 0.007 265);
+  --secondary-foreground: oklch(0.305 0.028 265);
+
+  --muted: oklch(0.968 0.005 265);
+  --muted-foreground: oklch(0.512 0.021 265);
+
+  --accent: oklch(0.958 0.024 195);
+  --accent-foreground: oklch(0.325 0.058 218);
+
+  /* --- Semantic ------------------------------------------------------- */
+  --destructive: oklch(0.564 0.196 24.5);
+  --destructive-foreground: oklch(0.985 0.004 265);
+  --destructive-muted: oklch(0.958 0.026 24.5);
+
+  --success: oklch(0.567 0.128 156);
+  --success-foreground: oklch(0.985 0.004 265);
+  --success-muted: oklch(0.955 0.031 156);
+
+  --warning: oklch(0.712 0.153 71);
+  --warning-foreground: oklch(0.245 0.048 71);
+  --warning-muted: oklch(0.964 0.043 84);
+
+  --info: oklch(0.576 0.129 236);
+  --info-foreground: oklch(0.985 0.004 265);
+  --info-muted: oklch(0.955 0.029 236);
+
+  /* --- Financial direction --------------------------------------------
+     Aliases so a component says what it means ("this figure is money in")
+     rather than picking a colour and hoping the meaning is obvious. */
+  --positive: var(--success);
+  --negative: var(--destructive);
+
+  /* --- AI surfaces ---------------------------------------------------- */
+  --ai: oklch(0.552 0.113 205);
+  --ai-foreground: oklch(0.985 0.004 265);
+  --ai-muted: oklch(0.955 0.028 205);
+
+  /* --- Lines & focus -------------------------------------------------- */
+  --border: oklch(0.916 0.006 265);
+  --input: oklch(0.916 0.006 265);
+  --ring: oklch(0.448 0.152 264);
+
+  /* --- Charts ---------------------------------------------------------
+     Five hues chosen to stay distinguishable for the common forms of colour
+     vision deficiency, and to hold their ordering when printed greyscale. */
+  --chart-1: oklch(0.508 0.152 264);
+  --chart-2: oklch(0.612 0.113 199);
+  --chart-3: oklch(0.668 0.135 71);
+  --chart-4: oklch(0.578 0.138 340);
+  --chart-5: oklch(0.598 0.118 156);
+  --chart-grid: oklch(0.926 0.005 265);
+
+  /* --- Application shell ---------------------------------------------- */
+  --sidebar: oklch(0.982 0.004 265);
+  --sidebar-foreground: oklch(0.305 0.024 265);
+  --sidebar-primary: oklch(0.448 0.152 264);
+  --sidebar-primary-foreground: oklch(0.985 0.004 265);
+  --sidebar-accent: oklch(0.948 0.012 265);
+  --sidebar-accent-foreground: oklch(0.265 0.031 265);
+  --sidebar-border: oklch(0.916 0.006 265);
+  --sidebar-ring: oklch(0.448 0.152 264);
+
+  /* --- Elevation -------------------------------------------------------
+     Shadows are tinted with the brand hue rather than pure black, which keeps
+     cards from looking dirty against the cool background. */
+  --shadow-color: 264 40% 22%;
+  --shadow-xs: 0 1px 2px 0 hsl(var(--shadow-color) / 0.04);
+  --shadow-sm:
+    0 1px 3px 0 hsl(var(--shadow-color) / 0.05),
+    0 1px 2px -1px hsl(var(--shadow-color) / 0.04);
+  --shadow-md:
+    0 4px 12px -2px hsl(var(--shadow-color) / 0.07),
+    0 2px 6px -2px hsl(var(--shadow-color) / 0.04);
+  --shadow-lg:
+    0 12px 28px -6px hsl(var(--shadow-color) / 0.1),
+    0 6px 12px -6px hsl(var(--shadow-color) / 0.05);
+  --shadow-xl: 0 24px 48px -12px hsl(var(--shadow-color) / 0.14);
+}
+
+.dark {
+  --background: oklch(0.172 0.014 265);
+  --foreground: oklch(0.962 0.004 265);
+
+  --card: oklch(0.212 0.017 265);
+  --card-foreground: oklch(0.962 0.004 265);
+
+  --popover: oklch(0.226 0.018 265);
+  --popover-foreground: oklch(0.962 0.004 265);
+
+  /* Brand lightens in dark mode: the light-theme indigo fails contrast
+     against a dark surface, so the token moves rather than the usage. */
+  --primary: oklch(0.702 0.132 264);
+  --primary-foreground: oklch(0.172 0.021 265);
+  --primary-muted: oklch(0.278 0.048 264);
+
+  --secondary: oklch(0.262 0.017 265);
+  --secondary-foreground: oklch(0.928 0.006 265);
+
+  --muted: oklch(0.256 0.015 265);
+  --muted-foreground: oklch(0.702 0.017 265);
+
+  --accent: oklch(0.288 0.038 205);
+  --accent-foreground: oklch(0.902 0.032 199);
+
+  --destructive: oklch(0.668 0.176 24.5);
+  --destructive-foreground: oklch(0.172 0.021 265);
+  --destructive-muted: oklch(0.288 0.062 24.5);
+
+  --success: oklch(0.688 0.128 156);
+  --success-foreground: oklch(0.172 0.021 265);
+  --success-muted: oklch(0.278 0.048 156);
+
+  --warning: oklch(0.788 0.142 76);
+  --warning-foreground: oklch(0.185 0.038 71);
+  --warning-muted: oklch(0.302 0.058 76);
+
+  --info: oklch(0.688 0.118 236);
+  --info-foreground: oklch(0.172 0.021 265);
+  --info-muted: oklch(0.278 0.048 236);
+
+  --positive: var(--success);
+  --negative: var(--destructive);
+
+  --ai: oklch(0.702 0.108 199);
+  --ai-foreground: oklch(0.172 0.021 265);
+  --ai-muted: oklch(0.282 0.042 199);
+
+  --border: oklch(0.302 0.015 265);
+  --input: oklch(0.322 0.016 265);
+  --ring: oklch(0.702 0.132 264);
+
+  --chart-1: oklch(0.672 0.138 264);
+  --chart-2: oklch(0.712 0.108 199);
+  --chart-3: oklch(0.768 0.132 76);
+  --chart-4: oklch(0.688 0.132 340);
+  --chart-5: oklch(0.702 0.112 156);
+  --chart-grid: oklch(0.292 0.013 265);
+
+  --sidebar: oklch(0.196 0.016 265);
+  --sidebar-foreground: oklch(0.902 0.006 265);
+  --sidebar-primary: oklch(0.702 0.132 264);
+  --sidebar-primary-foreground: oklch(0.172 0.021 265);
+  --sidebar-accent: oklch(0.268 0.019 265);
+  --sidebar-accent-foreground: oklch(0.948 0.005 265);
+  --sidebar-border: oklch(0.302 0.015 265);
+  --sidebar-ring: oklch(0.702 0.132 264);
+
+  /* Dark surfaces need a deeper, more opaque shadow to read as elevation. */
+  --shadow-color: 264 60% 4%;
+  --shadow-xs: 0 1px 2px 0 hsl(var(--shadow-color) / 0.28);
+  --shadow-sm:
+    0 1px 3px 0 hsl(var(--shadow-color) / 0.34),
+    0 1px 2px -1px hsl(var(--shadow-color) / 0.28);
+  --shadow-md:
+    0 4px 12px -2px hsl(var(--shadow-color) / 0.42),
+    0 2px 6px -2px hsl(var(--shadow-color) / 0.3);
+  --shadow-lg:
+    0 12px 28px -6px hsl(var(--shadow-color) / 0.5),
+    0 6px 12px -6px hsl(var(--shadow-color) / 0.34);
+  --shadow-xl: 0 24px 48px -12px hsl(var(--shadow-color) / 0.6);
+}
+
+/* =============================================================================
+   TAILWIND THEME MAPPING
+   Exposes each token as a utility (bg-primary, text-success, border-border …).
+   ============================================================================= */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-muted: var(--primary-muted);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-muted: var(--destructive-muted);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-muted: var(--success-muted);
+
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-muted: var(--warning-muted);
+
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-muted: var(--info-muted);
+
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+
+  --color-ai: var(--ai);
+  --color-ai-foreground: var(--ai-foreground);
+  --color-ai-muted: var(--ai-muted);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-grid: var(--chart-grid);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  --font-sans:
+    var(--font-app-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-mono:
+    var(--font-app-mono), ui-monospace, "SF Mono", "Cascadia Mono", monospace;
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+
+  --animate-shimmer: shimmer 2s ease-in-out infinite;
+
+  @keyframes shimmer {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
+
+/* =============================================================================
+   BASE
+   ============================================================================= */
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    text-rendering: optimizeLegibility;
+  }
+
+  /* A single, consistent focus treatment. Never remove it without an
+     equivalent replacement — keyboard users navigate by it. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+
+  /* Respect the OS "reduce motion" setting. Vestibular disorders make
+     parallax and long transitions genuinely unpleasant, not just noisy. */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Strip the spinner from number inputs: an accidental scroll over a
+     quantity field must not silently change a posted amount. */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+
+  ::selection {
+    background-color: var(--primary-muted);
+    color: var(--foreground);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+    background-clip: content-box;
+  }
+}
+
+/* =============================================================================
+   UTILITIES
+   ============================================================================= */
+
+@layer utilities {
+  /* Every monetary figure in the product carries this. Fixed-width digits
+     keep decimal points aligned down a column without a monospace font. */
+  .tabular-figures {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .text-pretty {
+    text-wrap: pretty;
+  }
+
+  /* Visible only to screen readers; still focusable for skip links. */
+  .sr-only-focusable:not(:focus):not(:focus-within) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  /* Marketing-only gradient text. Kept out of the app shell, where colour
+     must stay meaningful. */
+  .text-gradient-brand {
+    background-image: linear-gradient(
+      135deg,
+      var(--primary) 0%,
+      var(--ai) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Soft radial wash behind hero sections. */
+  .bg-brand-glow {
+    background-image:
+      radial-gradient(
+        60rem 30rem at 50% -10%,
+        color-mix(in oklch, var(--primary) 14%, transparent) 0%,
+        transparent 70%
+      ),
+      radial-gradient(
+        40rem 24rem at 85% 10%,
+        color-mix(in oklch, var(--ai) 10%, transparent) 0%,
+        transparent 70%
+      );
+  }
+
+  /* 1px grid used behind hero/section backgrounds. */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, var(--border) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+    background-size: 3.5rem 3.5rem;
+    mask-image: radial-gradient(
+      ellipse 80% 50% at 50% 0%,
+      black 40%,
+      transparent 100%
+    );
+  }
+
+  .card-hover {
+    transition:
+      box-shadow 200ms ease,
+      transform 200ms ease,
+      border-color 200ms ease;
+  }
+  .card-hover:hover {
+    box-shadow: var(--shadow-md);
+    border-color: color-mix(in oklch, var(--primary) 28%, var(--border));
+  }
+}

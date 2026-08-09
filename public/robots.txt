@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+
+# Authenticated surfaces carry no public content and must not be indexed.
+Disallow: /app/
+Disallow: /admin/
+Disallow: /login
+Disallow: /register
+Disallow: /forgot-password
+Disallow: /reset-password
+
+Sitemap: https://retailintelligence.ai/sitemap.xml
