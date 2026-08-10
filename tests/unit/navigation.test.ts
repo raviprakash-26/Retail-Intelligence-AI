@@ -33,9 +33,10 @@ describe("navigation config integrity", () => {
     for (const section of NAV_SECTIONS) {
       for (const item of section.items) {
         if (item.permission) {
-          expect(known.has(item.permission), `${item.label} → ${item.permission}`).toBe(
-            true,
-          );
+          expect(
+            known.has(item.permission),
+            `${item.label} → ${item.permission}`,
+          ).toBe(true);
         }
       }
     }
@@ -48,9 +49,10 @@ describe("navigation config integrity", () => {
     for (const section of NAV_SECTIONS) {
       for (const item of section.items) {
         if (item.feature) {
-          expect(ALL_FEATURES.has(item.feature), `${item.label} → ${item.feature}`).toBe(
-            true,
-          );
+          expect(
+            ALL_FEATURES.has(item.feature),
+            `${item.label} → ${item.feature}`,
+          ).toBe(true);
         }
       }
     }
@@ -92,11 +94,13 @@ describe("navigation config integrity", () => {
     for (const action of QUICK_ACTIONS) {
       const owner = items.find(
         (item) =>
-          item.href === action.href ||
-          action.href.startsWith(`${item.href}/`),
+          item.href === action.href || action.href.startsWith(`${item.href}/`),
       );
 
-      expect(owner, `${action.label} → ${action.href} reaches no module`).toBeDefined();
+      expect(
+        owner,
+        `${action.label} → ${action.href} reaches no module`,
+      ).toBeDefined();
 
       if (owner && owner.href !== action.href) {
         expect(
@@ -111,8 +115,10 @@ describe("navigation config integrity", () => {
     for (const section of NAV_SECTIONS) {
       for (const item of section.items) {
         if (item.status === "ready") {
-          expect(item.phase, `${item.label} is built but claims a phase`)
-            .toBeUndefined();
+          expect(
+            item.phase,
+            `${item.label} is built but claims a phase`,
+          ).toBeUndefined();
         }
       }
     }
@@ -144,7 +150,7 @@ describe("permission gating", () => {
     expect(labels).toContain("Dashboard");
     expect(labels).toContain("Sales");
     // A cashier holds none of these permissions, so the doors are not shown.
-    expect(labels).not.toContain("Accounting");
+    expect(labels).not.toContain("Chart of accounts");
     expect(labels).not.toContain("Settings");
     expect(labels).not.toContain("Reports");
     expect(labels).not.toContain("Analytics");
@@ -156,7 +162,7 @@ describe("permission gating", () => {
       section.items.map((item) => item.label),
     );
 
-    expect(labels).toContain("Accounting");
+    expect(labels).toContain("Chart of accounts");
     expect(labels).toContain("Reports");
     expect(labels).toContain("AI Auditor");
 
@@ -196,7 +202,10 @@ describe("permission gating", () => {
 
 describe("plan gating", () => {
   it("treats an item with no feature as always included", () => {
-    const visibility = { permissions: new Set<string>(), features: new Set<string>() };
+    const visibility = {
+      permissions: new Set<string>(),
+      features: new Set<string>(),
+    };
     expect(isIncludedInPlan({ feature: undefined }, visibility)).toBe(true);
   });
 
@@ -246,7 +255,9 @@ describe("activeHref", () => {
 
   it("matches a nested path to its parent item", () => {
     expect(activeHref("/app/sales/new", targets)).toBe("/app/sales");
-    expect(activeHref("/app/accounting/ledger", targets)).toBe("/app/accounting");
+    expect(activeHref("/app/accounting/ledger", targets)).toBe(
+      "/app/accounting",
+    );
   });
 
   it("prefers the longest match", () => {

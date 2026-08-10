@@ -212,6 +212,7 @@ src/
     purchases/             Bill form and list
     expenses/              Expense form, list and category breakdown
     settlements/           Receipt/payment form, allocation table, ageing panel
+    accounting/            Chart of accounts tree, account dialog, equation panel
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
   lib/
@@ -221,14 +222,14 @@ src/
     settlements/ageing.ts  Ageing buckets and oldest-first allocation, pure
     navigation.ts          One navigation model, gated by permission and plan
     constants/cookies.ts   Cookie names shared across the server/client boundary
-    accounting/            Double-entry rules, chart of accounts, system keys
+    accounting/            Double-entry rules, chart of accounts, account tree
     rbac/                  Permission catalogue and role templates
     billing/               Plan definitions and entitlements
     validation/            Zod schemas shared by client and server
     env.ts                 Validated environment; the app refuses to boot without it
     db.ts                  Prisma singleton
   server/
-    accounting/            Journal posting engine
+    accounting/            Journal posting, account balances, chart management
     documents/             Accounts, GST register, reversal — shared by modules
     sales/                 Invoice posting: tax, stock, journal, GST register
     purchases/             Bill posting: landed cost, input credit, payables
@@ -279,7 +280,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 519 tests: unit + integration
+npm run test          # 558 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -287,7 +288,8 @@ Integration tests run against `riai_test` and refuse to start if
 `DATABASE_URL` does not name a `_test` database.
 
 Coverage includes the accounting rules, GST arithmetic, inventory valuation,
-ageing and allocation, permission boundaries (an auditor cannot write; a cashier
+ageing and allocation, account balances and the accounting equation, permission
+boundaries (an auditor cannot write; a cashier
 cannot void), tenant isolation, document numbering under rollback, and every
 database constraint listed above.
 
@@ -510,6 +512,44 @@ all stay.
 
 ---
 
+## Where the figures come from
+
+Every account balance in the product is computed in one place. The chart of
+accounts, the dashboard, the ledger and the statements all read the same
+function, so there is exactly one answer to "what is in Cash in Hand" and no two
+screens can disagree.
+
+Three rules hold it together.
+
+**Only posted lines count, and a void is cancelled by its reversal rather than
+excluded by status.** That is what lets a voided sale stay visible in the journal
+— the business did raise that invoice — while being absent from the profit
+figure. Filtering documents by status instead would make the journal and the
+statements tell different stories.
+
+**Opening balances are ordinary journal entries.** A business migrating in posts
+its starting positions on the day before the year opens, so nothing needs a
+special case for them. An opening-balance column fed by a different mechanism
+than the rest of the ledger is a column that eventually disagrees with it.
+
+**Balances are reported where they actually sit, not where they ought to.** A
+supplier ledger with a debit balance is an advance paid; forcing it to the credit
+column by the account's declared nature would hide exactly the anomaly a trial
+balance exists to surface.
+
+Nothing is a stored running total. Balances are aggregated from the lines on
+every read, because a stored balance drifts the moment an entry is backdated or
+voided and there is nothing to reconcile it against.
+
+The chart itself is editable, within limits that keep the engine standing.
+Posting rules resolve accounts by a `systemKey` no one can edit, so any account
+can be renamed — call Sales "Counter Takings" if that is the word used in the
+shop — while the accounts the engine posts to cannot be removed or reclassified.
+Accounts are retired, never deleted, and an account still holding a balance
+refuses to be retired until it is cleared.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -588,7 +628,8 @@ query text is the only thing the browser controls.
 | 7     | Purchases — bills, input tax credit, landed cost, void        | **Done** |
 | 8     | Expenses — categories, GST, capital vs revenue, void          | **Done** |
 | 9     | Receipts & payments — allocation, ageing, void                | **Done** |
-| 10–14 | Accounting engine, journal, ledger, trial balance, statements | Next     |
+| 10    | Accounting engine — chart of accounts, balances, the equation | **Done** |
+| 11–14 | Journal, ledger, trial balance, financial statements          | Next     |
 | 15    | Inventory                                                     |          |
 | 16–17 | GST and tax preparation                                       |          |
 | 18–19 | Analytics and forecasting                                     |          |

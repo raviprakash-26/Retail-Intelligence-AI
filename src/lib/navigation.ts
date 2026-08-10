@@ -149,12 +149,11 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     label: "Accounting",
     items: [
       {
-        label: "Accounting",
+        label: "Chart of accounts",
         href: "/app/accounting",
         icon: "BookOpenCheck",
         permission: "accounting.view",
-        status: "planned",
-        phase: 11,
+        status: "ready",
       },
       {
         label: "GST & Tax",
@@ -171,7 +170,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: "FileSpreadsheet",
         permission: "reports.view",
         status: "planned",
-        phase: 39,
+        phase: 14,
       },
     ],
   },
