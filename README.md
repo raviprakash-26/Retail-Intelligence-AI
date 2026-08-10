@@ -13,14 +13,20 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–3 of 27 complete** — project foundation, database schema, design
-system, public website, working authentication, and company onboarding. See
-[Roadmap](#roadmap) for what is built and what is not.
+**Phases 1–4 of 27 complete** — project foundation, database schema, design
+system, public website, working authentication, company onboarding and the
+application shell. See [Roadmap](#roadmap) for what is built and what is not.
 
 You can register a business, sign in and out, reset a password, confirm an email
 address, edit your business and accounting settings, manage branches, invite
-team members and switch between businesses. The dashboard behind sign-in is a
-placeholder until Phase 4.
+team members, switch between businesses, and work inside the dashboard shell —
+permission-filtered navigation, financial-year scoping, global search and a
+dashboard whose figures come from the posted ledger.
+
+**Transactions cannot be recorded yet.** Sales, purchases, expenses and the
+reports built on them arrive in Phases 5–14. Every module that is not built says
+so on its own page rather than showing an empty screen, and no figure anywhere
+in the product is invented to fill a gap.
 
 ---
 
@@ -170,14 +176,20 @@ src/
   app/
     (marketing)/           Public website
     (auth)/                Sign in, register, password reset
+    (app)/app/             The signed-in application, inside the shell
     globals.css            Design tokens (OKLCH, light + dark)
   components/
     ui/                    shadcn/ui primitives
     marketing/             Landing page sections
     auth/                  Auth forms
+    shell/                 Sidebar, top bar, search, mobile bar, placeholders
+    dashboard/             KPI cards, onboarding checklist
+    company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
   lib/
     money.ts               Exact decimal arithmetic — money never touches a float
+    navigation.ts          One navigation model, gated by permission and plan
+    constants/cookies.ts   Cookie names shared across the server/client boundary
     accounting/            Double-entry rules, chart of accounts, system keys
     rbac/                  Permission catalogue and role templates
     billing/               Plan definitions and entitlements
@@ -186,6 +198,11 @@ src/
     db.ts                  Prisma singleton
   server/
     accounting/            Journal posting engine
+    auth/                  Sessions, company context, permission guards
+    company/               Settings, team, branch and onboarding services
+    fiscal/                Financial-year resolution and period listing
+    search/                Tenant-scoped global search
+    notifications/         Notification feed
     provisioning/          Tenant provisioning and purge
     sequences/             Gap-free document numbering
 
@@ -224,7 +241,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 172 tests: unit + integration
+npm run test          # 291 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -305,6 +322,35 @@ support ticket in waiting.
 
 ---
 
+## The shell
+
+Navigation is one declarative model in `src/lib/navigation.ts`, filtered through
+three independent gates before anything renders:
+
+| Gate           | Effect                                                             |
+| -------------- | ------------------------------------------------------------------ |
+| **Permission** | The item is not rendered at all. A door you cannot open is noise.  |
+| **Plan**       | The item stays visible and marked, so the upgrade is discoverable. |
+| **Build**      | The item is marked `Soon` with the phase it arrives in.            |
+
+Hiding is a presentation decision, never a security one — every page behind
+those links calls `requirePermission()` on the server regardless of what the
+navigation chose to show.
+
+The dashboard reads real balances from posted journal lines. A figure it cannot
+compute yet — sales this month, gross profit — is shown as **pending, with the
+module it waits on named**. It is never shown as `₹0.00`, because zero is a
+factual claim about a business's trading, and an empty ledger is not the same
+statement as no sales.
+
+The financial year lives in a cookie so it survives navigation, and the server
+re-validates it against the company's own years on every request: a cookie is
+client data, and a year id from one tenant must never resolve inside another.
+Global search runs entirely server-side under the session's `companyId`, so the
+query text is the only thing the browser controls.
+
+---
+
 ## Roadmap
 
 | Phase | Scope                                                         | Status   |
@@ -312,8 +358,8 @@ support ticket in waiting.
 | 1     | Foundation, schema, design system, public site, auth UI       | **Done** |
 | 2     | Authentication — sessions, verification, rate limiting, audit | **Done** |
 | 3     | Company onboarding — settings, branches, team, invitations    | **Done** |
-| 4     | Dashboard shell                                               | Next     |
-| 5     | Master data                                                   |          |
+| 4     | Application shell — navigation, search, dashboard             | **Done** |
+| 5     | Master data                                                   | Next     |
 | 6–9   | Sales, purchases, expenses, receipts & payments               |          |
 | 10–14 | Accounting engine, journal, ledger, trial balance, statements |          |
 | 15    | Inventory                                                     |          |

@@ -1,21 +1,17 @@
-import { requireCompanyContext } from "@/server/auth/context";
+import { requireAuth } from "@/server/auth/context";
 
 /**
- * Authenticated application shell.
+ * Authenticated area.
  *
- * `requireCompanyContext()` is the real authorization boundary — middleware
- * only checked that a cookie existed. Resolving it here means every page under
- * this layout is guaranteed a valid session, an active membership and a
- * company, and none of them has to re-check.
- *
- * Phase 4 replaces this with the full shell (sidebar, top bar, search,
- * financial-year selector). Until then it is a plain container so the
- * authentication work can be exercised end to end.
+ * Requires a session and nothing more. Requiring a *company* here would be a
+ * redirect loop: `requireCompanyContext()` sends a user with no membership to
+ * `/onboarding`, which lives inside this group and would then bounce them
+ * straight back. The company requirement therefore belongs one level down, in
+ * `app/layout.tsx`, alongside the shell that actually needs it.
  */
-export default async function AppLayout({
+export default async function AuthenticatedLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  await requireCompanyContext();
-
-  return <div className="min-h-dvh bg-muted/30">{children}</div>;
+  await requireAuth();
+  return children;
 }
