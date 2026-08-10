@@ -97,27 +97,31 @@ export async function globalSearch(params: {
       : Promise.resolve([]),
   ]);
 
+  // Results land on the record's own list, filtered to it. A per-record page
+  // will be worth having once there is a ledger or a stock card to show on it;
+  // until then a link to a page that only repeats one row is a worse answer
+  // than a link to the list the user can act from.
   return [
     ...customers.map((customer) => ({
       id: customer.id,
       kind: "customer" as const,
       title: customer.name,
       subtitle: customer.phone ?? customer.code,
-      href: `/app/customers/${customer.id}`,
+      href: `/app/customers?q=${encodeURIComponent(customer.code)}`,
     })),
     ...suppliers.map((supplier) => ({
       id: supplier.id,
       kind: "supplier" as const,
       title: supplier.name,
       subtitle: supplier.phone ?? supplier.code,
-      href: `/app/suppliers/${supplier.id}`,
+      href: `/app/suppliers?q=${encodeURIComponent(supplier.code)}`,
     })),
     ...products.map((product) => ({
       id: product.id,
       kind: "product" as const,
       title: product.name,
       subtitle: product.sku,
-      href: `/app/products/${product.id}`,
+      href: `/app/products?q=${encodeURIComponent(product.sku)}`,
     })),
     ...accounts.map((account) => ({
       id: account.id,

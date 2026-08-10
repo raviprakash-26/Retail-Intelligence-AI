@@ -4,8 +4,7 @@ import {
   INDIAN_MOBILE_PATTERN,
   PAN_PATTERN,
   PINCODE_PATTERN,
-  gstinStateCode,
-  panFromGstin,
+  gstIdentityIssue,
 } from "@/lib/constants/india";
 
 /**
@@ -80,29 +79,18 @@ export const companyProfileSchema = z
       path: ["gstin"],
     },
   )
-  .refine(
-    (data) => {
-      if (!data.gstin) return true;
-      const code = gstinStateCode(data.gstin);
-      return code === null || code === data.stateCode;
-    },
-    {
-      message:
-        "The state code in your GSTIN does not match the selected state.",
-      path: ["gstin"],
-    },
-  )
-  .refine(
-    (data) => {
-      if (!data.gstin || !data.pan) return true;
-      const embedded = panFromGstin(data.gstin);
-      return embedded === null || embedded === data.pan;
-    },
-    {
-      message: "The PAN inside your GSTIN does not match the PAN entered.",
-      path: ["pan"],
-    },
-  );
+  // The GSTIN/state and GSTIN/PAN cross-checks are the same rule the customer
+  // and supplier forms apply, so they live in one place rather than three.
+  .superRefine((data, ctx) => {
+    const issue = gstIdentityIssue(data);
+    if (issue) {
+      ctx.addIssue({
+        code: "custom",
+        message: issue.message,
+        path: [issue.field],
+      });
+    }
+  });
 
 export type CompanyProfileInput = z.infer<typeof companyProfileSchema>;
 

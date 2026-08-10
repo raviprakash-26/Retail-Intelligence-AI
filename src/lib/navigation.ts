@@ -31,6 +31,13 @@ export type NavItem = {
   phase?: number;
   /** Shown on the mobile bottom bar. */
   primary?: boolean;
+  /**
+   * Highlighted only on its own path, never on a descendant.
+   *
+   * The dashboard lives at the application root, so without this it would
+   * prefix-match every page in the product and appear active everywhere.
+   */
+  exact?: boolean;
 };
 
 export type NavSection = {
@@ -49,6 +56,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         permission: "dashboard.view",
         status: "ready",
         primary: true,
+        exact: true,
       },
     ],
   },
@@ -65,10 +73,11 @@ export const NAV_SECTIONS: readonly NavSection[] = [
   {
     label: "Records",
     items: [
-      { label: "Customers", href: "/app/customers", icon: "Users", permission: "customers.view", status: "planned", phase: 5 },
-      { label: "Suppliers", href: "/app/suppliers", icon: "Truck", permission: "suppliers.view", status: "planned", phase: 5 },
-      { label: "Inventory", href: "/app/inventory", icon: "Package", permission: "inventory.view", feature: FEATURE.INVENTORY, status: "planned", phase: 15 },
-      { label: "Employees", href: "/app/employees", icon: "IdCard", permission: "employees.view", status: "planned", phase: 5 },
+      { label: "Products", href: "/app/products", icon: "Package", permission: "products.view", status: "ready" },
+      { label: "Customers", href: "/app/customers", icon: "Users", permission: "customers.view", status: "ready" },
+      { label: "Suppliers", href: "/app/suppliers", icon: "Truck", permission: "suppliers.view", status: "ready" },
+      { label: "Inventory", href: "/app/inventory", icon: "Boxes", permission: "inventory.view", feature: FEATURE.INVENTORY, status: "planned", phase: 15 },
+      { label: "Employees", href: "/app/employees", icon: "IdCard", permission: "employees.view", status: "ready" },
     ],
   },
   {
@@ -105,16 +114,23 @@ export type QuickAction = {
   phase?: number;
 };
 
-/** Shown in the top bar's "New" menu and on the mobile action sheet. */
+/**
+ * Shown in the top bar's "New" menu and on the mobile action sheet.
+ *
+ * Every href must be one a navigation item already points at — a quick action
+ * for something not yet built lands on that module's page, which explains what
+ * is coming and when. Pointing at the eventual `/new` route instead would give
+ * a menu full of links that 404 today.
+ */
 export const QUICK_ACTIONS: readonly QuickAction[] = [
-  { label: "New sale", href: "/app/sales/new", icon: "ReceiptIndianRupee", permission: "sales.create", status: "planned", phase: 6 },
-  { label: "New purchase", href: "/app/purchases/new", icon: "ShoppingCart", permission: "purchases.create", status: "planned", phase: 7 },
-  { label: "New expense", href: "/app/expenses/new", icon: "Wallet", permission: "expenses.create", status: "planned", phase: 8 },
-  { label: "Record receipt", href: "/app/receipts/new", icon: "ArrowDownToLine", permission: "receipts.create", status: "planned", phase: 9 },
-  { label: "Record payment", href: "/app/payments/new", icon: "ArrowUpFromLine", permission: "payments.create", status: "planned", phase: 9 },
-  { label: "Add customer", href: "/app/customers/new", icon: "UserPlus", permission: "customers.manage", status: "planned", phase: 5 },
-  { label: "Add supplier", href: "/app/suppliers/new", icon: "Truck", permission: "suppliers.manage", status: "planned", phase: 5 },
-  { label: "Add product", href: "/app/products/new", icon: "Package", permission: "products.manage", status: "planned", phase: 5 },
+  { label: "New sale", href: "/app/sales", icon: "ReceiptIndianRupee", permission: "sales.create", status: "planned", phase: 6 },
+  { label: "New purchase", href: "/app/purchases", icon: "ShoppingCart", permission: "purchases.create", status: "planned", phase: 7 },
+  { label: "New expense", href: "/app/expenses", icon: "Wallet", permission: "expenses.create", status: "planned", phase: 8 },
+  { label: "Record receipt", href: "/app/receipts", icon: "ArrowDownToLine", permission: "receipts.create", status: "planned", phase: 9 },
+  { label: "Record payment", href: "/app/payments", icon: "ArrowUpFromLine", permission: "payments.create", status: "planned", phase: 9 },
+  { label: "Add customer", href: "/app/customers", icon: "UserPlus", permission: "customers.manage", status: "ready" },
+  { label: "Add supplier", href: "/app/suppliers", icon: "Truck", permission: "suppliers.manage", status: "ready" },
+  { label: "Add product", href: "/app/products", icon: "Package", permission: "products.manage", status: "ready" },
 ] as const;
 
 export type NavVisibility = {
@@ -152,17 +168,28 @@ export function visibleQuickActions(visibility: NavVisibility): QuickAction[] {
   return QUICK_ACTIONS.filter((action) => visibility.permissions.has(action.permission));
 }
 
+export type NavTarget = { href: string; exact?: boolean };
+
 /**
  * Which nav item a path belongs to.
  *
- * Longest match wins so `/app/settings/team` highlights Settings rather than
- * Dashboard, which `/app` would otherwise claim by prefix.
+ * Longest match wins, so `/app/settings/team` highlights Settings rather than
+ * whichever shorter href also prefixes it. An `exact` target claims only its
+ * own path — otherwise the dashboard at `/app` would look active on every page
+ * in the product, which is what the mobile bar showed before this existed.
  */
-export function activeHref(pathname: string, hrefs: readonly string[]): string | null {
+export function activeHref(
+  pathname: string,
+  targets: readonly NavTarget[],
+): string | null {
   let best: string | null = null;
-  for (const href of hrefs) {
-    const matches = pathname === href || pathname.startsWith(`${href}/`);
-    if (matches && (best === null || href.length > best.length)) best = href;
+  for (const target of targets) {
+    const matches = target.exact
+      ? pathname === target.href
+      : pathname === target.href || pathname.startsWith(`${target.href}/`);
+    if (matches && (best === null || target.href.length > best.length)) {
+      best = target.href;
+    }
   }
   return best;
 }

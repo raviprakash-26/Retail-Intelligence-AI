@@ -33,10 +33,10 @@ export function SidebarNav({
   const pathname = usePathname();
   const included = new Set(includedFeatures);
 
-  const allHrefs = sections.flatMap((section) =>
-    section.items.map((item) => item.href),
+  const current = activeHref(
+    pathname,
+    sections.flatMap((section) => section.items),
   );
-  const current = activeHref(pathname, allHrefs);
 
   return (
     <TooltipProvider delayDuration={0}>

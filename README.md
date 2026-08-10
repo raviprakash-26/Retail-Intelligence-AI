@@ -13,18 +13,25 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–4 of 27 complete** — project foundation, database schema, design
-system, public website, working authentication, company onboarding and the
-application shell. See [Roadmap](#roadmap) for what is built and what is not.
+**Phases 1–5 of 27 complete** — project foundation, database schema, design
+system, public website, working authentication, company onboarding, the
+application shell and master data. See [Roadmap](#roadmap) for what is built and
+what is not.
 
 You can register a business, sign in and out, reset a password, confirm an email
 address, edit your business and accounting settings, manage branches, invite
-team members, switch between businesses, and work inside the dashboard shell —
-permission-filtered navigation, financial-year scoping, global search and a
-dashboard whose figures come from the posted ledger.
+team members, switch between businesses, work inside the dashboard shell, and
+set up the records everything else is built on — products with HSN codes and GST
+rates, customers and suppliers with GSTIN validation, staff, categories and
+units of measure.
+
+**Opening balances are real accounting, not stored numbers.** Opening stock,
+receivables and payables each post a balanced journal entry against owner's
+capital, and correcting one posts a further entry for the difference rather than
+rewriting what is already in the books.
 
 **Transactions cannot be recorded yet.** Sales, purchases, expenses and the
-reports built on them arrive in Phases 5–14. Every module that is not built says
+reports built on them arrive in Phases 6–14. Every module that is not built says
 so on its own page rather than showing an empty screen, and no figure anywhere
 in the product is invented to fill a gap.
 
@@ -184,6 +191,7 @@ src/
     auth/                  Auth forms
     shell/                 Sidebar, top bar, search, mobile bar, placeholders
     dashboard/             KPI cards, onboarding checklist
+    master-data/           Products, parties, staff, categories and units
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
   lib/
@@ -199,6 +207,7 @@ src/
   server/
     accounting/            Journal posting engine
     auth/                  Sessions, company context, permission guards
+    master-data/           Products, parties, staff; opening-balance posting
     company/               Settings, team, branch and onboarding services
     fiscal/                Financial-year resolution and period listing
     search/                Tenant-scoped global search
@@ -241,7 +250,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 291 tests: unit + integration
+npm run test          # 376 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -322,6 +331,42 @@ support ticket in waiting.
 
 ---
 
+## Opening balances
+
+A business migrating onto this platform arrives owing money, being owed it, and
+with stock on the shelves. Those positions enter the ledger as **balanced
+journal entries**, not as numbers stored next to the master record — otherwise
+the trial balance is wrong from day one and every statement built on it inherits
+the error.
+
+| Position                     | Entry                                    |
+| ---------------------------- | ---------------------------------------- |
+| Customer owes ₹50,000        | Dr Receivables · Cr Owner's capital      |
+| Supplier owed ₹30,000        | Dr Owner's capital · Cr Payables         |
+| 40 bags of rice at ₹1,450    | Dr Inventory ₹58,000 · Cr Owner's capital |
+
+The counter-side is owner's capital because on migration that is exactly what
+capital means: what the business owns minus what it owes. A suspense account
+would be the textbook alternative, and it would leave every retailer with a
+balance nobody ever clears.
+
+Internally every position is expressed as a **signed debit to its control
+account**, so one posting routine handles receivables, payables and stock —
+including a customer in credit and a supplier paid in advance.
+
+Editing an opening balance never rewrites the original entry. The change posts
+its own entry for the difference, measured against the ledger rather than
+against the master row, so a correction made by any route is accounted for.
+Product opening stock is fixed at creation: it is a quantity in the stock ledger
+*and* a value in the journal, and correcting it properly is a stock adjustment
+with its own date and reason.
+
+Party records are archived, never deleted. One that carried an opening balance
+is named in a posted entry, and an entry that cannot say who it was with is not
+an audit trail.
+
+---
+
 ## The shell
 
 Navigation is one declarative model in `src/lib/navigation.ts`, filtered through
@@ -359,8 +404,8 @@ query text is the only thing the browser controls.
 | 2     | Authentication — sessions, verification, rate limiting, audit | **Done** |
 | 3     | Company onboarding — settings, branches, team, invitations    | **Done** |
 | 4     | Application shell — navigation, search, dashboard             | **Done** |
-| 5     | Master data                                                   | Next     |
-| 6–9   | Sales, purchases, expenses, receipts & payments               |          |
+| 5     | Master data — products, parties, staff, opening balances      | **Done** |
+| 6–9   | Sales, purchases, expenses, receipts & payments               | Next     |
 | 10–14 | Accounting engine, journal, ledger, trial balance, statements |          |
 | 15    | Inventory                                                     |          |
 | 16–17 | GST and tax preparation                                       |          |

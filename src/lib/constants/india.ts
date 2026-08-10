@@ -96,6 +96,54 @@ export function panFromGstin(gstin: string): string | null {
   return gstin.slice(2, 12);
 }
 
+export type GstIdentityIssue = { field: "gstin" | "pan"; message: string };
+
+/**
+ * Cross-checks a GSTIN against the state and PAN entered beside it.
+ *
+ * A GSTIN carries both facts inside it, so a mismatch is a typo caught for
+ * free — and the state half is not cosmetic: it is what decides CGST + SGST
+ * versus IGST on every invoice raised to this party.
+ *
+ * Lives here rather than in a schema because the same rule applies to the
+ * company's own registration, its customers and its suppliers alike.
+ */
+export function gstIdentityIssue(input: {
+  gstin?: string | null;
+  pan?: string | null;
+  stateCode?: string | null;
+}): GstIdentityIssue | null {
+  const gstin = input.gstin?.trim().toUpperCase();
+  if (!gstin) return null;
+
+  const stateCode = input.stateCode?.trim();
+  if (stateCode) {
+    const embedded = gstinStateCode(gstin);
+    if (embedded !== null && embedded !== stateCode) {
+      const named = findStateByCode(embedded);
+      return {
+        field: "gstin",
+        message: named
+          ? `This GSTIN is registered in ${named.name}, which is not the state selected.`
+          : "The state code in this GSTIN does not match the state selected.",
+      };
+    }
+  }
+
+  const pan = input.pan?.trim().toUpperCase();
+  if (pan) {
+    const embedded = panFromGstin(gstin);
+    if (embedded !== null && embedded !== pan) {
+      return {
+        field: "pan",
+        message: "The PAN inside this GSTIN does not match the PAN entered.",
+      };
+    }
+  }
+
+  return null;
+}
+
 export const BUSINESS_TYPE_OPTIONS = [
   { value: "SOLE_PROPRIETORSHIP", label: "Sole Proprietorship" },
   { value: "PARTNERSHIP", label: "Partnership Firm" },

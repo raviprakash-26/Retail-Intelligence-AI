@@ -55,10 +55,7 @@ export function MobileNav({
     .filter((item) => item.primary)
     .slice(0, 4);
 
-  const current = activeHref(
-    pathname,
-    primary.map((item) => item.href),
-  );
+  const current = activeHref(pathname, primary);
 
   return (
     <>

@@ -82,7 +82,10 @@ describe("identifier reuse across tenants", () => {
     }
 
     const matches = await prisma.product.findMany({
-      where: { sku: "RICE-25KG" },
+      where: {
+        sku: "RICE-25KG",
+        companyId: { in: [alpha.companyId, beta.companyId] },
+      },
       select: { companyId: true },
     });
     expect(matches).toHaveLength(2);
@@ -114,9 +117,17 @@ describe("identifier reuse across tenants", () => {
       });
     }
 
-    expect(await prisma.customer.count({ where: { code: "CUS-0001" } })).toBe(
-      2,
-    );
+    // Scoped to this test's two tenants: other suites share the database, and
+    // a global count would assert something about them rather than about the
+    // uniqueness rule under test.
+    expect(
+      await prisma.customer.count({
+        where: {
+          code: "CUS-0001",
+          companyId: { in: [alpha.companyId, beta.companyId] },
+        },
+      }),
+    ).toBe(2);
   });
 
   it("lets both tenants use the same invoice number", async () => {
@@ -134,7 +145,12 @@ describe("identifier reuse across tenants", () => {
     }
 
     expect(
-      await prisma.sale.count({ where: { invoiceNumber: "INV-0001" } }),
+      await prisma.sale.count({
+        where: {
+          invoiceNumber: "INV-0001",
+          companyId: { in: [alpha.companyId, beta.companyId] },
+        },
+      }),
     ).toBe(2);
   });
 

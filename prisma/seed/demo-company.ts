@@ -11,6 +11,7 @@ import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import { SYSTEM_ROLE } from "@/lib/rbac/permissions";
 import { add, multiply, subtract, toStorageString } from "@/lib/money";
 import { postJournalEntry } from "@/server/accounting/post-journal-entry";
+import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { provisionCompany } from "@/server/provisioning/company-provisioner";
 import {
   purgeCompany,
@@ -131,7 +132,6 @@ const PRODUCTS: readonly ProductSeed[] = [
 
 const CUSTOMERS = [
   {
-    code: "CUS-0001",
     name: "Sharma Provision Store",
     phone: "9845012345",
     city: "Bengaluru",
@@ -140,7 +140,6 @@ const CUSTOMERS = [
     creditDays: 30,
   },
   {
-    code: "CUS-0002",
     name: "Lakshmi Kirana",
     phone: "9845023456",
     city: "Bengaluru",
@@ -149,7 +148,6 @@ const CUSTOMERS = [
     creditDays: 15,
   },
   {
-    code: "CUS-0003",
     name: "Anand Canteen Services",
     phone: "9845034567",
     city: "Bengaluru",
@@ -158,7 +156,6 @@ const CUSTOMERS = [
     creditDays: 30,
   },
   {
-    code: "CUS-0004",
     name: "Walk-in Customer",
     phone: null,
     city: "Bengaluru",
@@ -170,7 +167,6 @@ const CUSTOMERS = [
 
 const SUPPLIERS = [
   {
-    code: "SUP-0001",
     name: "ABC Traders",
     phone: "9880011223",
     city: "Bengaluru",
@@ -178,7 +174,6 @@ const SUPPLIERS = [
     creditDays: 30,
   },
   {
-    code: "SUP-0002",
     name: "Sri Venkateshwara Wholesale",
     phone: "9880022334",
     city: "Bengaluru",
@@ -186,7 +181,6 @@ const SUPPLIERS = [
     creditDays: 21,
   },
   {
-    code: "SUP-0003",
     name: "Karnataka Dairy Supplies",
     phone: "9880033445",
     city: "Mysuru",
@@ -197,7 +191,6 @@ const SUPPLIERS = [
 
 const EMPLOYEES = [
   {
-    code: "EMP-0001",
     name: "Suresh Kumar",
     designation: "Store Manager",
     department: "Operations",
@@ -205,7 +198,6 @@ const EMPLOYEES = [
     allowances: 4000,
   },
   {
-    code: "EMP-0002",
     name: "Priya Nair",
     designation: "Cashier",
     department: "Sales",
@@ -213,7 +205,6 @@ const EMPLOYEES = [
     allowances: 2500,
   },
   {
-    code: "EMP-0003",
     name: "Mohan Reddy",
     designation: "Stock Assistant",
     department: "Warehouse",
@@ -435,11 +426,17 @@ export async function seedDemoCompany(prisma: PrismaClient, asOf: Date) {
       }
 
       // --- Parties ---------------------------------------------------------
+      // Codes come from the same numbering series the application uses, so the
+      // first customer a user adds continues the sequence instead of colliding
+      // with a code the seed had written straight into the table.
       for (const customer of CUSTOMERS) {
         await tx.customer.create({
           data: {
             companyId,
-            code: customer.code,
+            code: await allocateDocumentNumber(tx, {
+              companyId,
+              key: "CUSTOMER",
+            }),
             name: customer.name,
             phone: customer.phone,
             gstin: customer.gstin,
@@ -457,7 +454,10 @@ export async function seedDemoCompany(prisma: PrismaClient, asOf: Date) {
         await tx.supplier.create({
           data: {
             companyId,
-            code: supplier.code,
+            code: await allocateDocumentNumber(tx, {
+              companyId,
+              key: "SUPPLIER",
+            }),
             name: supplier.name,
             phone: supplier.phone,
             gstin: supplier.gstin,
@@ -474,7 +474,10 @@ export async function seedDemoCompany(prisma: PrismaClient, asOf: Date) {
         await tx.employee.create({
           data: {
             companyId,
-            employeeCode: employee.code,
+            employeeCode: await allocateDocumentNumber(tx, {
+              companyId,
+              key: "EMPLOYEE",
+            }),
             name: employee.name,
             designation: employee.designation,
             department: employee.department,

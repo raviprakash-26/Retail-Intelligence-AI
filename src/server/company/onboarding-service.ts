@@ -146,7 +146,7 @@ export async function getOnboardingChecklist(params: {
       description:
         "The accounting, stock movement and GST all follow from it automatically.",
       done: saleCount > 0,
-      href: "/app/sales/new",
+      href: "/app/sales",
       actionLabel: "Record a sale",
       requires: "sales.create",
     },

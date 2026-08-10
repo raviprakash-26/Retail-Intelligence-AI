@@ -81,6 +81,32 @@ describe("navigation config integrity", () => {
     }
   });
 
+  it("only points quick actions at pages the navigation already reaches", () => {
+    // A quick action for an unbuilt module has to land somewhere that exists.
+    // Linking straight to its eventual `/new` route gives a menu of 404s, and
+    // nothing in the type system catches it because every href is cast to a
+    // Route at the call site.
+    const pages = new Set(
+      NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.href)),
+    );
+    for (const action of QUICK_ACTIONS) {
+      expect(pages.has(action.href), `${action.label} → ${action.href}`).toBe(
+        true,
+      );
+    }
+  });
+
+  it("gives a built item no build phase", () => {
+    for (const section of NAV_SECTIONS) {
+      for (const item of section.items) {
+        if (item.status === "ready") {
+          expect(item.phase, `${item.label} is built but claims a phase`)
+            .toBeUndefined();
+        }
+      }
+    }
+  });
+
   it("marks at most four items as mobile primary", () => {
     // The bottom bar has four slots plus a centre action button.
     const primary = NAV_SECTIONS.flatMap((section) =>
@@ -196,33 +222,54 @@ describe("plan gating", () => {
 });
 
 describe("activeHref", () => {
-  const hrefs = ["/app", "/app/sales", "/app/settings/business", "/app/accounting"];
+  const targets = [
+    { href: "/app", exact: true },
+    { href: "/app/sales" },
+    { href: "/app/settings/business" },
+    { href: "/app/accounting" },
+  ];
 
   it("matches an exact path", () => {
-    expect(activeHref("/app/sales", hrefs)).toBe("/app/sales");
+    expect(activeHref("/app/sales", targets)).toBe("/app/sales");
   });
 
   it("matches a nested path to its parent item", () => {
-    expect(activeHref("/app/sales/new", hrefs)).toBe("/app/sales");
-    expect(activeHref("/app/accounting/ledger", hrefs)).toBe("/app/accounting");
+    expect(activeHref("/app/sales/new", targets)).toBe("/app/sales");
+    expect(activeHref("/app/accounting/ledger", targets)).toBe("/app/accounting");
   });
 
-  it("prefers the longest match so a nested item wins over the dashboard", () => {
-    // "/app" prefixes everything; without longest-match it would always win.
-    expect(activeHref("/app/settings/business", hrefs)).toBe("/app/settings/business");
+  it("prefers the longest match", () => {
+    expect(activeHref("/app/settings/business", targets)).toBe(
+      "/app/settings/business",
+    );
   });
 
   it("keeps the dashboard active only at its own path", () => {
-    expect(activeHref("/app", hrefs)).toBe("/app");
+    expect(activeHref("/app", targets)).toBe("/app");
+    // The bug this guards: on a page with no bottom-bar tab of its own, the
+    // dashboard used to claim it by prefix and light up while you were
+    // somewhere else entirely.
+    expect(activeHref("/app/products", targets)).toBeNull();
   });
 
   it("does not match a path that merely shares a prefix string", () => {
     // "/app/salesperson" is not inside "/app/sales".
-    expect(activeHref("/app/salesperson", hrefs)).toBe("/app");
+    expect(activeHref("/app/salesperson", targets)).toBeNull();
+  });
+
+  it("still lets a non-exact parent claim its descendants", () => {
+    expect(activeHref("/app/sales/new/line", targets)).toBe("/app/sales");
   });
 
   it("returns null when nothing matches", () => {
-    expect(activeHref("/marketing", ["/app/sales"])).toBeNull();
+    expect(activeHref("/marketing", [{ href: "/app/sales" }])).toBeNull();
+  });
+
+  it("marks the dashboard exact in the real navigation", () => {
+    const dashboard = NAV_SECTIONS.flatMap((section) => section.items).find(
+      (item) => item.href === "/app",
+    );
+    expect(dashboard?.exact).toBe(true);
   });
 });
 
