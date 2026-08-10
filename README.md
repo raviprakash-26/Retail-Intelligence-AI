@@ -36,11 +36,19 @@ each post to their own account, so the profit and loss account adds up without
 anyone sorting receipts at year end — and something the shop keeps and uses goes
 to fixed assets rather than being written off in the month it was bought.
 
-**Money movement is not built yet.** Receipts and payments arrive in Phase 9,
-and the reports built on all of it in Phases 10–14. Sales and purchase *returns*
-are still to come as well. Every module that is not built says so on its own
-page rather than showing an empty screen, and no figure anywhere in the product
-is invented to fill a gap.
+**Money movement is recorded too.** A receipt matched to the invoices it
+settles keeps "who owes me what, and for how long" answerable without anyone
+reconciling by hand; money received against nothing in particular still moves
+the ledger in full and is shown sitting on account until somebody attributes it.
+Capital the owner puts in is equity, a loan is a liability, and money the owner
+takes out reduces capital — none of them touch the profit and loss account.
+Receivables and payables are aged from each document's _due_ date, so nobody is
+chased for an invoice that is not yet payable.
+
+**The reports built on all of it arrive in Phases 10–14.** Sales and purchase
+_returns_ are still to come as well. Every module that is not built says so on
+its own page rather than showing an empty screen, and no figure anywhere in the
+product is invented to fill a gap.
 
 ---
 
@@ -203,12 +211,14 @@ src/
     sales/                 Invoice form and list
     purchases/             Bill form and list
     expenses/              Expense form, list and category breakdown
+    settlements/           Receipt/payment form, allocation table, ageing panel
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
   lib/
     money.ts               Exact decimal arithmetic — money never touches a float
     tax/gst.ts             GST rules: place of supply, rate splits, round-off
     inventory/valuation.ts FIFO and weighted average, as pure functions
+    settlements/ageing.ts  Ageing buckets and oldest-first allocation, pure
     navigation.ts          One navigation model, gated by permission and plan
     constants/cookies.ts   Cookie names shared across the server/client boundary
     accounting/            Double-entry rules, chart of accounts, system keys
@@ -223,6 +233,7 @@ src/
     sales/                 Invoice posting: tax, stock, journal, GST register
     purchases/             Bill posting: landed cost, input credit, payables
     expenses/              Expense posting: categories, capital vs revenue
+    settlements/           Receipts and payments: allocation, ageing, void
     inventory/             Stock positions and the movement ledger
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
@@ -268,16 +279,17 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 478 tests: unit + integration
+npm run test          # 519 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
 Integration tests run against `riai_test` and refuse to start if
 `DATABASE_URL` does not name a `_test` database.
 
-Coverage includes the accounting rules, GST arithmetic, permission boundaries
-(an auditor cannot write; a cashier cannot void), tenant isolation, document
-numbering under rollback, and every database constraint listed above.
+Coverage includes the accounting rules, GST arithmetic, inventory valuation,
+ageing and allocation, permission boundaries (an auditor cannot write; a cashier
+cannot void), tenant isolation, document numbering under rollback, and every
+database constraint listed above.
 
 ---
 
@@ -401,7 +413,7 @@ is the gap a tax officer asks about.
 
 The mirror of a sale, with two differences that are not cosmetic.
 
-**The supplier is the seller.** Whether the bill carries GST depends on *their*
+**The supplier is the seller.** Whether the bill carries GST depends on _their_
 registration, and whether it is CGST + SGST or IGST depends on their state
 against yours. A supplier with no GSTIN charges nothing, and the form says so
 rather than leaving a blank where the tax should be.
@@ -462,6 +474,42 @@ noise in a return.
 
 ---
 
+## What a receipt does
+
+Money in and money out are the same event with the arrow reversed, so one engine
+posts both, and two rules hold it together.
+
+**The control account always moves by the full amount.** Receiving ₹5,000 from a
+customer reduces receivables by ₹5,000 whether or not anyone says which invoice
+it was against. Allocation — which bill it settled — is a sub-ledger question,
+not a ledger one. Money that is not matched to a document is an advance, which
+is a real position a customer can be in, and it is shown as such rather than
+being quietly forced onto the oldest invoice.
+
+**An allocation can never exceed what is owed.** Over-allocating would report an
+invoice as more than settled and net away somebody else's debt, so every figure
+is checked against the document's own outstanding amount inside the posting
+transaction — not against what the browser said a moment earlier.
+
+**Not everything that arrives is income.** Capital the owner puts in is equity,
+a loan received is a liability, and money the owner takes out is drawings that
+reduce capital. None of the three touches the profit and loss account, and the
+form says so in the words a retailer would use rather than in account names.
+
+**Ageing counts from the due date, not the document date.** An invoice on 30
+days' credit raised three weeks ago is not overdue, and a report that says it is
+sends someone to chase a customer who has done nothing wrong. Outstanding is
+total minus settled, read from the documents themselves — never a stored running
+balance, which drifts the moment anything is voided and has nothing to reconcile
+against.
+
+Voiding a receipt reverses its entry and takes the allocations back off the
+invoices they cleared, so those invoices are outstanding again and reappear in
+the ageing. Nothing is deleted: the original entry, the reversal and the reason
+all stay.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -470,11 +518,11 @@ journal entries**, not as numbers stored next to the master record — otherwise
 the trial balance is wrong from day one and every statement built on it inherits
 the error.
 
-| Position                     | Entry                                    |
-| ---------------------------- | ---------------------------------------- |
-| Customer owes ₹50,000        | Dr Receivables · Cr Owner's capital      |
-| Supplier owed ₹30,000        | Dr Owner's capital · Cr Payables         |
-| 40 bags of rice at ₹1,450    | Dr Inventory ₹58,000 · Cr Owner's capital |
+| Position                  | Entry                                     |
+| ------------------------- | ----------------------------------------- |
+| Customer owes ₹50,000     | Dr Receivables · Cr Owner's capital       |
+| Supplier owed ₹30,000     | Dr Owner's capital · Cr Payables          |
+| 40 bags of rice at ₹1,450 | Dr Inventory ₹58,000 · Cr Owner's capital |
 
 The counter-side is owner's capital because on migration that is exactly what
 capital means: what the business owns minus what it owes. A suspense account
@@ -489,7 +537,7 @@ Editing an opening balance never rewrites the original entry. The change posts
 its own entry for the difference, measured against the ledger rather than
 against the master row, so a correction made by any route is accounted for.
 Product opening stock is fixed at creation: it is a quantity in the stock ledger
-*and* a value in the journal, and correcting it properly is a stock adjustment
+_and_ a value in the journal, and correcting it properly is a stock adjustment
 with its own date and reason.
 
 Party records are archived, never deleted. One that carried an opening balance
@@ -539,8 +587,8 @@ query text is the only thing the browser controls.
 | 6     | Sales — invoicing, GST split, stock issue, void               | **Done** |
 | 7     | Purchases — bills, input tax credit, landed cost, void        | **Done** |
 | 8     | Expenses — categories, GST, capital vs revenue, void          | **Done** |
-| 9     | Receipts & payments                                           | Next     |
-| 10–14 | Accounting engine, journal, ledger, trial balance, statements |          |
+| 9     | Receipts & payments — allocation, ageing, void                | **Done** |
+| 10–14 | Accounting engine, journal, ledger, trial balance, statements | Next     |
 | 15    | Inventory                                                     |          |
 | 16–17 | GST and tax preparation                                       |          |
 | 18–19 | Analytics and forecasting                                     |          |

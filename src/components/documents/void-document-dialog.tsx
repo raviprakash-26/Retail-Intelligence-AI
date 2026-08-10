@@ -55,16 +55,24 @@ export function VoidDocumentDialog({
   noun,
   onVoid,
   placeholder = "Entered twice by mistake",
+  description,
 }: {
   documentId: string;
   documentNumber: string;
-  /** "invoice", "bill". */
+  /** "invoice", "bill", "receipt", "payment". */
   noun: string;
   onVoid: (
     id: string,
     values: VoidValues,
   ) => Promise<ActionResult<{ entryNumber: string }>>;
   placeholder?: string;
+  /**
+   * What voiding this particular kind of document undoes. The default speaks
+   * of stock, which is true of an invoice and a bill and untrue of a receipt —
+   * telling someone their stock will be put back when no stock moved is worse
+   * than saying nothing.
+   */
+  description?: React.ReactNode;
 }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
@@ -95,10 +103,14 @@ export function VoidDocumentDialog({
           <DialogHeader>
             <DialogTitle>Void {documentNumber}?</DialogTitle>
             <DialogDescription>
-              The {noun}, its journal entry and its stock movements all stay
-              exactly where they are. A reversing entry is posted beside them and
-              the stock is put back, so the books show both that this happened
-              and that it was undone.
+              {description ?? (
+                <>
+                  The {noun}, its journal entry and its stock movements all stay
+                  exactly where they are. A reversing entry is posted beside
+                  them and the stock is put back, so the books show both that
+                  this happened and that it was undone.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
 

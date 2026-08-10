@@ -63,44 +63,169 @@ export const NAV_SECTIONS: readonly NavSection[] = [
   {
     label: "Transactions",
     items: [
-      { label: "Sales", href: "/app/sales", icon: "ReceiptIndianRupee", permission: "sales.view", status: "ready", primary: true },
-      { label: "Purchases", href: "/app/purchases", icon: "ShoppingCart", permission: "purchases.view", status: "ready", primary: true },
-      { label: "Expenses", href: "/app/expenses", icon: "Wallet", permission: "expenses.view", status: "ready", primary: true },
-      { label: "Receipts", href: "/app/receipts", icon: "ArrowDownToLine", permission: "receipts.view", status: "planned", phase: 9 },
-      { label: "Payments", href: "/app/payments", icon: "ArrowUpFromLine", permission: "payments.view", status: "planned", phase: 9 },
+      {
+        label: "Sales",
+        href: "/app/sales",
+        icon: "ReceiptIndianRupee",
+        permission: "sales.view",
+        status: "ready",
+        primary: true,
+      },
+      {
+        label: "Purchases",
+        href: "/app/purchases",
+        icon: "ShoppingCart",
+        permission: "purchases.view",
+        status: "ready",
+        primary: true,
+      },
+      {
+        label: "Expenses",
+        href: "/app/expenses",
+        icon: "Wallet",
+        permission: "expenses.view",
+        status: "ready",
+        primary: true,
+      },
+      {
+        label: "Receipts",
+        href: "/app/receipts",
+        icon: "ArrowDownToLine",
+        permission: "receipts.view",
+        status: "ready",
+      },
+      {
+        label: "Payments",
+        href: "/app/payments",
+        icon: "ArrowUpFromLine",
+        permission: "payments.view",
+        status: "ready",
+      },
     ],
   },
   {
     label: "Records",
     items: [
-      { label: "Products", href: "/app/products", icon: "Package", permission: "products.view", status: "ready" },
-      { label: "Customers", href: "/app/customers", icon: "Users", permission: "customers.view", status: "ready" },
-      { label: "Suppliers", href: "/app/suppliers", icon: "Truck", permission: "suppliers.view", status: "ready" },
-      { label: "Inventory", href: "/app/inventory", icon: "Boxes", permission: "inventory.view", feature: FEATURE.INVENTORY, status: "planned", phase: 15 },
-      { label: "Employees", href: "/app/employees", icon: "IdCard", permission: "employees.view", status: "ready" },
+      {
+        label: "Products",
+        href: "/app/products",
+        icon: "Package",
+        permission: "products.view",
+        status: "ready",
+      },
+      {
+        label: "Customers",
+        href: "/app/customers",
+        icon: "Users",
+        permission: "customers.view",
+        status: "ready",
+      },
+      {
+        label: "Suppliers",
+        href: "/app/suppliers",
+        icon: "Truck",
+        permission: "suppliers.view",
+        status: "ready",
+      },
+      {
+        label: "Inventory",
+        href: "/app/inventory",
+        icon: "Boxes",
+        permission: "inventory.view",
+        feature: FEATURE.INVENTORY,
+        status: "planned",
+        phase: 15,
+      },
+      {
+        label: "Employees",
+        href: "/app/employees",
+        icon: "IdCard",
+        permission: "employees.view",
+        status: "ready",
+      },
     ],
   },
   {
     label: "Accounting",
     items: [
-      { label: "Accounting", href: "/app/accounting", icon: "BookOpenCheck", permission: "accounting.view", status: "planned", phase: 11 },
-      { label: "GST & Tax", href: "/app/gst", icon: "Landmark", permission: "gst.view", feature: FEATURE.GST_PREPARATION, status: "planned", phase: 16 },
-      { label: "Reports", href: "/app/reports", icon: "FileSpreadsheet", permission: "reports.view", status: "planned", phase: 39 },
+      {
+        label: "Accounting",
+        href: "/app/accounting",
+        icon: "BookOpenCheck",
+        permission: "accounting.view",
+        status: "planned",
+        phase: 11,
+      },
+      {
+        label: "GST & Tax",
+        href: "/app/gst",
+        icon: "Landmark",
+        permission: "gst.view",
+        feature: FEATURE.GST_PREPARATION,
+        status: "planned",
+        phase: 16,
+      },
+      {
+        label: "Reports",
+        href: "/app/reports",
+        icon: "FileSpreadsheet",
+        permission: "reports.view",
+        status: "planned",
+        phase: 39,
+      },
     ],
   },
   {
     label: "Intelligence",
     items: [
-      { label: "Analytics", href: "/app/analytics", icon: "ChartColumnBig", permission: "analytics.view", feature: FEATURE.ANALYTICS, status: "planned", phase: 18 },
-      { label: "Forecasting", href: "/app/forecasting", icon: "TrendingUp", permission: "forecasting.view", feature: FEATURE.FORECASTING, status: "planned", phase: 19 },
-      { label: "AI Accountant", href: "/app/ai/accountant", icon: "MessageSquareText", permission: "ai.accountant", feature: FEATURE.AI_ACCOUNTANT, status: "planned", phase: 20 },
-      { label: "AI Auditor", href: "/app/ai/auditor", icon: "ShieldCheck", permission: "ai.auditor", feature: FEATURE.AI_AUDITOR, status: "planned", phase: 21 },
+      {
+        label: "Analytics",
+        href: "/app/analytics",
+        icon: "ChartColumnBig",
+        permission: "analytics.view",
+        feature: FEATURE.ANALYTICS,
+        status: "planned",
+        phase: 18,
+      },
+      {
+        label: "Forecasting",
+        href: "/app/forecasting",
+        icon: "TrendingUp",
+        permission: "forecasting.view",
+        feature: FEATURE.FORECASTING,
+        status: "planned",
+        phase: 19,
+      },
+      {
+        label: "AI Accountant",
+        href: "/app/ai/accountant",
+        icon: "MessageSquareText",
+        permission: "ai.accountant",
+        feature: FEATURE.AI_ACCOUNTANT,
+        status: "planned",
+        phase: 20,
+      },
+      {
+        label: "AI Auditor",
+        href: "/app/ai/auditor",
+        icon: "ShieldCheck",
+        permission: "ai.auditor",
+        feature: FEATURE.AI_AUDITOR,
+        status: "planned",
+        phase: 21,
+      },
     ],
   },
   {
     label: "Business",
     items: [
-      { label: "Settings", href: "/app/settings/business", icon: "Settings", permission: "settings.view", status: "ready" },
+      {
+        label: "Settings",
+        href: "/app/settings/business",
+        icon: "Settings",
+        permission: "settings.view",
+        status: "ready",
+      },
     ],
   },
 ] as const;
@@ -123,14 +248,62 @@ export type QuickAction = {
  * a menu full of links that 404 today.
  */
 export const QUICK_ACTIONS: readonly QuickAction[] = [
-  { label: "New sale", href: "/app/sales/new", icon: "ReceiptIndianRupee", permission: "sales.create", status: "ready" },
-  { label: "New purchase", href: "/app/purchases/new", icon: "ShoppingCart", permission: "purchases.create", status: "ready" },
-  { label: "New expense", href: "/app/expenses/new", icon: "Wallet", permission: "expenses.create", status: "ready" },
-  { label: "Record receipt", href: "/app/receipts", icon: "ArrowDownToLine", permission: "receipts.create", status: "planned", phase: 9 },
-  { label: "Record payment", href: "/app/payments", icon: "ArrowUpFromLine", permission: "payments.create", status: "planned", phase: 9 },
-  { label: "Add customer", href: "/app/customers", icon: "UserPlus", permission: "customers.manage", status: "ready" },
-  { label: "Add supplier", href: "/app/suppliers", icon: "Truck", permission: "suppliers.manage", status: "ready" },
-  { label: "Add product", href: "/app/products", icon: "Package", permission: "products.manage", status: "ready" },
+  {
+    label: "New sale",
+    href: "/app/sales/new",
+    icon: "ReceiptIndianRupee",
+    permission: "sales.create",
+    status: "ready",
+  },
+  {
+    label: "New purchase",
+    href: "/app/purchases/new",
+    icon: "ShoppingCart",
+    permission: "purchases.create",
+    status: "ready",
+  },
+  {
+    label: "New expense",
+    href: "/app/expenses/new",
+    icon: "Wallet",
+    permission: "expenses.create",
+    status: "ready",
+  },
+  {
+    label: "Record receipt",
+    href: "/app/receipts/new",
+    icon: "ArrowDownToLine",
+    permission: "receipts.create",
+    status: "ready",
+  },
+  {
+    label: "Record payment",
+    href: "/app/payments/new",
+    icon: "ArrowUpFromLine",
+    permission: "payments.create",
+    status: "ready",
+  },
+  {
+    label: "Add customer",
+    href: "/app/customers",
+    icon: "UserPlus",
+    permission: "customers.manage",
+    status: "ready",
+  },
+  {
+    label: "Add supplier",
+    href: "/app/suppliers",
+    icon: "Truck",
+    permission: "suppliers.manage",
+    status: "ready",
+  },
+  {
+    label: "Add product",
+    href: "/app/products",
+    icon: "Package",
+    permission: "products.manage",
+    status: "ready",
+  },
 ] as const;
 
 export type NavVisibility = {
@@ -165,7 +338,9 @@ export function visibleSections(visibility: NavVisibility): NavSection[] {
 }
 
 export function visibleQuickActions(visibility: NavVisibility): QuickAction[] {
-  return QUICK_ACTIONS.filter((action) => visibility.permissions.has(action.permission));
+  return QUICK_ACTIONS.filter((action) =>
+    visibility.permissions.has(action.permission),
+  );
 }
 
 export type NavTarget = { href: string; exact?: boolean };
