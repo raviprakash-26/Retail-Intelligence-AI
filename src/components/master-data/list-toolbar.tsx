@@ -33,12 +33,15 @@ export function ListToolbar({
   filterLabel,
   filterOptions,
   archivedLabel,
+  hideArchived = false,
 }: {
   searchPlaceholder: string;
   filterLabel?: string;
   filterOptions?: FilterOption[];
   /** Wording for the include-inactive checkbox, e.g. "Show archived". */
   archivedLabel: string;
+  /** For lists where nothing is archived — transactions are voided, not hidden. */
+  hideArchived?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -136,18 +139,20 @@ export function ListToolbar({
         </Select>
       )}
 
-      <div className="flex shrink-0 items-center gap-2">
-        <Checkbox
-          id="show-archived"
-          checked={showArchived}
-          onCheckedChange={(checked) =>
-            apply({ archived: checked === true ? "1" : null })
-          }
-        />
-        <Label htmlFor="show-archived" className="text-sm font-normal">
-          {archivedLabel}
-        </Label>
-      </div>
+      {!hideArchived && (
+        <div className="flex shrink-0 items-center gap-2">
+          <Checkbox
+            id="show-archived"
+            checked={showArchived}
+            onCheckedChange={(checked) =>
+              apply({ archived: checked === true ? "1" : null })
+            }
+          />
+          <Label htmlFor="show-archived" className="text-sm font-normal">
+            {archivedLabel}
+          </Label>
+        </div>
+      )}
     </div>
   );
 }

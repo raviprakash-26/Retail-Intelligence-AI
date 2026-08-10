@@ -13,10 +13,10 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–5 of 27 complete** — project foundation, database schema, design
+**Phases 1–6 of 27 complete** — project foundation, database schema, design
 system, public website, working authentication, company onboarding, the
-application shell and master data. See [Roadmap](#roadmap) for what is built and
-what is not.
+application shell, master data and sales invoicing. See [Roadmap](#roadmap) for
+what is built and what is not.
 
 You can register a business, sign in and out, reset a password, confirm an email
 address, edit your business and accounting settings, manage branches, invite
@@ -25,15 +25,15 @@ set up the records everything else is built on — products with HSN codes and G
 rates, customers and suppliers with GSTIN validation, staff, categories and
 units of measure.
 
-**Opening balances are real accounting, not stored numbers.** Opening stock,
-receivables and payables each post a balanced journal entry against owner's
-capital, and correcting one posts a further entry for the difference rather than
-rewriting what is already in the books.
+**You can now record a sale.** One invoice writes its own balanced journal
+entry, takes the stock it sold out of inventory at what that stock actually
+cost, splits the GST by place of supply, and lands in the register a return will
+be built from — all in one transaction, all or nothing.
 
-**Transactions cannot be recorded yet.** Sales, purchases, expenses and the
-reports built on them arrive in Phases 6–14. Every module that is not built says
-so on its own page rather than showing an empty screen, and no figure anywhere
-in the product is invented to fill a gap.
+**Purchases, expenses and money movement are not built yet.** They arrive in
+Phases 7–9, and the reports built on them in Phases 10–14. Every module that is
+not built says so on its own page rather than showing an empty screen, and no
+figure anywhere in the product is invented to fill a gap.
 
 ---
 
@@ -192,10 +192,13 @@ src/
     shell/                 Sidebar, top bar, search, mobile bar, placeholders
     dashboard/             KPI cards, onboarding checklist
     master-data/           Products, parties, staff, categories and units
+    sales/                 Invoice form, product picker, void
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
   lib/
     money.ts               Exact decimal arithmetic — money never touches a float
+    tax/gst.ts             GST rules: place of supply, rate splits, round-off
+    inventory/valuation.ts FIFO and weighted average, as pure functions
     navigation.ts          One navigation model, gated by permission and plan
     constants/cookies.ts   Cookie names shared across the server/client boundary
     accounting/            Double-entry rules, chart of accounts, system keys
@@ -206,6 +209,8 @@ src/
     db.ts                  Prisma singleton
   server/
     accounting/            Journal posting engine
+    sales/                 Invoice posting: tax, stock, journal, GST register
+    inventory/             Stock positions and the movement ledger
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
     company/               Settings, team, branch and onboarding services
@@ -250,7 +255,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 376 tests: unit + integration
+npm run test          # 441 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -331,6 +336,54 @@ support ticket in waiting.
 
 ---
 
+## What a sale does
+
+A retailer enters an invoice. Four things follow from it, inside one database
+transaction — all of them or none:
+
+```
+   Marie Biscuits × 10 @ ₹25, 18% GST, paid in cash
+                          │
+   ┌──────────────┬───────┴────────┬──────────────────┐
+   ▼              ▼                ▼                  ▼
+ Invoice     Stock ledger     Journal entry      GST register
+ INV-0001    −10 PKT          Dr Cash    295     outward supply
+             @ ₹18 cost       Cr Sales   250     HSN 1905, 18%
+                              Cr CGST     22.50  taxable 250
+                              Cr SGST     22.50  tax 45
+                              Dr COGS    180
+                              Cr Stock   180
+```
+
+The entry totals ₹475, not ₹295, because the cost of the goods rides in the same
+entry as the revenue that earned it. Keeping them together is what makes the
+margin on a sale visible in one place, and it keeps invoice and entry one-to-one.
+
+**Nothing the browser sends decides what a sale was worth.** The form posts
+products, quantities, rates and discounts; taxable value, CGST/SGST/IGST,
+round-off and total are computed on the server by the same pure tax engine the
+form previews with. An altered request can change what is claimed to have been
+sold — it cannot change what the books say it earned.
+
+**GST splits by place of supply.** Same state as the seller, the tax is CGST +
+SGST; another state, it is a single IGST charge. The customer pays the same
+either way, but the two are reported in different tables of the return. An
+unregistered seller and a composition dealer charge no GST at all, and the
+invoice says why rather than leaving a retailer to wonder where the tax went.
+
+**Stock cannot go negative.** Selling what the business does not have would post
+a fabricated cost of goods sold and leave a negative asset on the balance sheet.
+The form warns while you type, naming the product and the shortfall, and the
+server refuses regardless.
+
+**A void reverses; it never erases.** The invoice, its entry and its stock
+movements all stay exactly as they were. A reversing entry, a matching inward
+stock movement and a negative register row are added beside them, with a stated
+reason. The invoice number stays in the series — a number that simply vanished
+is the gap a tax officer asks about.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -405,7 +458,8 @@ query text is the only thing the browser controls.
 | 3     | Company onboarding — settings, branches, team, invitations    | **Done** |
 | 4     | Application shell — navigation, search, dashboard             | **Done** |
 | 5     | Master data — products, parties, staff, opening balances      | **Done** |
-| 6–9   | Sales, purchases, expenses, receipts & payments               | Next     |
+| 6     | Sales — invoicing, GST split, stock issue, void               | **Done** |
+| 7–9   | Purchases, expenses, receipts & payments                      | Next     |
 | 10–14 | Accounting engine, journal, ledger, trial balance, statements |          |
 | 15    | Inventory                                                     |          |
 | 16–17 | GST and tax preparation                                       |          |

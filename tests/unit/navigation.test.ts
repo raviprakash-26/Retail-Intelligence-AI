@@ -81,18 +81,29 @@ describe("navigation config integrity", () => {
     }
   });
 
-  it("only points quick actions at pages the navigation already reaches", () => {
-    // A quick action for an unbuilt module has to land somewhere that exists.
-    // Linking straight to its eventual `/new` route gives a menu of 404s, and
-    // nothing in the type system catches it because every href is cast to a
-    // Route at the call site.
-    const pages = new Set(
-      NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.href)),
-    );
+  it("only points quick actions at pages that can exist", () => {
+    // A quick action has to land somewhere real. A built module may have
+    // sub-routes — /app/sales/new — but an unbuilt one must land on its own
+    // placeholder page, or the New menu is a list of 404s. Nothing in the type
+    // system catches this, because every href is cast to a Route at the call
+    // site.
+    const items = NAV_SECTIONS.flatMap((section) => section.items);
+
     for (const action of QUICK_ACTIONS) {
-      expect(pages.has(action.href), `${action.label} → ${action.href}`).toBe(
-        true,
+      const owner = items.find(
+        (item) =>
+          item.href === action.href ||
+          action.href.startsWith(`${item.href}/`),
       );
+
+      expect(owner, `${action.label} → ${action.href} reaches no module`).toBeDefined();
+
+      if (owner && owner.href !== action.href) {
+        expect(
+          owner.status,
+          `${action.label} links inside ${owner.href}, which is not built yet`,
+        ).toBe("ready");
+      }
     }
   });
 

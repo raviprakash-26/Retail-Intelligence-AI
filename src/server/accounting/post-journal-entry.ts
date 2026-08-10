@@ -37,6 +37,15 @@ export type PostJournalEntryInput = {
   createdById?: string | null;
   /** System-generated entries (opening balances, depreciation, close). */
   isSystem?: boolean;
+  /**
+   * The posted entry this one reverses.
+   *
+   * Set on the *reversing* entry, not on the original. Both entries stay in the
+   * ledger and cancel each other out — deleting the original is impossible by
+   * design, and hiding it would leave a business unable to show that a sale
+   * happened at all before it was undone.
+   */
+  reversesId?: string | null;
   /** Post immediately, or leave as an editable draft. */
   status?: Extract<JournalStatus, "DRAFT" | "POSTED">;
 };
@@ -128,6 +137,7 @@ export async function postJournalEntry(
       totalDebit: toStorageString(entry.totalDebit),
       totalCredit: toStorageString(entry.totalCredit),
       isSystem: input.isSystem ?? false,
+      reversesId: input.reversesId ?? null,
       postedAt,
       postedById:
         status === JournalStatus.POSTED ? (input.createdById ?? null) : null,
