@@ -104,6 +104,10 @@ export async function registerOwner(
               mobile: account.mobile,
               passwordHash,
               status: UserStatus.PENDING_VERIFICATION,
+              // Registration signs the owner straight in, so this is a real
+              // sign-in. Leaving it null would show "never signed in" against
+              // the person currently looking at the screen.
+              lastLoginAt: now,
             },
             select: { id: true },
           });

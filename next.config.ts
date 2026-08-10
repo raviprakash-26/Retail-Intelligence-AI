@@ -33,6 +33,15 @@ const nextConfig: NextConfig = {
   // route becomes a build failure instead of a 404 a user finds first.
   typedRoutes: true,
 
+  experimental: {
+    // Enables `forbidden()` and `unauthorized()`, which render the
+    // forbidden.tsx / unauthorized.tsx boundaries with a 403 / 401 status.
+    // Without this they surface as a generic 500 "something went wrong",
+    // which tells a user with insufficient permissions the wrong thing
+    // entirely — that the app is broken, rather than that they lack access.
+    authInterrupts: true,
+  },
+
   typescript: {
     // Type errors must fail the build. Never set this to true.
     ignoreBuildErrors: false,

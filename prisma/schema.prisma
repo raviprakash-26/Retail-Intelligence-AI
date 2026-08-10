@@ -402,10 +402,15 @@ model VerificationToken {
   consumedAt DateTime?
   createdAt DateTime                 @default(now())
 
-  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user    User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Set for member invitations. Cascades so purging a tenant also withdraws
+  /// any invitation that would otherwise grant access to a company that is
+  /// no longer there.
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([email, purpose])
   @@index([expiresAt])
+  @@index([companyId, purpose, consumedAt])
   @@map("verification_tokens")
 }
 
@@ -533,6 +538,7 @@ model Company {
   memberships        Membership[]
   roles              Role[]
   sessions           Session[]
+  verificationTokens VerificationToken[]
   branches           Branch[]
   subscription       Subscription?
   fiscalYears        FiscalYear[]

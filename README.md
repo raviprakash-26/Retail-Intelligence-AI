@@ -13,12 +13,14 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–2 of 27 complete** — project foundation, database schema, design
-system, public website, and working authentication. See [Roadmap](#roadmap) for
-what is built and what is not.
+**Phases 1–3 of 27 complete** — project foundation, database schema, design
+system, public website, working authentication, and company onboarding. See
+[Roadmap](#roadmap) for what is built and what is not.
 
-You can register a business, sign in and out, reset a password and confirm an
-email address today. The dashboard behind sign-in is a placeholder until Phase 4.
+You can register a business, sign in and out, reset a password, confirm an email
+address, edit your business and accounting settings, manage branches, invite
+team members and switch between businesses. The dashboard behind sign-in is a
+placeholder until Phase 4.
 
 ---
 
@@ -267,14 +269,50 @@ from the session, never from a URL or form field, and code asks
 
 ---
 
+## Team and permissions
+
+Roles are bundles of permissions, seeded per company and editable. The guards
+that matter are the ones that prevent a business locking itself out or a
+member quietly escalating:
+
+| Guard                                                      | Why                                                                                                      |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **The last Owner cannot be removed, suspended or demoted** | A company with no Owner has nobody who can manage it or restore access.                                  |
+| **Nobody can change their own role**                       | Otherwise "grant myself Owner" is one request away for anyone holding `users.manage`.                    |
+| **Only a confirmed email may invite**                      | An unverified inviter could hand out access to books they have not proven they control.                  |
+| **Removing or suspending ends sessions immediately**       | Revoking access has to mean now, not at session expiry.                                                  |
+| **Changing a role ends sessions too**                      | So the new permissions apply on the next request rather than whenever a cached context happens to lapse. |
+| **A role is fixed at invitation time**                     | The invitee accepts a role someone chose for them; they cannot pick their own.                           |
+| **Re-inviting supersedes the old link**                    | A forwarded earlier email cannot be used to join with a stale role.                                      |
+
+Accepting an invitation marks the address verified — following the link proves
+control of the mailbox, which is exactly what a verification email establishes.
+An existing account keeps its password; the one typed at acceptance is ignored
+rather than silently overwriting a credential they already rely on.
+
+## Settings that lock
+
+Some accounting settings stop being editable once they have shaped recorded
+data. Changing the fiscal year would leave posted entries outside any period;
+changing the currency would relabel amounts rather than convert them; changing
+the stock valuation method would make historical cost of goods sold
+irreproducible.
+
+Rather than silently ignoring such an edit — or applying it — the settings page
+disables the field **and states the reason**, and the server reports which
+fields it kept unchanged. A disabled control with no explanation is just a
+support ticket in waiting.
+
+---
+
 ## Roadmap
 
 | Phase | Scope                                                         | Status   |
 | ----- | ------------------------------------------------------------- | -------- |
 | 1     | Foundation, schema, design system, public site, auth UI       | **Done** |
 | 2     | Authentication — sessions, verification, rate limiting, audit | **Done** |
-| 3     | Company onboarding                                            | Next     |
-| 4     | Dashboard shell                                               |          |
+| 3     | Company onboarding — settings, branches, team, invitations    | **Done** |
+| 4     | Dashboard shell                                               | Next     |
 | 5     | Master data                                                   |          |
 | 6–9   | Sales, purchases, expenses, receipts & payments               |          |
 | 10–14 | Accounting engine, journal, ledger, trial balance, statements |          |

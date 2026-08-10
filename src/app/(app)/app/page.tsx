@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
-import { BadgeCheck, Building2, LogOut, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import { BadgeCheck, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { CompanySwitcher } from "@/components/company/company-switcher";
 import { Logo } from "@/components/brand/logo";
+import { SetupChecklist } from "@/components/onboarding/setup-checklist";
 import { VerifyEmailBanner } from "@/components/auth/verify-email-banner";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { Badge } from "@/components/ui/badge";
@@ -13,12 +16,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { formatCurrency, formatDate, initialsOf } from "@/lib/format";
+import { trialBalanceIsBalanced } from "@/lib/accounting/double-entry";
 import { fiscalYearLabel } from "@/lib/constants/india";
 import { prisma } from "@/lib/db";
+import { formatCurrency, formatDate, initialsOf } from "@/lib/format";
 import { signOutAction } from "@/server/auth/actions";
-import { requireCompanyContext } from "@/server/auth/context";
-import { trialBalanceIsBalanced } from "@/lib/accounting/double-entry";
+import { getUserCompanies, requireCompanyContext } from "@/server/auth/context";
+import { getOnboardingChecklist } from "@/server/company/onboarding-service";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -29,29 +33,36 @@ export const metadata: Metadata = {
  * Interim landing page.
  *
  * Phase 4 replaces this with the real dashboard. What it does today is prove
- * the authentication and tenancy work end to end: it renders the resolved
+ * authentication, tenancy and setup state work end to end: the resolved
  * session, the company the session is scoped to, the permissions the member
  * actually holds, and a trial balance computed from that company's journal
- * lines — all of which would be empty or wrong if any part of the chain were
- * broken.
+ * lines — all of which would be empty or wrong if any link in the chain broke.
  */
 export default async function AppHomePage() {
   const context = await requireCompanyContext();
   const { user, company, membership, permissions } = context;
 
-  // Scoped by companyId from the session — never from a URL or a prop.
-  const [lines, accountCount, openingEntry] = await Promise.all([
-    prisma.journalLine.groupBy({
-      by: ["accountId"],
-      where: { companyId: company.id, status: "POSTED" },
-      _sum: { debit: true, credit: true },
-    }),
-    prisma.account.count({ where: { companyId: company.id } }),
-    prisma.journalEntry.findFirst({
-      where: { companyId: company.id, voucherType: "OPENING_BALANCE" },
-      select: { entryNumber: true, entryDate: true, totalDebit: true },
-    }),
-  ]);
+  // Everything below is scoped by companyId taken from the session, never from
+  // a URL or a prop.
+  const [lines, accountCount, openingEntry, checklist, companies] =
+    await Promise.all([
+      prisma.journalLine.groupBy({
+        by: ["accountId"],
+        where: { companyId: company.id, status: "POSTED" },
+        _sum: { debit: true, credit: true },
+      }),
+      prisma.account.count({ where: { companyId: company.id } }),
+      prisma.journalEntry.findFirst({
+        where: { companyId: company.id, voucherType: "OPENING_BALANCE" },
+        select: { entryNumber: true, entryDate: true, totalDebit: true },
+      }),
+      getOnboardingChecklist({
+        companyId: company.id,
+        emailVerified: Boolean(user.emailVerifiedAt),
+        permissions,
+      }),
+      getUserCompanies(),
+    ]);
 
   const trialBalance = trialBalanceIsBalanced(
     lines.map((line) => ({
@@ -63,9 +74,29 @@ export default async function AppHomePage() {
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-10 sm:px-6">
       <header className="flex flex-wrap items-center justify-between gap-4">
-        <Logo size="md" />
+        <div className="flex items-center gap-4">
+          <Logo size="md" />
+          <CompanySwitcher
+            companies={companies.map((item) => ({
+              id: item.id,
+              name: item.name,
+              roleName: item.roleName,
+              isDemo: item.isDemo,
+            }))}
+            currentCompanyId={company.id}
+          />
+        </div>
+
         <div className="flex items-center gap-2">
           <ThemeToggle />
+          {permissions.has("settings.view") && (
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/app/settings/business">
+                <Settings className="size-4" />
+                Settings
+              </Link>
+            </Button>
+          )}
           <form action={signOutAction}>
             <Button type="submit" variant="outline" size="sm">
               <LogOut className="size-4" />
@@ -89,7 +120,6 @@ export default async function AppHomePage() {
               Welcome, {user.fullName.split(" ")[0]}
             </h1>
             <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <Building2 className="size-3.5" />
               {company.name}
               <Badge variant="muted">{membership.roleName}</Badge>
               {company.isDemo && <Badge variant="warning">Demo data</Badge>}
@@ -103,9 +133,11 @@ export default async function AppHomePage() {
           </div>
         </div>
 
+        <SetupChecklist checklist={checklist} />
+
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Your books are ready</CardTitle>
+            <CardTitle className="text-base">Your books</CardTitle>
             <CardDescription>
               Financial year{" "}
               {fiscalYearLabel(new Date(), company.fiscalYearStartMonth)} ·{" "}
@@ -164,40 +196,9 @@ export default async function AppHomePage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">
-              What you can do in this business
-            </CardTitle>
-            <CardDescription>
-              {permissions.size} permissions, from the {membership.roleName}{" "}
-              role. Every protected operation checks these on the server.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-1.5">
-              {[...permissions]
-                .sort()
-                .slice(0, 24)
-                .map((permission) => (
-                  <Badge
-                    key={permission}
-                    variant="outline"
-                    className="font-mono text-[0.6875rem]"
-                  >
-                    {permission}
-                  </Badge>
-                ))}
-              {permissions.size > 24 && (
-                <Badge variant="muted">+{permissions.size - 24} more</Badge>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
         <p className="text-center text-xs text-muted-foreground">
-          This interim page confirms authentication and tenant scoping are
-          working. The full dashboard arrives in Phase 4.
+          The full dashboard — KPIs, charts and quick actions — arrives in Phase
+          4.
         </p>
       </div>
     </div>

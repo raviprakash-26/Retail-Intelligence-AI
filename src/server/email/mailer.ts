@@ -137,6 +137,45 @@ export function passwordResetEmail(params: {
   };
 }
 
+export function invitationEmail(params: {
+  to: string;
+  name: string;
+  inviterName: string;
+  companyName: string;
+  roleName: string;
+  token: string;
+  hasAccount: boolean;
+}): EmailMessage {
+  const link = absoluteUrl(
+    `/invitation?token=${encodeURIComponent(params.token)}`,
+  );
+
+  return {
+    to: params.to,
+    subject: `${params.inviterName} invited you to ${params.companyName}`,
+    text: [
+      `Hello ${params.name},`,
+      "",
+      `${params.inviterName} has invited you to join ${params.companyName} on Retail Intelligence AI as ${article(params.roleName)} ${params.roleName}.`,
+      "",
+      params.hasAccount
+        ? "You already have an account, so accepting just adds this business to it:"
+        : "Accept the invitation and choose a password to get started:",
+      "",
+      link,
+      "",
+      "This invitation expires in 7 days.",
+      "",
+      "If you were not expecting this, you can ignore this message — no account will be created and nothing will be shared with you.",
+    ].join("\n"),
+  };
+}
+
+/** "an Accountant" / "a Cashier" — small thing, but it reads wrong otherwise. */
+function article(word: string): string {
+  return /^[aeiou]/i.test(word) ? "an" : "a";
+}
+
 /**
  * Sent when a reset is requested for an address with no account.
  *
