@@ -13,10 +13,10 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–7 of 27 complete** — project foundation, database schema, design
+**Phases 1–8 of 27 complete** — project foundation, database schema, design
 system, public website, working authentication, company onboarding, the
-application shell, master data, sales invoicing and supplier bills. See
-[Roadmap](#roadmap) for what is built and what is not.
+application shell, master data, sales invoicing, supplier bills and expenses.
+See [Roadmap](#roadmap) for what is built and what is not.
 
 You can register a business, sign in and out, reset a password, confirm an email
 address, edit your business and accounting settings, manage branches, invite
@@ -31,11 +31,16 @@ its landed cost, holds recoverable GST as an asset and raises what you owe the
 supplier. Buy at two prices and sell, and the cost of sales is the blend — the
 margin on the dashboard is real.
 
-**Expenses and money movement are not built yet.** They arrive in Phases 8–9,
-and the reports built on them in Phases 10–14. Sales and purchase *returns* are
-still to come as well. Every module that is not built says so on its own page
-rather than showing an empty screen, and no figure anywhere in the product is
-invented to fill a gap.
+**Every cost is now recorded too.** Rent, salaries, electricity and repairs
+each post to their own account, so the profit and loss account adds up without
+anyone sorting receipts at year end — and something the shop keeps and uses goes
+to fixed assets rather than being written off in the month it was bought.
+
+**Money movement is not built yet.** Receipts and payments arrive in Phase 9,
+and the reports built on all of it in Phases 10–14. Sales and purchase *returns*
+are still to come as well. Every module that is not built says so on its own
+page rather than showing an empty screen, and no figure anywhere in the product
+is invented to fill a gap.
 
 ---
 
@@ -197,6 +202,7 @@ src/
     documents/             Line editor, product picker, void — shared by both
     sales/                 Invoice form and list
     purchases/             Bill form and list
+    expenses/              Expense form, list and category breakdown
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
   lib/
@@ -216,6 +222,7 @@ src/
     documents/             Accounts, GST register, reversal — shared by modules
     sales/                 Invoice posting: tax, stock, journal, GST register
     purchases/             Bill posting: landed cost, input credit, payables
+    expenses/              Expense posting: categories, capital vs revenue
     inventory/             Stock positions and the movement ledger
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
@@ -261,7 +268,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 460 tests: unit + integration
+npm run test          # 478 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -429,6 +436,32 @@ figures and points at a purchase return, which is what actually happened.
 
 ---
 
+## What an expense does
+
+One amount, one category — and two judgements that decide whether a profit
+figure means anything.
+
+**Capital or revenue.** A fridge bought for the shop is not a cost of this
+month; it is an asset that wears out over years. Recording it as an expense
+understates profit now and overstates it every month afterwards, and no report
+built on those figures can be right. Capital items post to fixed assets and join
+the asset register under `FA-<voucher>`, ready to be depreciated — and voiding
+one withdraws it from the register, because depreciating something the books say
+was never bought carries the mistake forward for years.
+
+**Claimable or not.** ₹11,800 of rent at 18% is ₹10,000 of cost and ₹1,800 of
+recoverable tax — for a business registered under the regular scheme. For anyone
+else the whole ₹11,800 is the cost, exactly as on a purchase bill. The form
+shows which figure will reach the profit and loss account before it is saved,
+because that figure is not always the one on the receipt.
+
+The category decides which expense account it posts to, so rent lands in Rent
+and salary in Salary without anyone sorting receipts at year end. An expense
+carrying no GST writes nothing to the tax register at all — a row of zeroes is
+noise in a return.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -505,7 +538,8 @@ query text is the only thing the browser controls.
 | 5     | Master data — products, parties, staff, opening balances      | **Done** |
 | 6     | Sales — invoicing, GST split, stock issue, void               | **Done** |
 | 7     | Purchases — bills, input tax credit, landed cost, void        | **Done** |
-| 8–9   | Expenses, receipts & payments                                 | Next     |
+| 8     | Expenses — categories, GST, capital vs revenue, void          | **Done** |
+| 9     | Receipts & payments                                           | Next     |
 | 10–14 | Accounting engine, journal, ledger, trial balance, statements |          |
 | 15    | Inventory                                                     |          |
 | 16–17 | GST and tax preparation                                       |          |
