@@ -281,6 +281,26 @@ describe("data separation", () => {
 });
 
 describe("purge isolation", () => {
+  it("purges a tenant that has audit-log entries", async () => {
+    // Regression: audit_logs.companyId is ON DELETE SET NULL, so purging a
+    // company *updates* audit rows — and the append-only trigger rejects an
+    // UPDATE just as firmly as a DELETE. The purge flag has to cover both.
+    const withLogs = await createTenant("Audited Traders");
+
+    await prisma.auditLog.create({
+      data: {
+        companyId: withLogs.companyId,
+        action: "test.purge_regression",
+        module: "Testing",
+      },
+    });
+
+    await expect(purgeTestCompany(withLogs.companyId)).resolves.toBeUndefined();
+    expect(
+      await prisma.company.findUnique({ where: { id: withLogs.companyId } }),
+    ).toBeNull();
+  }, 60_000);
+
   it("deletes only the target tenant's data", async () => {
     const disposable = await createTenant("Disposable Traders");
 

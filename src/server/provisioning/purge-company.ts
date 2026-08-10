@@ -30,15 +30,24 @@ export async function purgeCompany(companyId: string): Promise<void> {
  *
  * Called after a purge: an account with no tenant left to belong to has no way
  * to sign in to anything, and keeping it serves no purpose.
+ *
+ * This needs the same escape hatch as `purgeCompany`. `audit_logs.userId` is
+ * ON DELETE SET NULL, so removing a user *updates* audit rows — and the
+ * append-only trigger rejects an UPDATE just as firmly as a DELETE.
  */
 export async function purgeOrphanedUsers(
   emails: readonly string[],
 ): Promise<number> {
-  const result = await prisma.user.deleteMany({
-    where: {
-      email: { in: [...emails] },
-      memberships: { none: {} },
-    },
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw(
+      Prisma.sql`SET LOCAL app.allow_financial_purge = 'on'`,
+    );
+    const result = await tx.user.deleteMany({
+      where: {
+        email: { in: [...emails] },
+        memberships: { none: {} },
+      },
+    });
+    return result.count;
   });
-  return result.count;
 }

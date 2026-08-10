@@ -13,12 +13,12 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phase 1 of 27 complete** — project foundation, database schema, design system,
-public website and authentication UI. See [Roadmap](#roadmap) for what is built
-and what is not.
+**Phases 1–2 of 27 complete** — project foundation, database schema, design
+system, public website, and working authentication. See [Roadmap](#roadmap) for
+what is built and what is not.
 
-> Authentication forms validate but do not yet submit; sessions land in Phase 2.
-> The forms say so on screen rather than pretending to succeed.
+You can register a business, sign in and out, reset a password and confirm an
+email address today. The dashboard behind sign-in is a placeholder until Phase 4.
 
 ---
 
@@ -235,13 +235,45 @@ numbering under rollback, and every database constraint listed above.
 
 ---
 
+## Authentication
+
+Sessions are opaque, database-backed and revocable. A JWT would avoid the
+lookup, but it cannot be revoked before it expires — and "remove this person's
+access now" has to mean now.
+
+| Property           | How                                                                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Token storage**  | Only a SHA-256 digest is stored. A database disclosure yields nothing replayable as a sign-in.                                                               |
+| **Cookie**         | `HttpOnly`, `SameSite=Lax`, `Secure` and `__Host-` prefixed over HTTPS. Unreadable from JavaScript.                                                          |
+| **Revocation**     | Per-session, or all at once via a `sessionEpoch` bump. Suspending a user ends their access on the next request.                                              |
+| **No enumeration** | Sign-in returns one message for a wrong password and an unknown address, and burns comparable time on both. Password reset always reports success.           |
+| **Rate limiting**  | Two axes on every credential endpoint — per IP _and_ per account. Either alone is trivially evaded.                                                          |
+| **Lockout**        | Progressive, from 1 minute at five failures up to an hour.                                                                                                   |
+| **CSRF**           | Origin is compared against the host the request arrived on, so a proxy or preview URL does not break actions while an attacker's origin still never matches. |
+| **Open redirect**  | `?next=` accepts only same-site paths; `//evil.example` and friends are rejected.                                                                            |
+| **Audit**          | Sign-in, failure, lockout, sign-out, registration, verification and reset all land in the append-only log with IP and user agent.                            |
+
+Registration creates the user, the company, the chart of accounts, the fiscal
+calendar, the roles and the opening journal entry **in one transaction**. A
+half-created tenant is worse than none.
+
+Email verification is a prompt, not a wall: a retailer locked out of their own
+books until an email arrives simply leaves. It gates the operations where an
+unconfirmed address is actually dangerous — inviting team members and billing.
+
+Authorization lives in `src/server/auth/context.ts`. `companyId` always comes
+from the session, never from a URL or form field, and code asks
+`requirePermission("sales.void")` rather than checking a role name.
+
+---
+
 ## Roadmap
 
 | Phase | Scope                                                         | Status   |
 | ----- | ------------------------------------------------------------- | -------- |
 | 1     | Foundation, schema, design system, public site, auth UI       | **Done** |
-| 2     | Authentication — sessions, verification, rate limiting        | Next     |
-| 3     | Company onboarding                                            |          |
+| 2     | Authentication — sessions, verification, rate limiting, audit | **Done** |
+| 3     | Company onboarding                                            | Next     |
 | 4     | Dashboard shell                                               |          |
 | 5     | Master data                                                   |          |
 | 6–9   | Sales, purchases, expenses, receipts & payments               |          |

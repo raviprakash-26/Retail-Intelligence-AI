@@ -49,6 +49,22 @@ export async function purgeTestCompany(companyId: string): Promise<void> {
   });
 }
 
+/**
+ * Removes users created by a test.
+ *
+ * Needs the purge flag for the same reason `purgeOrphanedUsers` does: deleting
+ * a user nulls its audit-log rows, and that UPDATE is blocked by the
+ * append-only trigger.
+ */
+export async function purgeTestUsers(emails: readonly string[]): Promise<void> {
+  if (emails.length === 0) return;
+  const prisma = testDb();
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL app.allow_financial_purge = 'on'");
+    await tx.user.deleteMany({ where: { email: { in: [...emails] } } });
+  });
+}
+
 /** Unique slug per test so parallel files never collide on the unique index. */
 export function uniqueSlug(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;

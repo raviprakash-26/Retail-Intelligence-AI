@@ -1,12 +1,14 @@
 "use client";
 
-import * as React from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowRight } from "lucide-react";
-import { AuthBackendNotice } from "@/components/auth/phase-notice";
+import { ArrowRight, CircleCheck } from "lucide-react";
+import { FormError } from "@/components/auth/form-error";
 import { PasswordField } from "@/components/auth/password-field";
+import { useServerFormErrors } from "@/components/auth/use-action-form";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -19,25 +21,47 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { loginSchema, type LoginInput } from "@/lib/validation/auth";
+import { signInAction } from "@/server/auth/actions";
 
 export function LoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next");
+  const justReset = searchParams.get("reset") === "1";
+
   const form = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "", rememberMe: false },
   });
 
-  const [submitted, setSubmitted] = React.useState(false);
+  const { formError, retryAfterSeconds, applyResult } =
+    useServerFormErrors(form);
 
-  function onSubmit() {
-    // Phase 2 replaces this with a server action that verifies the password,
-    // rotates the session token and records the sign-in in the audit log.
-    setSubmitted(true);
+  async function onSubmit(values: LoginInput) {
+    const result = await signInAction({ ...values, next: next ?? undefined });
+    if (!applyResult(result)) return;
+
+    // `router.replace` rather than `push` so Back does not return to a sign-in
+    // page the user has already passed through.
+    router.replace(result.data.redirectTo);
+    router.refresh();
   }
 
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
-        {submitted && <AuthBackendNotice action="signing in" />}
+        {justReset && !formError && (
+          <Alert variant="success">
+            <CircleCheck />
+            <AlertDescription>
+              <p>
+                Your password has been changed. Sign in with your new password.
+              </p>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <FormError message={formError} retryAfterSeconds={retryAfterSeconds} />
 
         <FormField
           control={form.control}
@@ -108,6 +132,7 @@ export function LoginForm() {
           size="lg"
           className="w-full"
           loading={form.formState.isSubmitting}
+          loadingText="Signing in…"
         >
           Sign in
           <ArrowRight className="size-4" />

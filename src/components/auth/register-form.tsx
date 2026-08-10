@@ -3,8 +3,9 @@
 import * as React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Building2, Info } from "lucide-react";
-import { AuthBackendNotice } from "@/components/auth/phase-notice";
+import { FormError } from "@/components/auth/form-error";
 import { PasswordField } from "@/components/auth/password-field";
 import { PasswordStrengthMeter } from "@/components/auth/password-strength";
 import {
@@ -48,6 +49,7 @@ import {
   type RegisterAccountInput,
   type RegisterBusinessInput,
 } from "@/lib/validation/auth";
+import { registerAction } from "@/server/auth/actions";
 
 const MONTHS = [
   "January",
@@ -70,11 +72,12 @@ const MONTHS = [
  * Each step owns its own form instance and is validated before the wizard
  * advances, so a person cannot reach step 3 with an invalid GSTIN behind them.
  * Completed steps are held in component state; the whole payload is submitted
- * once at the end as a single transaction (Phase 2), because a half-created
- * tenant — a user with no company, or a company with no chart of accounts —
- * is worse than no tenant at all.
+ * once at the end and written in a single database transaction, because a
+ * half-created tenant — a user with no company, or a company with no chart of
+ * accounts — is worse than no tenant at all.
  */
 export function RegisterForm() {
+  const router = useRouter();
   const [step, setStep] = React.useState(1);
   const [account, setAccount] = React.useState<RegisterAccountInput | null>(
     null,
@@ -82,7 +85,10 @@ export function RegisterForm() {
   const [business, setBusiness] = React.useState<RegisterBusinessInput | null>(
     null,
   );
-  const [submitted, setSubmitted] = React.useState(false);
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
+  const [retryAfterSeconds, setRetryAfterSeconds] = React.useState<
+    number | null
+  >(null);
 
   const headingRef = React.useRef<HTMLHeadingElement>(null);
 
@@ -116,7 +122,7 @@ export function RegisterForm() {
 
       <RegisterStepper current={step} />
 
-      {submitted && <AuthBackendNotice action="creating your account" />}
+      <FormError message={submitError} retryAfterSeconds={retryAfterSeconds} />
 
       {step === 1 && (
         <AccountStep
@@ -139,11 +145,42 @@ export function RegisterForm() {
         />
       )}
 
-      {step === 3 && (
+      {step === 3 && account && business && (
         <AccountingStep
-          businessName={business?.businessName ?? "your business"}
+          businessName={business.businessName}
           onBack={() => setStep(2)}
-          onSubmit={() => setSubmitted(true)}
+          onSubmit={async (accounting) => {
+            setSubmitError(null);
+            setRetryAfterSeconds(null);
+
+            const result = await registerAction({
+              account,
+              business,
+              accounting,
+            });
+
+            if (!result.ok) {
+              setSubmitError(result.message);
+              setRetryAfterSeconds(result.retryAfterSeconds ?? null);
+
+              // A server-side problem with an earlier step (a taken email, a
+              // GSTIN that failed the cross-field check) is only fixable back
+              // on that step, so send the user there rather than leaving them
+              // on a screen with no offending field.
+              const fields = Object.keys(result.fieldErrors ?? {});
+              if (fields.some((field) => field.startsWith("account."))) {
+                setStep(1);
+              } else if (
+                fields.some((field) => field.startsWith("business."))
+              ) {
+                setStep(2);
+              }
+              return;
+            }
+
+            router.replace(result.data.redirectTo);
+            router.refresh();
+          }}
         />
       )}
 
@@ -592,14 +629,13 @@ function AccountingStep({
 }: {
   businessName: string;
   onBack: () => void;
-  onSubmit: () => void;
+  onSubmit: (values: RegisterAccountingInput) => Promise<void>;
 }) {
   const form = useForm<RegisterAccountingInput>({
     resolver: zodResolver(registerAccountingSchema),
     defaultValues: {
       fiscalYearStartMonth: 4,
       currency: "INR",
-      openingCapital: 0,
       openingCashBalance: 0,
       openingBankBalance: 0,
       inventoryMethod: "WEIGHTED_AVERAGE",
@@ -608,14 +644,14 @@ function AccountingStep({
   });
 
   const startMonth = form.watch("fiscalYearStartMonth");
-  const capital = form.watch("openingCapital");
   const cash = form.watch("openingCashBalance");
   const bank = form.watch("openingBankBalance");
 
-  // The opening entry must balance: assets introduced are matched by capital.
-  // Showing the difference live means a user fixes it here rather than
-  // discovering an unbalanced opening balance in their first trial balance.
-  const difference = capital - (cash + bank);
+  // Capital is derived, not entered. It equals the assets actually introduced,
+  // which is what makes the opening entry balance without a plug figure — and
+  // showing the resulting double entry here means the very first thing a user
+  // sees of their accounts is one they can check.
+  const capital = cash + bank;
 
   return (
     <Form {...form}>
@@ -695,29 +731,6 @@ function AccountingStep({
           </p>
         </div>
 
-        <FormField
-          control={form.control}
-          name="openingCapital"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Owner&rsquo;s capital</FormLabel>
-              <FormControl>
-                <AmountInput
-                  prefix="₹"
-                  min={0}
-                  step="0.01"
-                  value={field.value}
-                  onChange={field.onChange}
-                  onBlur={field.onBlur}
-                  name={field.name}
-                  ref={field.ref}
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
         <div className="grid gap-5 sm:grid-cols-2">
           <FormField
             control={form.control}
@@ -766,28 +779,43 @@ function AccountingStep({
           />
         </div>
 
-        {(capital > 0 || cash > 0 || bank > 0) && (
-          <Alert variant={difference === 0 ? "success" : "info"}>
+        {capital > 0 && (
+          <Alert variant="info">
             <Info />
             <AlertDescription>
-              {difference === 0 ? (
-                <p>
-                  Your opening entry balances: capital of{" "}
+              <p>
+                We will post this opening entry for you, dated the first day of{" "}
+                {fiscalYearLabel(new Date(), startMonth)}:
+              </p>
+              <ul className="mt-1 w-full space-y-0.5 text-xs">
+                {cash > 0 && (
+                  <li className="flex justify-between gap-4">
+                    <span>Debit — Cash in Hand</span>
+                    <span className="tabular-figures font-medium">
+                      {formatCurrency(cash)}
+                    </span>
+                  </li>
+                )}
+                {bank > 0 && (
+                  <li className="flex justify-between gap-4">
+                    <span>Debit — Bank Account</span>
+                    <span className="tabular-figures font-medium">
+                      {formatCurrency(bank)}
+                    </span>
+                  </li>
+                )}
+                <li className="flex justify-between gap-4">
+                  <span>Credit — Owner&rsquo;s Capital</span>
                   <span className="tabular-figures font-medium">
                     {formatCurrency(capital)}
-                  </span>{" "}
-                  against cash and bank of the same amount.
-                </p>
-              ) : (
-                <p>
-                  Capital and opening assets differ by{" "}
-                  <span className="tabular-figures font-medium">
-                    {formatCurrency(Math.abs(difference))}
                   </span>
-                  . That is fine — the difference will be posted to your capital
-                  account so the opening entry balances.
-                </p>
-              )}
+                </li>
+              </ul>
+              <p className="text-xs opacity-80">
+                Anything you owned before today — stock, fixtures, vehicles — is
+                recorded later in its own module, each with its matching capital
+                adjustment.
+              </p>
             </AlertDescription>
           </Alert>
         )}
@@ -831,6 +859,7 @@ function AccountingStep({
             size="lg"
             className="flex-1"
             loading={form.formState.isSubmitting}
+            loadingText="Setting up your books…"
           >
             Create account
             <ArrowRight className="size-4" />

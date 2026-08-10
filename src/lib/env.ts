@@ -147,7 +147,14 @@ const serverSchema = z
       needs("REDIS_URL", value.REDIS_URL, "when RATE_LIMIT_DRIVER is redis");
     }
 
-    if (value.NODE_ENV === "production") {
+    // These are *runtime* hardening checks. `next build` runs with
+    // NODE_ENV=production and collects page data, which imports server
+    // modules — but a build serves no traffic, so demanding a real
+    // AUTH_SECRET and a Redis URL there would force production secrets into
+    // every CI build environment for no security benefit.
+    const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
+
+    if (value.NODE_ENV === "production" && !isBuildPhase) {
       if (
         value.AUTH_SECRET.includes("replace-me") ||
         value.AUTH_SECRET.startsWith("test-only")

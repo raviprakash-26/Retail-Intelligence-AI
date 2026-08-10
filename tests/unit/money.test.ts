@@ -180,4 +180,33 @@ describe("money — Decimal interop", () => {
     const value = new Decimal("123.4567");
     expect(money(value).toString()).toBe("123.4567");
   });
+
+  it("accepts a decimal from a different copy of the library", () => {
+    // Prisma bundles its own build of decimal.js, so the values it returns
+    // are structurally identical but fail `instanceof` against ours. Matching
+    // on shape is what lets a figure read out of the database be used here.
+    const foreignDecimal = {
+      toFixed: (places?: number) =>
+        places === undefined ? "1234.5600" : (1234.56).toFixed(places),
+      toString: () => "1234.56",
+    };
+
+    expect(money(foreignDecimal).toString()).toBe("1234.56");
+    expect(add(foreignDecimal, 100).toString()).toBe("1334.56");
+    expect(equals(foreignDecimal, "1234.56")).toBe(true);
+  });
+
+  it("preserves precision on a large foreign decimal", () => {
+    // `toString()` would switch to exponential notation here; `toFixed()`
+    // does not, which is why the conversion uses it.
+    const large = {
+      toFixed: () => "12345678901234.5678",
+      toString: () => "1.23456789012345678e+13",
+    };
+    expect(money(large).toFixed(4)).toBe("12345678901234.5678");
+  });
+
+  it("rejects an object that is not decimal-shaped", () => {
+    expect(() => money({ amount: 5 } as never)).toThrow(TypeError);
+  });
 });

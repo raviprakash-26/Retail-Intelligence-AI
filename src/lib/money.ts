@@ -34,12 +34,31 @@ export const CALCULATION_SCALE = 4;
 export const PRESENTATION_SCALE = 2;
 
 /**
+ * A decimal from *some* copy of decimal.js.
+ *
+ * Prisma bundles its own build of the library, so a `Decimal` returned by the
+ * client is not an `instanceof` the `Decimal` imported here even though it is
+ * the same type of value. Matching structurally is what lets a figure read
+ * straight out of the database flow into these helpers.
+ */
+export type DecimalLike = {
+  toFixed(decimalPlaces?: number): string;
+  toString(): string;
+};
+
+/**
  * Anything that can be interpreted as an exact decimal amount. Prisma returns
  * `Decimal` instances, forms produce strings, and constants are numbers.
  */
-export type MoneyInput = Decimal | string | number | null | undefined;
+export type MoneyInput =
+  Decimal | DecimalLike | string | number | null | undefined;
 
 export { Decimal };
+
+/** True for a decimal.js instance from any build of the library. */
+function isDecimalLike(value: object): value is DecimalLike {
+  return typeof (value as DecimalLike).toFixed === "function";
+}
 
 /**
  * Coerce any supported representation into a Decimal.
@@ -61,6 +80,20 @@ export function toDecimal(value: MoneyInput): Decimal {
       );
     }
     return new Decimal(value.toString());
+  }
+
+  // Prisma's Decimal lands here: same value, different class identity.
+  // `toFixed` preserves every digit, where `toString` can switch to
+  // exponential notation for very large or very small magnitudes.
+  if (typeof value === "object") {
+    if (!isDecimalLike(value)) {
+      throw new TypeError("Cannot convert this value to a monetary amount");
+    }
+    try {
+      return new Decimal(value.toFixed());
+    } catch {
+      throw new TypeError("Cannot convert this value to a monetary amount");
+    }
   }
 
   const normalised = value.trim().replace(/,/g, "");

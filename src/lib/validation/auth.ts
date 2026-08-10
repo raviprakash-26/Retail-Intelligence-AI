@@ -185,7 +185,13 @@ export const registerAccountingSchema = z.object({
   /** 1-12. Determines when the fiscal year rolls over. */
   fiscalYearStartMonth: z.number().int().min(1).max(12),
   currency: z.string().length(3),
-  openingCapital: openingAmount("Opening capital"),
+  // Opening capital is deliberately NOT an input. It is derived as the sum of
+  // the assets actually introduced, which is what makes the opening entry
+  // balance by construction. A free-text capital figure that disagreed with
+  // the listed assets would have to be reconciled to a suspense account, and a
+  // mystery balance on day one is precisely the problem this product exists to
+  // eliminate. Assets acquired before adoption are recorded later through
+  // their own modules, each with its matching capital adjustment.
   openingCashBalance: openingAmount("Opening cash"),
   openingBankBalance: openingAmount("Opening bank balance"),
   inventoryMethod: z.enum(["FIFO", "WEIGHTED_AVERAGE"]),

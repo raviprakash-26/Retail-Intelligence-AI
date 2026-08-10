@@ -3,8 +3,10 @@
 import * as React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Mail } from "lucide-react";
-import { AuthBackendNotice } from "@/components/auth/phase-notice";
+import { Mail, MailCheck } from "lucide-react";
+import { FormError } from "@/components/auth/form-error";
+import { useServerFormErrors } from "@/components/auth/use-action-form";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -20,6 +22,7 @@ import {
   forgotPasswordSchema,
   type ForgotPasswordInput,
 } from "@/lib/validation/auth";
+import { forgotPasswordAction } from "@/server/auth/actions";
 
 export function ForgotPasswordForm() {
   const form = useForm<ForgotPasswordInput>({
@@ -27,15 +30,41 @@ export function ForgotPasswordForm() {
     defaultValues: { email: "" },
   });
 
-  const [submitted, setSubmitted] = React.useState(false);
+  const { formError, retryAfterSeconds, applyResult } =
+    useServerFormErrors(form);
+  const [sentTo, setSentTo] = React.useState<string | null>(null);
+
+  async function onSubmit(values: ForgotPasswordInput) {
+    const result = await forgotPasswordAction(values);
+    if (!applyResult(result)) return;
+    setSentTo(values.email);
+  }
+
+  // The confirmation is deliberately identical whether or not the address is
+  // registered — the server does not tell us, precisely so this screen cannot.
+  if (sentTo) {
+    return (
+      <Alert variant="success">
+        <MailCheck />
+        <AlertTitle>Check your inbox</AlertTitle>
+        <AlertDescription>
+          <p>
+            If an account exists for <strong>{sentTo}</strong>, a reset link is
+            on its way. It expires in one hour and can only be used once.
+          </p>
+          <p className="text-xs opacity-80">
+            Nothing arrived? Check your spam folder, or try again in a few
+            minutes.
+          </p>
+        </AlertDescription>
+      </Alert>
+    );
+  }
 
   return (
     <Form {...form}>
-      <form
-        onSubmit={form.handleSubmit(() => setSubmitted(true))}
-        className="space-y-5"
-      >
-        {submitted && <AuthBackendNotice action="sending the reset email" />}
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+        <FormError message={formError} retryAfterSeconds={retryAfterSeconds} />
 
         <FormField
           control={form.control}
@@ -52,9 +81,6 @@ export function ForgotPasswordForm() {
                   {...field}
                 />
               </FormControl>
-              {/* The live implementation returns the same response whether or
-                  not the address exists, so this screen must not promise an
-                  email will definitely arrive. */}
               <FormDescription>
                 If an account exists for this address, a reset link will be sent
                 to it. The link expires in one hour.
@@ -69,6 +95,7 @@ export function ForgotPasswordForm() {
           size="lg"
           className="w-full"
           loading={form.formState.isSubmitting}
+          loadingText="Sending…"
         >
           <Mail className="size-4" />
           Send reset link
