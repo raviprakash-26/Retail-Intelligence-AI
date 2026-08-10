@@ -13,10 +13,10 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–6 of 27 complete** — project foundation, database schema, design
+**Phases 1–7 of 27 complete** — project foundation, database schema, design
 system, public website, working authentication, company onboarding, the
-application shell, master data and sales invoicing. See [Roadmap](#roadmap) for
-what is built and what is not.
+application shell, master data, sales invoicing and supplier bills. See
+[Roadmap](#roadmap) for what is built and what is not.
 
 You can register a business, sign in and out, reset a password, confirm an email
 address, edit your business and accounting settings, manage branches, invite
@@ -25,15 +25,17 @@ set up the records everything else is built on — products with HSN codes and G
 rates, customers and suppliers with GSTIN validation, staff, categories and
 units of measure.
 
-**You can now record a sale.** One invoice writes its own balanced journal
-entry, takes the stock it sold out of inventory at what that stock actually
-cost, splits the GST by place of supply, and lands in the register a return will
-be built from — all in one transaction, all or nothing.
+**You can now trade.** A sale posts its own balanced entry, issues stock at
+what it cost and splits the GST by place of supply. A bill brings stock in at
+its landed cost, holds recoverable GST as an asset and raises what you owe the
+supplier. Buy at two prices and sell, and the cost of sales is the blend — the
+margin on the dashboard is real.
 
-**Purchases, expenses and money movement are not built yet.** They arrive in
-Phases 7–9, and the reports built on them in Phases 10–14. Every module that is
-not built says so on its own page rather than showing an empty screen, and no
-figure anywhere in the product is invented to fill a gap.
+**Expenses and money movement are not built yet.** They arrive in Phases 8–9,
+and the reports built on them in Phases 10–14. Sales and purchase *returns* are
+still to come as well. Every module that is not built says so on its own page
+rather than showing an empty screen, and no figure anywhere in the product is
+invented to fill a gap.
 
 ---
 
@@ -192,7 +194,9 @@ src/
     shell/                 Sidebar, top bar, search, mobile bar, placeholders
     dashboard/             KPI cards, onboarding checklist
     master-data/           Products, parties, staff, categories and units
-    sales/                 Invoice form, product picker, void
+    documents/             Line editor, product picker, void — shared by both
+    sales/                 Invoice form and list
+    purchases/             Bill form and list
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
   lib/
@@ -209,7 +213,9 @@ src/
     db.ts                  Prisma singleton
   server/
     accounting/            Journal posting engine
+    documents/             Accounts, GST register, reversal — shared by modules
     sales/                 Invoice posting: tax, stock, journal, GST register
+    purchases/             Bill posting: landed cost, input credit, payables
     inventory/             Stock positions and the movement ledger
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
@@ -255,7 +261,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 441 tests: unit + integration
+npm run test          # 460 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -384,6 +390,45 @@ is the gap a tax officer asks about.
 
 ---
 
+## What a bill does
+
+The mirror of a sale, with two differences that are not cosmetic.
+
+**The supplier is the seller.** Whether the bill carries GST depends on *their*
+registration, and whether it is CGST + SGST or IGST depends on their state
+against yours. A supplier with no GSTIN charges nothing, and the form says so
+rather than leaving a blank where the tax should be.
+
+**Recoverable tax is not a cost.** A business registered under the regular
+scheme sets input tax against the tax it collects, so GST on a bill is an asset:
+
+```
+   100 packets at ₹20, 18% GST, on credit
+                       │
+   ┌───────────────────┼──────────────────────┐
+   ▼                   ▼                      ▼
+ Stock ledger     Journal entry          GST register
+ +100 PKT         Dr Inventory 2,000     inward supply
+ @ ₹20 cost       Dr GST Input   360     claimable
+                  Cr Payables  2,360
+```
+
+A composition dealer or an unregistered business cannot claim it, so the tax is
+landed onto the stock — ₹2,360 into inventory at ₹23.60 a packet, and nothing in
+the input accounts. Holding a credit that can never be claimed would overstate
+assets and understate cost of sales for as long as the business exists, so the
+request is overruled rather than honoured, whatever the form asks for.
+
+**The same bill cannot be recorded twice.** A supplier's own reference is checked
+against their earlier bills, because paying one twice is easy to do and hard to
+notice afterwards. Voiding a bill frees the reference again.
+
+**Voiding is refused once the stock has been sold.** Taking it back out would
+drive the position negative and fabricate a cost, so the refusal names the
+figures and points at a purchase return, which is what actually happened.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -459,7 +504,8 @@ query text is the only thing the browser controls.
 | 4     | Application shell — navigation, search, dashboard             | **Done** |
 | 5     | Master data — products, parties, staff, opening balances      | **Done** |
 | 6     | Sales — invoicing, GST split, stock issue, void               | **Done** |
-| 7–9   | Purchases, expenses, receipts & payments                      | Next     |
+| 7     | Purchases — bills, input tax credit, landed cost, void        | **Done** |
+| 8–9   | Expenses, receipts & payments                                 | Next     |
 | 10–14 | Accounting engine, journal, ledger, trial balance, statements |          |
 | 15    | Inventory                                                     |          |
 | 16–17 | GST and tax preparation                                       |          |

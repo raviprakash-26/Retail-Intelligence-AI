@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Ban } from "lucide-react";
+import { z } from "zod";
 import { FormError } from "@/components/auth/form-error";
 import { useServerFormErrors } from "@/components/auth/use-action-form";
 import { Button } from "@/components/ui/button";
@@ -25,35 +26,57 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
-import { voidSaleSchema, type VoidSaleInput } from "@/lib/validation/sales";
-import { voidSaleAction } from "@/server/sales/actions";
+import type { ActionResult } from "@/server/auth/action-result";
 
 /**
- * Voiding an invoice.
+ * Voiding a posted document.
  *
- * A reason is required and it is stored, because "why is invoice INV-0042 not
- * in the turnover" is a question someone will eventually have to answer. The
+ * A reason is required and stored, because "why is bill BILL-0042 not in the
+ * purchases figure" is a question someone will eventually have to answer. The
  * dialog says plainly what voiding does — nothing is deleted — so nobody
- * reaches for it expecting the invoice to disappear.
+ * reaches for it expecting the document to disappear.
+ *
+ * Shared by invoices and bills: the wording differs, the guarantee does not.
  */
-export function VoidInvoiceDialog({
-  saleId,
-  invoiceNumber,
+
+const schema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(5, "Say why this is being voided.")
+    .max(300, "Keep the reason under 300 characters."),
+});
+
+type VoidValues = z.infer<typeof schema>;
+
+export function VoidDocumentDialog({
+  documentId,
+  documentNumber,
+  noun,
+  onVoid,
+  placeholder = "Entered twice by mistake",
 }: {
-  saleId: string;
-  invoiceNumber: string;
+  documentId: string;
+  documentNumber: string;
+  /** "invoice", "bill". */
+  noun: string;
+  onVoid: (
+    id: string,
+    values: VoidValues,
+  ) => Promise<ActionResult<{ entryNumber: string }>>;
+  placeholder?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
 
-  const form = useForm<VoidSaleInput>({
-    resolver: zodResolver(voidSaleSchema),
+  const form = useForm<VoidValues>({
+    resolver: zodResolver(schema),
     defaultValues: { reason: "" },
   });
   const { formError, applyResult } = useServerFormErrors(form);
 
-  async function onSubmit(values: VoidSaleInput) {
-    const result = await voidSaleAction(saleId, values);
+  async function onSubmit(values: VoidValues) {
+    const result = await onVoid(documentId, values);
     if (!applyResult(result)) return;
     setOpen(false);
     form.reset({ reason: "" });
@@ -64,17 +87,17 @@ export function VoidInvoiceDialog({
     <>
       <Button variant="outline" onClick={() => setOpen(true)}>
         <Ban className="size-4" />
-        Void invoice
+        Void {noun}
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Void {invoiceNumber}?</DialogTitle>
+            <DialogTitle>Void {documentNumber}?</DialogTitle>
             <DialogDescription>
-              The invoice, its journal entry and its stock movements all stay
+              The {noun}, its journal entry and its stock movements all stay
               exactly where they are. A reversing entry is posted beside them and
-              the stock goes back, so the books show both that the sale happened
+              the stock is put back, so the books show both that this happened
               and that it was undone.
             </DialogDescription>
           </DialogHeader>
@@ -93,7 +116,7 @@ export function VoidInvoiceDialog({
                       <Textarea
                         rows={3}
                         autoFocus
-                        placeholder="Entered twice by mistake"
+                        placeholder={placeholder}
                         {...field}
                       />
                     </FormControl>
@@ -116,7 +139,7 @@ export function VoidInvoiceDialog({
                   loading={form.formState.isSubmitting}
                   loadingText="Voiding…"
                 >
-                  Void invoice
+                  Void {noun}
                 </Button>
               </DialogFooter>
             </form>

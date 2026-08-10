@@ -64,7 +64,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     label: "Transactions",
     items: [
       { label: "Sales", href: "/app/sales", icon: "ReceiptIndianRupee", permission: "sales.view", status: "ready", primary: true },
-      { label: "Purchases", href: "/app/purchases", icon: "ShoppingCart", permission: "purchases.view", status: "planned", phase: 7, primary: true },
+      { label: "Purchases", href: "/app/purchases", icon: "ShoppingCart", permission: "purchases.view", status: "ready", primary: true },
       { label: "Expenses", href: "/app/expenses", icon: "Wallet", permission: "expenses.view", status: "planned", phase: 8, primary: true },
       { label: "Receipts", href: "/app/receipts", icon: "ArrowDownToLine", permission: "receipts.view", status: "planned", phase: 9 },
       { label: "Payments", href: "/app/payments", icon: "ArrowUpFromLine", permission: "payments.view", status: "planned", phase: 9 },
@@ -124,7 +124,7 @@ export type QuickAction = {
  */
 export const QUICK_ACTIONS: readonly QuickAction[] = [
   { label: "New sale", href: "/app/sales/new", icon: "ReceiptIndianRupee", permission: "sales.create", status: "ready" },
-  { label: "New purchase", href: "/app/purchases", icon: "ShoppingCart", permission: "purchases.create", status: "planned", phase: 7 },
+  { label: "New purchase", href: "/app/purchases/new", icon: "ShoppingCart", permission: "purchases.create", status: "ready" },
   { label: "New expense", href: "/app/expenses", icon: "Wallet", permission: "expenses.create", status: "planned", phase: 8 },
   { label: "Record receipt", href: "/app/receipts", icon: "ArrowDownToLine", permission: "receipts.create", status: "planned", phase: 9 },
   { label: "Record payment", href: "/app/payments", icon: "ArrowUpFromLine", permission: "payments.create", status: "planned", phase: 9 },

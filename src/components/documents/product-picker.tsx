@@ -17,33 +17,50 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { formatCurrency, formatNumber } from "@/lib/format";
-import type { SellableProduct } from "@/server/sales/actions";
-import { searchSellableProductsAction } from "@/server/sales/actions";
 import { cn } from "@/lib/utils";
 
 /**
- * Picks a product for an invoice line.
+ * Picks a product for a document line.
  *
- * Search runs on the server. Preloading the catalogue would make typing feel
- * faster and would also hand every cashier the tenant's entire product list,
- * stock position included, on page load.
+ * Search runs on the server, supplied by the caller. Preloading the catalogue
+ * would make typing feel faster and would also hand every cashier the tenant's
+ * entire product list on page load — including, on the purchase side, its cost
+ * base.
  *
- * Stock is shown next to each product because the invoice will refuse to sell
- * what is not there — finding that out while choosing is much better than
- * finding out at submit.
+ * Shared by invoices and bills because the choosing is identical; what differs
+ * is which price starts the line, and that arrives already normalised.
  */
+
+export type PickerProduct = {
+  id: string;
+  sku: string;
+  name: string;
+  unitCode: string;
+  /** Selling price on an invoice, last cost on a bill. */
+  price: string;
+  taxPercent: string;
+  hsnCode: string | null;
+  isStockTracked: boolean;
+  stockOnHand: string | null;
+};
+
 export function ProductPicker({
   value,
   onSelect,
+  search,
+  /** Highlights an empty stock position — only a sale can be blocked by it. */
+  warnWhenEmpty = false,
   disabled,
 }: {
-  value: SellableProduct | null;
-  onSelect: (product: SellableProduct) => void;
+  value: PickerProduct | null;
+  onSelect: (product: PickerProduct) => void;
+  search: (query: string) => Promise<PickerProduct[]>;
+  warnWhenEmpty?: boolean;
   disabled?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
-  const [results, setResults] = React.useState<SellableProduct[]>([]);
+  const [results, setResults] = React.useState<PickerProduct[]>([]);
   const [loading, setLoading] = React.useState(false);
   const requestId = React.useRef(0);
   const debounce = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -54,21 +71,24 @@ export function ProductPicker({
     };
   }, []);
 
-  const runSearch = React.useCallback((term: string) => {
-    if (debounce.current) clearTimeout(debounce.current);
-    setLoading(true);
-    const id = ++requestId.current;
-    debounce.current = setTimeout(async () => {
-      try {
-        const found = await searchSellableProductsAction(term);
-        // A slow early query must not overwrite a later, faster one.
-        if (id !== requestId.current) return;
-        setResults(found);
-      } finally {
-        if (id === requestId.current) setLoading(false);
-      }
-    }, 180);
-  }, []);
+  const runSearch = React.useCallback(
+    (term: string) => {
+      if (debounce.current) clearTimeout(debounce.current);
+      setLoading(true);
+      const id = ++requestId.current;
+      debounce.current = setTimeout(async () => {
+        try {
+          const found = await search(term);
+          // A slow early query must not overwrite a later, faster one.
+          if (id !== requestId.current) return;
+          setResults(found);
+        } finally {
+          if (id === requestId.current) setLoading(false);
+        }
+      }, 180);
+    },
+    [search],
+  );
 
   function onOpenChange(next: boolean) {
     setOpen(next);
@@ -126,14 +146,16 @@ export function ProductPicker({
 
             {!loading && results.length === 0 && (
               <CommandEmpty>
-                Nothing matched. Add the product first, then invoice it.
+                Nothing matched. Add the product first, then use it here.
               </CommandEmpty>
             )}
 
             {!loading &&
               results.map((product) => {
-                const outOfStock =
-                  product.isStockTracked && Number(product.stockOnHand) <= 0;
+                const empty =
+                  warnWhenEmpty &&
+                  product.isStockTracked &&
+                  Number(product.stockOnHand) <= 0;
                 return (
                   <CommandItem
                     key={product.id}
@@ -156,14 +178,14 @@ export function ProductPicker({
                       </p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-sm tabular-figures">
-                        {formatCurrency(product.sellingPrice, {
+                      <p className="tabular-figures text-sm">
+                        {formatCurrency(product.price, {
                           compactZeroDecimals: true,
                         })}
                       </p>
                       {product.isStockTracked ? (
                         <Badge
-                          variant={outOfStock ? "danger" : "muted"}
+                          variant={empty ? "danger" : "muted"}
                           className="mt-0.5 text-[0.625rem]"
                         >
                           {formatNumber(product.stockOnHand ?? 0)}{" "}

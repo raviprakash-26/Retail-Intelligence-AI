@@ -2,7 +2,6 @@ import "server-only";
 import {
   DocumentStatus,
   GstDirection,
-  JournalStatus,
   PartyType,
   Prisma,
   StockMovementType,
@@ -16,10 +15,8 @@ import type { InventoryMethod } from "@/lib/inventory/valuation";
 import { InsufficientStockError } from "@/lib/inventory/valuation";
 import {
   computeLine,
-  groupByRate,
   resolveSupplyType,
   totalLines,
-  type GstLineResult,
   type SupplyType,
 } from "@/lib/tax/gst";
 import {
@@ -32,6 +29,9 @@ import {
 import type { SaleInput } from "@/lib/validation/sales";
 import { postJournalEntry } from "@/server/accounting/post-journal-entry";
 import { recordAuditLog } from "@/server/audit/audit-log";
+import { resolveSystemAccounts } from "@/server/documents/accounts";
+import { writeGstRows } from "@/server/documents/gst-register";
+import { reversePostedEntry } from "@/server/documents/reversal";
 import { recordInward, recordOutward } from "@/server/inventory/stock-service";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { MasterDataError } from "@/server/master-data/errors";
@@ -97,32 +97,6 @@ type ResolvedProduct = {
   taxPercent: Decimal;
   cessPercent: Decimal;
 };
-
-async function resolveAccounts(
-  tx: DbClient,
-  companyId: string,
-  keys: readonly string[],
-): Promise<Map<string, string>> {
-  const accounts = await tx.account.findMany({
-    where: { companyId, systemKey: { in: [...keys] } },
-    select: { id: true, systemKey: true },
-  });
-
-  const map = new Map<string, string>();
-  for (const account of accounts) {
-    if (account.systemKey) map.set(account.systemKey, account.id);
-  }
-
-  for (const key of keys) {
-    if (!map.has(key)) {
-      throw new SaleError(
-        `The ${key.toLowerCase().replace(/_/g, " ")} account is missing from your chart of accounts.`,
-        "NO_ACCOUNT",
-      );
-    }
-  }
-  return map;
-}
 
 async function resolveProducts(
   tx: DbClient,
@@ -404,7 +378,7 @@ export async function createSale(params: {
       }
 
       // --- The journal entry ------------------------------------------------
-      const accounts = await resolveAccounts(tx, companyId, [
+      const accountId = await resolveSystemAccounts(tx, companyId, [
         SYSTEM_ACCOUNT.CASH,
         SYSTEM_ACCOUNT.BANK,
         SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
@@ -417,12 +391,6 @@ export async function createSale(params: {
         SYSTEM_ACCOUNT.COST_OF_GOODS_SOLD,
         SYSTEM_ACCOUNT.INVENTORY,
       ]);
-
-      const accountId = (key: string): string => {
-        const id = accounts.get(key);
-        if (!id) throw new SaleError(`Missing account ${key}`, "NO_ACCOUNT");
-        return id;
-      };
 
       const settlementKey = SETTLEMENT_ACCOUNT[input.paymentMode];
       const debitAccountId = settlementKey
@@ -511,6 +479,7 @@ export async function createSale(params: {
       // --- GST register -----------------------------------------------------
       await writeGstRows(tx, {
         companyId,
+        direction: GstDirection.OUTWARD,
         documentType: "SALE",
         documentId: sale.id,
         documentNumber: invoiceNumber,
@@ -519,7 +488,7 @@ export async function createSale(params: {
         placeOfSupply,
         partyName: customer?.name ?? "Counter sale",
         partyGstin: customer?.gstin ?? null,
-        rows: computed.map((entry_) => ({
+        lines: computed.map((entry_) => ({
           ...entry_.result,
           hsnCode: entry_.product.hsnCode,
           taxRateId: entry_.product.taxRateId,
@@ -558,68 +527,6 @@ export async function createSale(params: {
     },
     { timeout: 30_000 },
   );
-}
-
-/**
- * Writes the outward-supply rows a GST return is assembled from.
- *
- * `sign` is -1 when reversing a void: the register keeps both the original and
- * its reversal rather than losing the row, because a return period that has
- * already been looked at must still show what was there.
- */
-async function writeGstRows(
-  tx: DbClient,
-  params: {
-    companyId: string;
-    documentType: string;
-    documentId: string;
-    documentNumber: string;
-    documentDate: Date;
-    supplyType: SupplyType;
-    placeOfSupply: string | null;
-    partyName: string;
-    partyGstin: string | null;
-    rows: ReadonlyArray<GstLineResult & { hsnCode: string | null; taxRateId: string | null }>;
-    sign: 1 | -1;
-  },
-): Promise<void> {
-  const groups = groupByRate(params.rows);
-  if (groups.length === 0) return;
-
-  const rateByKey = new Map<string, string | null>();
-  for (const row of params.rows) {
-    rateByKey.set(`${row.hsnCode ?? ""}|${row.taxPercent.toFixed(4)}`, row.taxRateId);
-  }
-
-  const factor = money(params.sign);
-
-  await tx.gstTransaction.createMany({
-    data: groups.map((group) => ({
-      companyId: params.companyId,
-      taxRateId:
-        rateByKey.get(`${group.hsnCode ?? ""}|${group.taxPercent.toFixed(4)}`) ?? null,
-      direction: GstDirection.OUTWARD,
-      documentType: params.documentType,
-      documentId: params.documentId,
-      documentNumber: params.documentNumber,
-      documentDate: params.documentDate,
-      periodYear: params.documentDate.getUTCFullYear(),
-      periodMonth: params.documentDate.getUTCMonth() + 1,
-      partyName: params.partyName,
-      partyGstin: params.partyGstin,
-      placeOfSupply: params.placeOfSupply,
-      supplyType: params.supplyType,
-      hsnCode: group.hsnCode,
-      taxableValue: toStorageString(group.taxableAmount.times(factor)),
-      ratePercent: toStorageString(group.taxPercent),
-      cgstAmount: toStorageString(group.cgstAmount.times(factor)),
-      sgstAmount: toStorageString(group.sgstAmount.times(factor)),
-      igstAmount: toStorageString(group.igstAmount.times(factor)),
-      cessAmount: toStorageString(group.cessAmount.times(factor)),
-      totalTax: toStorageString(group.totalTax.times(factor)),
-      isAmendment: params.sign === -1,
-    })),
-  });
 }
 
 /**
@@ -730,31 +637,9 @@ export async function voidSale(params: {
         );
       }
 
-      const original = await tx.journalLine.findMany({
-        where: { journalEntryId: entryId, companyId: params.companyId },
-        select: {
-          accountId: true,
-          debit: true,
-          credit: true,
-          narration: true,
-          partyType: true,
-          partyId: true,
-        },
-        orderBy: { lineNumber: "asc" },
-      });
-
-      if (original.length === 0) {
-        throw new SaleError(
-          "This invoice's journal entry has no lines, so it cannot be voided safely.",
-          "NO_ENTRY",
-        );
-      }
-
-      // A reversal is the original with each side swapped. Deriving it from the
-      // stored lines rather than recomputing from the invoice means it cancels
-      // whatever was actually posted, even if the rules have since changed.
-      const reversal = await postJournalEntry(tx, {
+      const reversal = await reversePostedEntry(tx, {
         companyId: params.companyId,
+        entryId,
         branchId: sale.branchId,
         entryDate: sale.invoiceDate,
         voucherType: VoucherType.SALES,
@@ -763,30 +648,12 @@ export async function voidSale(params: {
         sourceType: SALE_VOID_SOURCE,
         sourceId: sale.id,
         createdById: params.userId,
-        isSystem: true,
-        reversesId: entryId,
-        lines: original.map((line) => ({
-          accountId: line.accountId,
-          debit: line.credit,
-          credit: line.debit,
-          narration: line.narration,
-          partyType: line.partyType,
-          partyId: line.partyId,
-        })),
-      });
-
-      // Status only: the trigger rejects any change to a posted entry's
-      // financial fields, which is exactly the protection wanted here. The
-      // lines stay POSTED on both entries so the ledger holds the sale and its
-      // reversal and they net to zero.
-      await tx.journalEntry.update({
-        where: { id: entryId },
-        data: { status: JournalStatus.REVERSED },
       });
 
       // --- Reverse the GST register ----------------------------------------
       await writeGstRows(tx, {
         companyId: params.companyId,
+        direction: GstDirection.OUTWARD,
         documentType: "SALE",
         documentId: sale.id,
         documentNumber: sale.invoiceNumber,
@@ -795,7 +662,7 @@ export async function voidSale(params: {
         placeOfSupply: sale.placeOfSupply,
         partyName: sale.customer?.name ?? "Counter sale",
         partyGstin: sale.customer?.gstin ?? null,
-        rows: sale.items.map((item) => ({
+        lines: sale.items.map((item) => ({
           grossAmount: money(item.taxableAmount),
           discountAmount: money(item.discountAmount),
           taxableAmount: money(item.taxableAmount),

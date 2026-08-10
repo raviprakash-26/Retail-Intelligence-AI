@@ -16,62 +16,63 @@ import {
 } from "@/components/ui/table";
 import { findStateByCode } from "@/lib/constants/india";
 import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
-import { describeSupplyType, type GstRegistration, type SupplyType } from "@/lib/tax/gst";
 import { requirePermission } from "@/server/auth/context";
-import { getSale } from "@/server/sales/sale-service";
-import { voidSaleAction } from "@/server/sales/actions";
+import { getPurchase } from "@/server/purchases/purchase-service";
+import { voidPurchaseAction } from "@/server/purchases/actions";
 import { MasterDataError } from "@/server/master-data/errors";
 
 export const metadata: Metadata = {
-  title: "Invoice",
+  title: "Bill",
   robots: { index: false, follow: false },
 };
 
 /**
- * One invoice, and the entry it produced.
+ * One bill, and the entry it produced.
  *
- * The journal entry is shown on the same page as the document rather than being
- * buried in an accounting module. A retailer who can see that a ₹1,180 sale
- * became ₹1,000 of revenue, ₹180 of GST and ₹720 of cost has been taught more
- * about their own books than any explanation would manage.
+ * The entry is on the same page as the document because that is where a
+ * retailer learns what a purchase actually did to their books — that ₹1,180
+ * became ₹1,000 of stock and ₹180 of tax they can reclaim, or ₹1,180 of stock
+ * if they cannot.
  */
-export default async function SaleDetailPage({
+export default async function PurchaseDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const context = await requirePermission("sales.view");
+  const context = await requirePermission("purchases.view");
   const { id } = await params;
 
-  const detail = await getSale({ companyId: context.company.id, saleId: id }).catch(
-    (error: unknown) => {
-      if (error instanceof MasterDataError) notFound();
-      throw error;
-    },
-  );
+  const detail = await getPurchase({
+    companyId: context.company.id,
+    purchaseId: id,
+  }).catch((error: unknown) => {
+    if (error instanceof MasterDataError) notFound();
+    throw error;
+  });
 
-  const { sale, entry } = detail;
-  const voided = sale.status === "VOIDED";
-  const taxNotice = describeSupplyType(
-    sale.supplyType as SupplyType,
-    context.company.gstRegistration as GstRegistration,
-  );
+  const { purchase, entry } = detail;
+  const voided = purchase.status === "VOIDED";
+  const totalTax =
+    Number(purchase.cgstAmount) +
+    Number(purchase.sgstAmount) +
+    Number(purchase.igstAmount) +
+    Number(purchase.cessAmount);
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
       <Link
-        href="/app/sales"
+        href="/app/purchases"
         className="text-muted-foreground hover:text-foreground mb-5 inline-flex items-center gap-1.5 text-sm underline-offset-4 hover:underline"
       >
         <ArrowLeft className="size-3.5" />
-        All invoices
+        All bills
       </Link>
 
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="flex flex-wrap items-center gap-2.5 text-2xl font-semibold tracking-tight">
             <span className={voided ? "line-through" : undefined}>
-              {sale.invoiceNumber}
+              {purchase.billNumber}
             </span>
             {voided ? (
               <Badge variant="danger">
@@ -83,29 +84,32 @@ export default async function SaleDetailPage({
             )}
           </h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            {formatDate(sale.invoiceDate, { style: "long" })} ·{" "}
-            {sale.customer?.name ?? "Counter sale"}
-            {sale.branch ? ` · ${sale.branch.name}` : ""}
+            {formatDate(purchase.billDate, { style: "long" })} ·{" "}
+            {purchase.supplier?.name ?? "Supplier"}
+            {purchase.supplierBillNo
+              ? ` · their ref ${purchase.supplierBillNo}`
+              : ""}
           </p>
         </div>
 
-        {!voided && context.permissions.has("sales.void") && (
+        {!voided && context.permissions.has("purchases.void") && (
           <VoidDocumentDialog
-            documentId={sale.id}
-            documentNumber={sale.invoiceNumber}
-            noun="invoice"
-            onVoid={voidSaleAction}
+            documentId={purchase.id}
+            documentNumber={purchase.billNumber}
+            noun="bill"
+            onVoid={voidPurchaseAction}
+            placeholder="Goods returned to the supplier"
           />
         )}
       </header>
 
       {voided && (
         <Alert variant="destructive" className="mb-6">
-          <AlertTitle>This invoice was voided</AlertTitle>
+          <AlertTitle>This bill was voided</AlertTitle>
           <AlertDescription>
-            {sale.voidReason}
-            {sale.voidedAt
-              ? ` — ${formatDate(sale.voidedAt, { style: "long" })}`
+            {purchase.voidReason}
+            {purchase.voidedAt
+              ? ` — ${formatDate(purchase.voidedAt, { style: "long" })}`
               : ""}
             . The original entry and the reversal that cancels it both remain in
             the ledger.
@@ -128,11 +132,11 @@ export default async function SaleDetailPage({
                     <TableHead className="text-right">Rate</TableHead>
                     <TableHead className="text-right">Taxable</TableHead>
                     <TableHead className="text-right">GST</TableHead>
-                    <TableHead className="pr-6 text-right">Total</TableHead>
+                    <TableHead className="pr-6 text-right">Landed cost</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sale.items.map((item) => (
+                  {purchase.items.map((item) => (
                     <TableRow key={item.lineNumber}>
                       <TableCell className="pl-6">
                         <p className="font-medium">
@@ -177,7 +181,10 @@ export default async function SaleDetailPage({
                         )}
                       </TableCell>
                       <TableCell className="tabular-figures pr-6 text-right font-medium">
-                        {formatCurrency(item.lineTotal)}
+                        {formatCurrency(item.unitCost)}
+                        <span className="text-muted-foreground block text-xs">
+                          per {item.product.unit.code}
+                        </span>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -234,18 +241,14 @@ export default async function SaleDetailPage({
                 </Table>
                 <p className="text-muted-foreground border-t px-6 py-3 text-xs leading-relaxed">
                   Debits equal credits at {formatCurrency(entry.totalDebit)}.
-                  {Number(sale.costOfGoodsSold) > 0 && (
+                  {totalTax > 0 && (
                     <>
                       {" "}
-                      That is more than the {formatCurrency(sale.totalAmount)}{" "}
-                      invoiced because the entry also moves{" "}
-                      {formatCurrency(sale.costOfGoodsSold)} of stock into cost
-                      of sales — the sale and what it cost you belong together.
+                      {purchase.itcEligible
+                        ? `The ${formatCurrency(totalTax)} of GST sits in the input accounts as an asset — it is set against the GST you collect, not added to what the goods cost.`
+                        : `The ${formatCurrency(totalTax)} of GST is not recoverable here, so it is part of the cost rather than an asset.`}
                     </>
-                  )}{" "}
-                  This entry is what the ledger, trial balance and financial
-                  statements are built from; the invoice above is the document
-                  that caused it.
+                  )}
                 </p>
               </CardContent>
             </Card>
@@ -255,26 +258,26 @@ export default async function SaleDetailPage({
         <div className="space-y-6">
           <Card>
             <CardContent className="space-y-2 py-5 text-sm">
-              <Row label="Taxable value" value={sale.taxableAmount} />
-              {Number(sale.discountAmount) > 0 && (
-                <Row label="Discount" value={sale.discountAmount} muted />
+              <Row label="Taxable value" value={purchase.taxableAmount} />
+              {Number(purchase.discountAmount) > 0 && (
+                <Row label="Discount" value={purchase.discountAmount} muted />
               )}
-              {Number(sale.cgstAmount) > 0 && (
-                <Row label="CGST" value={sale.cgstAmount} muted />
+              {Number(purchase.cgstAmount) > 0 && (
+                <Row label="CGST" value={purchase.cgstAmount} muted />
               )}
-              {Number(sale.sgstAmount) > 0 && (
-                <Row label="SGST" value={sale.sgstAmount} muted />
+              {Number(purchase.sgstAmount) > 0 && (
+                <Row label="SGST" value={purchase.sgstAmount} muted />
               )}
-              {Number(sale.igstAmount) > 0 && (
-                <Row label="IGST" value={sale.igstAmount} muted />
+              {Number(purchase.igstAmount) > 0 && (
+                <Row label="IGST" value={purchase.igstAmount} muted />
               )}
-              {Number(sale.roundOff) !== 0 && (
-                <Row label="Round off" value={sale.roundOff} muted />
+              {Number(purchase.roundOff) !== 0 && (
+                <Row label="Round off" value={purchase.roundOff} muted />
               )}
               <div className="flex items-baseline justify-between border-t pt-3">
                 <span className="font-medium">Total</span>
                 <span className="tabular-figures text-lg font-semibold">
-                  {formatCurrency(sale.totalAmount)}
+                  {formatCurrency(purchase.totalAmount)}
                 </span>
               </div>
             </CardContent>
@@ -282,53 +285,52 @@ export default async function SaleDetailPage({
 
           <Card>
             <CardContent className="space-y-3 py-5 text-sm">
-              <Detail label="Payment" value={sale.paymentMode.toLowerCase()} />
-              <Detail
-                label="Place of supply"
-                value={
-                  sale.placeOfSupply
-                    ? (findStateByCode(sale.placeOfSupply)?.name ??
-                      sale.placeOfSupply)
-                    : "—"
-                }
-              />
+              <Detail label="Payment" value={purchase.paymentMode.toLowerCase()} />
               <Detail
                 label="Tax treatment"
                 value={
-                  sale.supplyType === "INTRA_STATE"
+                  purchase.supplyType === "INTRA_STATE"
                     ? "CGST + SGST"
-                    : sale.supplyType === "INTER_STATE"
+                    : purchase.supplyType === "INTER_STATE"
                       ? "IGST"
                       : "No GST"
                 }
               />
-              {sale.customer?.gstin && (
-                <Detail label="Customer GSTIN" value={sale.customer.gstin} mono />
+              {totalTax > 0 && (
+                <Detail
+                  label="Input credit"
+                  value={purchase.itcEligible ? "claimable" : "part of cost"}
+                />
               )}
-              {sale.dueDate && (
+              {purchase.supplier?.gstin && (
+                <Detail
+                  label="Supplier GSTIN"
+                  value={purchase.supplier.gstin}
+                  mono
+                />
+              )}
+              {purchase.supplier?.stateCode && (
+                <Detail
+                  label="Billed from"
+                  value={
+                    findStateByCode(purchase.supplier.stateCode)?.name ??
+                    purchase.supplier.stateCode
+                  }
+                />
+              )}
+              {purchase.dueDate && (
                 <Detail
                   label="Due"
-                  value={formatDate(sale.dueDate, { style: "short" })}
+                  value={formatDate(purchase.dueDate, { style: "short" })}
                 />
-              )}
-              {Number(sale.costOfGoodsSold) > 0 && (
-                <Detail
-                  label="Cost of goods sold"
-                  value={formatCurrency(sale.costOfGoodsSold)}
-                />
-              )}
-              {taxNotice && (
-                <p className="text-muted-foreground border-t pt-3 text-xs leading-relaxed">
-                  {taxNotice}
-                </p>
               )}
             </CardContent>
           </Card>
 
-          {sale.notes && (
+          {purchase.notes && (
             <Card>
               <CardContent className="py-5 text-sm leading-relaxed">
-                {sale.notes}
+                {purchase.notes}
               </CardContent>
             </Card>
           )}
