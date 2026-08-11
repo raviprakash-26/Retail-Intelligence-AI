@@ -178,6 +178,13 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         status: "ready",
       },
       {
+        label: "Statements",
+        href: "/app/accounting/statements",
+        icon: "FileChartColumn",
+        permission: "accounting.view",
+        status: "ready",
+      },
+      {
         label: "GST & Tax",
         href: "/app/gst",
         icon: "Landmark",

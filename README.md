@@ -72,8 +72,13 @@ columns, totalled — and honest about what that proves: the arithmetic holds, n
 that the books are right. A purchase recorded against Rent balances perfectly
 and is still wrong.
 
-**The financial statements arrive in Phase 14.** Sales and purchase _returns_
-are still to come as well. Every module that is not built says so on
+**The statements build themselves.** A trading account, a profit and loss
+account and a balance sheet, all from the same entries — with a plain-language
+reading above them that says what the margin actually means, and a note under
+each that says what it deliberately leaves out.
+
+**Inventory, GST preparation and the intelligence layer come next.** Sales and
+purchase _returns_ are still to come as well. Every module that is not built says so on
 its own page rather than showing an empty screen, and no figure anywhere in the
 product is invented to fill a gap.
 
@@ -239,7 +244,7 @@ src/
     purchases/             Bill form and list
     expenses/              Expense form, list and category breakdown
     settlements/           Receipt/payment form, allocation table, ageing panel
-    accounting/            Chart, journal, ledger, trial balance, pickers
+    accounting/            Chart, journal, ledger, trial balance, statements
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
   lib/
@@ -256,7 +261,7 @@ src/
     env.ts                 Validated environment; the app refuses to boot without it
     db.ts                  Prisma singleton
   server/
-    accounting/            Posting, balances, chart, journal, ledger, trial
+    accounting/            Posting, balances, ledger, trial balance, statements
     documents/             Accounts, GST register, reversal — shared by modules
     sales/                 Invoice posting: tax, stock, journal, GST register
     purchases/             Bill posting: landed cost, input credit, payables
@@ -307,7 +312,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 642 tests: unit + integration
+npm run test          # 664 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -675,6 +680,45 @@ next question and it should be one click away.
 
 ---
 
+## The financial statements
+
+A trading account, a profit and loss account and a balance sheet, all three
+derived from the same posted lines the ledger and the trial balance read. No
+figure is stored and none is computed a second way, so none of them can disagree
+with a ledger reached from it.
+
+**They are gated on the ledger balancing.** Producing a balance sheet from a
+ledger whose two sides differ means publishing a figure known to be wrong, so
+the check runs first and the page refuses, pointing at the trial balance.
+
+**The trading account is the perpetual form, because that is how these books
+work.** A bill puts goods into stock; a sale takes their cost out of stock at
+the moment it happens. The textbook periodic layout — opening stock plus
+purchases less closing stock — would print ₹0 against Purchases here and mislead
+anyone who knows the classical form. Gross profit is revenue less the cost of
+what was actually sold, and the page says why there is no Purchases line rather
+than leaving a reader to wonder.
+
+**Profit sits inside capital on the balance sheet.** Income and expense accounts
+are not closed to retained earnings until a year-end close, which this system
+does not yet perform, so what has been earned is shown as its own line within
+the owner's stake. Without it the two halves would differ by exactly the profit
+— and it is the owner's, whether or not a closing entry has been written.
+
+Period figures and position figures are read from separate windows. Income and
+expenses are measured _over_ the period; assets, liabilities and capital _at_
+its end. Mixing the two is the classic way to produce a balance sheet that does
+not balance, and there is a test that runs the statements over a single month of
+a longer history and asserts the sheet still agrees.
+
+Above the statements is a plain-language reading — what was left out of every
+₹100 of sales, what running the shop cost, whether the period made money. Every
+figure in it is read straight off the statement below. It says explicitly that
+it is not advice, and that an accountant should review the statements before
+they are relied on or filed.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -757,8 +801,8 @@ query text is the only thing the browser controls.
 | 11    | Journal — register, manual entries, reversal                  | **Done** |
 | 12    | Ledger — running balance, party statements                    | **Done** |
 | 13    | Trial balance — two columns, and what balancing proves        | **Done** |
-| 14    | Financial statements                                          | Next     |
-| 15    | Inventory                                                     |          |
+| 14    | Financial statements — trading, P&L, balance sheet            | **Done** |
+| 15    | Inventory                                                     | Next     |
 | 16–17 | GST and tax preparation                                       |          |
 | 18–19 | Analytics and forecasting                                     |          |
 | 20–22 | AI Accountant, Auditor, Advisor                               |          |

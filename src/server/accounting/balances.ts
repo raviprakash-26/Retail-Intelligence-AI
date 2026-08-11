@@ -304,13 +304,34 @@ export type SectionTotals = {
 };
 
 /** Which side a whole class of accounts sits on, regardless of any one of them. */
-const NATURAL_SIDE_FOR_TYPE: Record<AccountType, AccountNature> = {
+export const NATURAL_SIDE_FOR_TYPE: Record<AccountType, AccountNature> = {
   ASSET: AccountNature.DEBIT,
   LIABILITY: AccountNature.CREDIT,
   EQUITY: AccountNature.CREDIT,
   INCOME: AccountNature.CREDIT,
   EXPENSE: AccountNature.DEBIT,
 };
+
+/**
+ * One account's contribution to its class, in that class's direction.
+ *
+ * The single place any report converts a pair of debit and credit columns into
+ * a figure it can add up. A contra account — accumulated depreciation, drawings,
+ * sales returns, purchase returns — comes back negative, which is exactly right:
+ * each reduces the class it belongs to. Every statement reads this rather than
+ * deciding for itself which way up an account goes.
+ */
+export function naturalAmount(balance: {
+  type: AccountType;
+  closingDebit: Decimal;
+  closingCredit: Decimal;
+}): Decimal {
+  return signedBalance(
+    NATURAL_SIDE_FOR_TYPE[balance.type],
+    balance.closingDebit,
+    balance.closingCredit,
+  );
+}
 
 /**
  * Totals a set of balances by account type.
@@ -343,14 +364,7 @@ export function totalByType(
   };
 
   for (const balance of balances) {
-    totals[balance.type] = add(
-      totals[balance.type],
-      signedBalance(
-        NATURAL_SIDE_FOR_TYPE[balance.type],
-        balance.closingDebit,
-        balance.closingCredit,
-      ),
-    );
+    totals[balance.type] = add(totals[balance.type], naturalAmount(balance));
   }
   return totals;
 }
