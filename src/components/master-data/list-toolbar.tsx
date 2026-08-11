@@ -95,6 +95,9 @@ export function ListToolbar({
         />
         <Input
           type="search"
+          // Named for the search parameter it drives, so the field is
+          // addressable — by a test, and by a browser restoring a form.
+          name="q"
           value={draft}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={searchPlaceholder}

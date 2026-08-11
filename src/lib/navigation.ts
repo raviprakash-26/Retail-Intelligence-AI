@@ -133,8 +133,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: "Boxes",
         permission: "inventory.view",
         feature: FEATURE.INVENTORY,
-        status: "planned",
-        phase: 15,
+        status: "ready",
       },
       {
         label: "Employees",

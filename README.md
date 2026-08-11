@@ -77,8 +77,13 @@ account and a balance sheet, all from the same entries — with a plain-language
 reading above them that says what the margin actually means, and a note under
 each that says what it deliberately leaves out.
 
-**Inventory, GST preparation and the intelligence layer come next.** Sales and
-purchase _returns_ are still to come as well. Every module that is not built says so on
+**Stock reconciles with the books.** What is on the shelves is compared with
+the Inventory account in the ledger and the answer is shown rather than assumed
+— and a physical count that differs can be corrected honestly, as a transaction
+that posts real accounting rather than an edit to a number.
+
+**GST preparation and the intelligence layer come next.** Sales and purchase
+_returns_ are still to come as well. Every module that is not built says so on
 its own page rather than showing an empty screen, and no figure anywhere in the
 product is invented to fill a gap.
 
@@ -244,6 +249,7 @@ src/
     purchases/             Bill form and list
     expenses/              Expense form, list and category breakdown
     settlements/           Receipt/payment form, allocation table, ageing panel
+    inventory/             Stock list, stock card, count correction
     accounting/            Chart, journal, ledger, trial balance, statements
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
@@ -267,7 +273,7 @@ src/
     purchases/             Bill posting: landed cost, input credit, payables
     expenses/              Expense posting: categories, capital vs revenue
     settlements/           Receipts and payments: allocation, ageing, void
-    inventory/             Stock positions and the movement ledger
+    inventory/             Positions, movements, reconciliation, adjustments
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
     company/               Settings, team, branch and onboarding services
@@ -312,7 +318,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 664 tests: unit + integration
+npm run test          # 686 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -719,6 +725,45 @@ they are relied on or filed.
 
 ---
 
+## Inventory
+
+Positions are never entered. They are the consequence of the bills and invoices
+already recorded, and the only thing the module writes is a correction.
+
+**Stock is reconciled against the books, and the answer is shown.** It is
+recorded twice by design — as quantities in the inventory ledger and as a rupee
+balance in the Inventory account — by different code down different paths. Three
+figures must agree: the cached position on each product, the sum of every
+movement ever recorded for it, and the ledger balance. If they diverge, one of
+them is lying and every margin built on the cost of sales is suspect. This is
+the inventory analogue of the trial balance, and it is the single most useful
+thing the module can tell a retailer deciding whether to trust their own
+figures.
+
+Nothing is repaired automatically. A reconciliation that silently corrects what
+it finds destroys the evidence of how it broke.
+
+**A count that differs is a transaction, not an edit.** A physical count almost
+never matches exactly: things are dropped, spoiled, taken, or miscounted at the
+till. Pretending otherwise leaves a retailer with a figure they know is wrong
+and no honest way to fix it. So an adjustment says what was counted and why, and
+posts real accounting.
+
+Stock lost is a cost recognised now — goods bought and never to be sold have
+already been paid for, and leaving them in inventory overstates both the asset
+and next month's margin. Stock found is _not_ income: it is a correction to an
+asset that was understated, so it reverses the same expense rather than being
+credited to revenue. Treating it as income would inflate turnover with goods
+nobody bought, and on a GST return that is a number with consequences.
+
+The form asks what was counted, never the difference. A retailer counts the
+shelf; asking them to work out and sign a delta invites a sign error nobody
+notices until the stock figure is meaningless. The books' figure is shown beside
+the box, and what will happen — how much moves, what it is worth, where the
+value goes — is spelled out before anything is posted.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -802,8 +847,8 @@ query text is the only thing the browser controls.
 | 12    | Ledger — running balance, party statements                    | **Done** |
 | 13    | Trial balance — two columns, and what balancing proves        | **Done** |
 | 14    | Financial statements — trading, P&L, balance sheet            | **Done** |
-| 15    | Inventory                                                     | Next     |
-| 16–17 | GST and tax preparation                                       |          |
+| 15    | Inventory — positions, stock cards, reconciliation, counts    | **Done** |
+| 16–17 | GST and tax preparation                                       | Next     |
 | 18–19 | Analytics and forecasting                                     |          |
 | 20–22 | AI Accountant, Auditor, Advisor                               |          |
 | 23–24 | Subscriptions and admin panel                                 |          |
