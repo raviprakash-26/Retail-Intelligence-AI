@@ -164,6 +164,13 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         status: "ready",
       },
       {
+        label: "Ledger",
+        href: "/app/accounting/ledger",
+        icon: "BookOpen",
+        permission: "accounting.view",
+        status: "ready",
+      },
+      {
         label: "GST & Tax",
         href: "/app/gst",
         icon: "Landmark",

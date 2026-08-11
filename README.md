@@ -60,7 +60,14 @@ things that are genuinely only accounting — depreciation, an accrual, a bad de
 written off — can be posted by hand, through the same engine and the same
 balance check as everything else.
 
-**The reports built on all of it arrive in Phases 12–14.** Sales and purchase
+**Each account has a ledger.** Laid out the way a bahi khata is — what was
+carried in at the top, every movement in date order, the balance running down
+the right, what is carried out at the bottom. Narrow a customer or supplier
+account to one name and it becomes the statement you would send them, which
+reconciles with the ageing report exactly because both read the same posted
+lines.
+
+**The reports built on all of it arrive in Phases 13–14.** Sales and purchase
 _returns_ are still to come as well. Every module that is not built says so on
 its own page rather than showing an empty screen, and no figure anywhere in the
 product is invented to fill a gap.
@@ -227,7 +234,7 @@ src/
     purchases/             Bill form and list
     expenses/              Expense form, list and category breakdown
     settlements/           Receipt/payment form, allocation table, ageing panel
-    accounting/            Chart of accounts, journal register and entry form
+    accounting/            Chart of accounts, journal, ledger, account picker
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
   lib/
@@ -244,7 +251,7 @@ src/
     env.ts                 Validated environment; the app refuses to boot without it
     db.ts                  Prisma singleton
   server/
-    accounting/            Journal posting, account balances, chart, the register
+    accounting/            Posting, balances, chart, journal, ledger
     documents/             Accounts, GST register, reversal — shared by modules
     sales/                 Invoice posting: tax, stock, journal, GST register
     purchases/             Bill posting: landed cost, input credit, payables
@@ -295,7 +302,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 603 tests: unit + integration
+npm run test          # 624 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -599,6 +606,39 @@ through the same engine every other module uses.
 
 ---
 
+## The ledger
+
+One account at a time, laid out the way a paper ledger is: balance brought
+forward, every movement in date order, the running balance beside each line,
+balance carried forward. A retailer who has kept a bahi khata recognises the
+page immediately, which is the point — software that replaces a thing should
+look like the thing before it looks like software.
+
+Two details make it harder than it appears, and both would fail quietly.
+
+**The running balance has to survive pagination.** Row 51 shows the balance
+after fifty-one transactions, not after the one above it on the page.
+Accumulating in the view would restart at the opening figure on every page and
+each page after the first would be wrong, so the running total is computed by
+the database across the whole ordered set with a window function and the page is
+taken from that.
+
+**The ordering has to be total.** Two entries on the same day need a tiebreak,
+or the running balance shuffles between page loads and two printouts of the same
+ledger disagree with each other. Date, then entry number, then line number — no
+two lines can tie on all three.
+
+On a customer or supplier account the ledger can be narrowed to one name, which
+makes it the statement you would send someone disputing a balance. It reconciles
+with the ageing report exactly, because both are derived from the same posted
+lines rather than from separate running totals.
+
+Balances are shown as a positive figure with `Dr` or `Cr` beside them rather
+than as negative numbers, and the closing balance is also stated in words —
+"Sharma Provision Store owes you this much" rather than "₹1,180 Dr".
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -679,7 +719,8 @@ query text is the only thing the browser controls.
 | 9     | Receipts & payments — allocation, ageing, void                | **Done** |
 | 10    | Accounting engine — chart of accounts, balances, the equation | **Done** |
 | 11    | Journal — register, manual entries, reversal                  | **Done** |
-| 12–14 | Ledger, trial balance, financial statements                   | Next     |
+| 12    | Ledger — running balance, party statements                    | **Done** |
+| 13–14 | Trial balance, financial statements                           | Next     |
 | 15    | Inventory                                                     |          |
 | 16–17 | GST and tax preparation                                       |          |
 | 18–19 | Analytics and forecasting                                     |          |

@@ -1,6 +1,7 @@
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  BookOpen,
   BookOpenCheck,
   Boxes,
   ChartColumnBig,
@@ -34,6 +35,7 @@ import {
 const ICONS: Record<string, LucideIcon> = {
   ArrowDownToLine,
   ArrowUpFromLine,
+  BookOpen,
   BookOpenCheck,
   Boxes,
   ChartColumnBig,
