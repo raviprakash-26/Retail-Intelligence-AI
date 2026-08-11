@@ -67,8 +67,13 @@ account to one name and it becomes the statement you would send them, which
 reconciles with the ageing report exactly because both read the same posted
 lines.
 
-**The reports built on all of it arrive in Phases 13–14.** Sales and purchase
-_returns_ are still to come as well. Every module that is not built says so on
+**The trial balance is the checkpoint.** Every account with a balance, in two
+columns, totalled — and honest about what that proves: the arithmetic holds, not
+that the books are right. A purchase recorded against Rent balances perfectly
+and is still wrong.
+
+**The financial statements arrive in Phase 14.** Sales and purchase _returns_
+are still to come as well. Every module that is not built says so on
 its own page rather than showing an empty screen, and no figure anywhere in the
 product is invented to fill a gap.
 
@@ -234,7 +239,7 @@ src/
     purchases/             Bill form and list
     expenses/              Expense form, list and category breakdown
     settlements/           Receipt/payment form, allocation table, ageing panel
-    accounting/            Chart of accounts, journal, ledger, account picker
+    accounting/            Chart, journal, ledger, trial balance, pickers
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
   lib/
@@ -251,7 +256,7 @@ src/
     env.ts                 Validated environment; the app refuses to boot without it
     db.ts                  Prisma singleton
   server/
-    accounting/            Posting, balances, chart, journal, ledger
+    accounting/            Posting, balances, chart, journal, ledger, trial
     documents/             Accounts, GST register, reversal — shared by modules
     sales/                 Invoice posting: tax, stock, journal, GST register
     purchases/             Bill posting: landed cost, input credit, payables
@@ -302,7 +307,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 624 tests: unit + integration
+npm run test          # 642 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -639,6 +644,37 @@ than as negative numbers, and the closing balance is also stated in words —
 
 ---
 
+## The trial balance
+
+Every account with a balance, in two columns, grouped by type and totalled. It
+is the checkpoint between the ledger and the financial statements: if the two
+columns disagree there is no point producing a balance sheet, because it cannot
+be right. `assertLedgerBalances()` is the gate the statements sit behind, and it
+refuses rather than rounds.
+
+Give it a start date as well as an as-at date and it splits into what was
+carried in, what moved, and what is left — the shape an accountant wants at year
+end.
+
+Two things about it are stated on the page rather than left implied.
+
+**A balanced trial balance does not mean the books are correct.** A purchase
+recorded against Rent instead of Purchases balances perfectly and is still
+wrong. It catches arithmetic, not judgement — and in this system it catches
+little even of that, because an unbalanced entry cannot be written in the first
+place. It is here because it is the report an accountant asks for, and because
+seeing it agree is worth something.
+
+**Balances are reported where they actually sit.** A supplier ledger with a
+debit balance is an advance paid; putting it in the credit column because
+payables are supposed to be credits would hide exactly the oddity the report
+exists to surface.
+
+Every account name links to its ledger, because "why is Rent ₹48,000" is the
+next question and it should be one click away.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -720,7 +756,8 @@ query text is the only thing the browser controls.
 | 10    | Accounting engine — chart of accounts, balances, the equation | **Done** |
 | 11    | Journal — register, manual entries, reversal                  | **Done** |
 | 12    | Ledger — running balance, party statements                    | **Done** |
-| 13–14 | Trial balance, financial statements                           | Next     |
+| 13    | Trial balance — two columns, and what balancing proves        | **Done** |
+| 14    | Financial statements                                          | Next     |
 | 15    | Inventory                                                     |          |
 | 16–17 | GST and tax preparation                                       |          |
 | 18–19 | Analytics and forecasting                                     |          |

@@ -171,6 +171,13 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         status: "ready",
       },
       {
+        label: "Trial balance",
+        href: "/app/accounting/trial-balance",
+        icon: "Scale",
+        permission: "accounting.view",
+        status: "ready",
+      },
+      {
         label: "GST & Tax",
         href: "/app/gst",
         icon: "Landmark",
