@@ -45,7 +45,22 @@ takes out reduces capital — none of them touch the profit and loss account.
 Receivables and payables are aged from each document's _due_ date, so nobody is
 chased for an invoice that is not yet payable.
 
-**The reports built on all of it arrive in Phases 10–14.** Sales and purchase
+**The chart of accounts is yours to shape.** Every account the books can post
+to is visible with what it currently holds, and the accounting equation is shown
+at the top rather than assumed — a retailer who can see their own books balance
+has a reason to trust the figures on every other page. Add a line for a cost the
+standard chart does not name, rename any account including the ones the system
+posts to, and retire the ones you do not use.
+
+**Every entry the books contain is readable in one place.** The journal lists
+them all, says which document produced each one, and links back to it. Seeing
+that a shop's accounting is the direct consequence of the sales and bills
+already recorded is the whole argument for entering a transaction once. The few
+things that are genuinely only accounting — depreciation, an accrual, a bad debt
+written off — can be posted by hand, through the same engine and the same
+balance check as everything else.
+
+**The reports built on all of it arrive in Phases 12–14.** Sales and purchase
 _returns_ are still to come as well. Every module that is not built says so on
 its own page rather than showing an empty screen, and no figure anywhere in the
 product is invented to fill a gap.
@@ -212,7 +227,7 @@ src/
     purchases/             Bill form and list
     expenses/              Expense form, list and category breakdown
     settlements/           Receipt/payment form, allocation table, ageing panel
-    accounting/            Chart of accounts tree, account dialog, equation panel
+    accounting/            Chart of accounts, journal register and entry form
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
   lib/
@@ -225,11 +240,11 @@ src/
     accounting/            Double-entry rules, chart of accounts, account tree
     rbac/                  Permission catalogue and role templates
     billing/               Plan definitions and entitlements
-    validation/            Zod schemas shared by client and server
+    validation/            Zod schemas shared by client and server, and one date
     env.ts                 Validated environment; the app refuses to boot without it
     db.ts                  Prisma singleton
   server/
-    accounting/            Journal posting, account balances, chart management
+    accounting/            Journal posting, account balances, chart, the register
     documents/             Accounts, GST register, reversal — shared by modules
     sales/                 Invoice posting: tax, stock, journal, GST register
     purchases/             Bill posting: landed cost, input credit, payables
@@ -280,7 +295,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 558 tests: unit + integration
+npm run test          # 603 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -550,6 +565,40 @@ refuses to be retired until it is cleared.
 
 ---
 
+## The journal
+
+Every entry the books contain, in one register, whatever produced it. Most were
+derived from a document, and each says which — clicking from a journal line to
+the invoice behind it is how the accounting stops being something that happens
+elsewhere.
+
+A few things are genuinely only accounting: depreciation, an accrual, a
+prepayment released over the year, a bad debt written off. Those are posted by
+hand, and the path is fenced deliberately.
+
+**A document's entry is never reversed from the journal.** Reversing the entry
+behind an invoice without touching the invoice would leave the sale standing in
+the sales register with no accounting under it — the two would disagree and
+neither would be obviously wrong. Void the document; its entry follows, along
+with the stock it moved and the settlements that went with it.
+
+**A control account needs a name.** Posting to Accounts Receivable without
+saying whose debt it is creates a receivable nobody can chase, age or settle. A
+bad debt write-off is a real and necessary entry, so it is allowed — attributed
+to the customer whose debt it was.
+
+**Sales and purchases are not on the list of things you can post by hand.** A
+sale entered as a journal entry would move the ledger without moving the stock,
+without a GST register row and without a document to show anyone.
+
+The form shows the running difference as you type, names which side is short,
+and keeps the button disabled until it is nil — an accountant works the entry
+out as they enter it, and being told after a failed submit what they already
+knew helps nobody. The same schema then runs again on the server, which posts
+through the same engine every other module uses.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -629,7 +678,8 @@ query text is the only thing the browser controls.
 | 8     | Expenses — categories, GST, capital vs revenue, void          | **Done** |
 | 9     | Receipts & payments — allocation, ageing, void                | **Done** |
 | 10    | Accounting engine — chart of accounts, balances, the equation | **Done** |
-| 11–14 | Journal, ledger, trial balance, financial statements          | Next     |
+| 11    | Journal — register, manual entries, reversal                  | **Done** |
+| 12–14 | Ledger, trial balance, financial statements                   | Next     |
 | 15    | Inventory                                                     |          |
 | 16–17 | GST and tax preparation                                       |          |
 | 18–19 | Analytics and forecasting                                     |          |

@@ -10,6 +10,8 @@ import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
 import { createSale, voidSale } from "@/server/sales/sale-service";
+import { createPayment } from "@/server/settlements/settlement-service";
+import { createManualEntry } from "@/server/accounting/journal-service";
 import {
   assignableGroups,
   createAccount,
@@ -281,6 +283,100 @@ describe("the balance engine", () => {
     expect(Number(totals.INCOME)).toBeGreaterThan(0);
     expect(Number(totals.LIABILITY)).toBeGreaterThan(0);
     expect(Number(totals.ASSET)).toBeGreaterThan(0);
+  });
+
+  it("treats drawings as a reduction of capital, not an addition to it", async () => {
+    // Drawings sit inside capital but carry a debit balance. Summed in their
+    // own direction they would *add* to the owner's stake, and the equation
+    // would be out by twice the amount on every sole proprietorship that has
+    // ever taken money out of the till.
+    const fixture = await createCompany();
+    const before = totalByType(
+      await accountBalances({ companyId: fixture.companyId }),
+    );
+
+    await createPayment({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        kind: "DRAWINGS",
+        partyId: "",
+        date: new Date().toISOString().slice(0, 10),
+        paymentMode: "CASH",
+        amount: 15_000,
+        referenceNo: "",
+        notes: "",
+        allocations: [],
+      },
+    });
+
+    const balances = await accountBalances({ companyId: fixture.companyId });
+    const after = totalByType(balances);
+
+    expect(Number(after.EQUITY) - Number(before.EQUITY)).toBeCloseTo(
+      -15_000,
+      2,
+    );
+    expect(accountingEquation(balances).balanced).toBe(true);
+  });
+
+  it("treats accumulated depreciation as a reduction of assets", async () => {
+    const fixture = await createCompany();
+    const meta = await listAccountMeta(fixture.companyId);
+    const expense = meta.find(
+      (entry) => entry.systemKey === SYSTEM_ACCOUNT.DEPRECIATION_EXPENSE,
+    );
+    const accumulated = meta.find(
+      (entry) => entry.systemKey === SYSTEM_ACCOUNT.ACCUMULATED_DEPRECIATION,
+    );
+
+    await createManualEntry({
+      companyId: fixture.companyId,
+      branchId: null,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        entryDate: new Date().toISOString().slice(0, 10),
+        voucherType: "DEPRECIATION",
+        narration: "Depreciation for the year on the display fridge",
+        referenceNo: "",
+        lines: [
+          {
+            accountId: expense!.id,
+            debit: 4000,
+            credit: 0,
+            narration: "",
+            partyId: "",
+          },
+          {
+            accountId: accumulated!.id,
+            debit: 0,
+            credit: 4000,
+            narration: "",
+            partyId: "",
+          },
+        ],
+      },
+    });
+
+    const balances = await accountBalances({ companyId: fixture.companyId });
+    const totals = totalByType(balances);
+
+    // A contra-asset: it reduces what the business owns.
+    expect(Number(totals.ASSET)).toBeCloseTo(-4000, 2);
+    expect(accountingEquation(balances).balanced).toBe(true);
+
+    // On the chart it still reads as a positive credit balance, because that
+    // is what somebody looking at the account expects to see.
+    expect(
+      balances
+        .find(
+          (entry) =>
+            entry.systemKey === SYSTEM_ACCOUNT.ACCUMULATED_DEPRECIATION,
+        )
+        ?.balance.toFixed(2),
+    ).toBe("4000.00");
   });
 
   it("nets a void away without excluding it by status", async () => {

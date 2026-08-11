@@ -303,13 +303,33 @@ export type SectionTotals = {
   balanceSheet: Decimal;
 };
 
+/** Which side a whole class of accounts sits on, regardless of any one of them. */
+const NATURAL_SIDE_FOR_TYPE: Record<AccountType, AccountNature> = {
+  ASSET: AccountNature.DEBIT,
+  LIABILITY: AccountNature.CREDIT,
+  EQUITY: AccountNature.CREDIT,
+  INCOME: AccountNature.CREDIT,
+  EXPENSE: AccountNature.DEBIT,
+};
+
 /**
- * Totals a set of balances by account type, in each type's natural direction.
+ * Totals a set of balances by account type.
  *
- * Income and liabilities carry credit balances, assets and expenses debit ones,
- * so "total income" read straight off the debit column would be negative and
- * every figure downstream of it wrong. `signedBalance` has already put each
- * account the right way up; this only adds them together.
+ * Summed in the direction of the *type*, not of each individual account, and
+ * that distinction is the whole point. Several accounts deliberately run
+ * against their class: accumulated depreciation is an asset carrying a credit
+ * balance, drawings sit inside capital carrying a debit one, sales returns run
+ * against income and purchase returns against purchases. Each is a contra
+ * account, and each *reduces* the class it belongs to.
+ *
+ * Adding them in their own direction would report accumulated depreciation as
+ * an asset the business owns and drawings as capital the owner had put in —
+ * both backwards, and both enough to make the accounting equation fail on any
+ * sole proprietorship that has ever taken money out.
+ *
+ * `balance` on each row stays signed by the account's own nature, because that
+ * is what a person reading the chart wants to see; this reads the debit and
+ * credit columns instead.
  */
 export function totalByType(
   balances: readonly AccountBalance[],
@@ -323,7 +343,14 @@ export function totalByType(
   };
 
   for (const balance of balances) {
-    totals[balance.type] = add(totals[balance.type], balance.balance);
+    totals[balance.type] = add(
+      totals[balance.type],
+      signedBalance(
+        NATURAL_SIDE_FOR_TYPE[balance.type],
+        balance.closingDebit,
+        balance.closingCredit,
+      ),
+    );
   }
   return totals;
 }

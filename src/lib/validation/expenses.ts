@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isoDate } from "./date";
 
 /**
  * Expense input.
@@ -36,14 +37,6 @@ export const EXPENSE_PAYMENT_LABELS: Record<ExpensePaymentMode, string> = {
 
 /** GST slabs an expense receipt can carry. */
 export const EXPENSE_TAX_RATES = [0, 5, 12, 18, 28] as const;
-
-const isoDate = z
-  .string()
-  .trim()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a date.")
-  .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)), {
-    message: "That is not a real date.",
-  });
 
 export const expenseSchema = z
   .object({

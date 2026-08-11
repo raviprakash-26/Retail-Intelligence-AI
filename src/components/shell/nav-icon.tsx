@@ -10,6 +10,7 @@ import {
   Landmark,
   LayoutDashboard,
   MessageSquareText,
+  NotebookPen,
   Package,
   ReceiptIndianRupee,
   Settings,
@@ -41,6 +42,7 @@ const ICONS: Record<string, LucideIcon> = {
   Landmark,
   LayoutDashboard,
   MessageSquareText,
+  NotebookPen,
   Package,
   ReceiptIndianRupee,
   Settings,
@@ -62,10 +64,7 @@ const ICONS: Record<string, LucideIcon> = {
  * remount on every pass. Doing the lookup inside a stable component avoids
  * that entirely.
  */
-export function NavIcon({
-  name,
-  ...props
-}: LucideProps & { name: string }) {
+export function NavIcon({ name, ...props }: LucideProps & { name: string }) {
   const Icon = ICONS[name] ?? CircleDot;
   return <Icon {...props} />;
 }

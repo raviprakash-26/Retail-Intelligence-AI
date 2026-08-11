@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isoDate } from "./date";
 import {
   GSTIN_PATTERN,
   INDIAN_MOBILE_PATTERN,
@@ -112,13 +113,17 @@ const partyFields = {
 };
 
 /** The GSTIN cross-checks, wired into a schema. */
-function withGstChecks<T extends z.ZodType<{ gstin?: string; pan?: string; stateCode?: string }>>(
-  schema: T,
-) {
+function withGstChecks<
+  T extends z.ZodType<{ gstin?: string; pan?: string; stateCode?: string }>,
+>(schema: T) {
   return schema.superRefine((data, ctx) => {
     const issue = gstIdentityIssue(data);
     if (issue) {
-      ctx.addIssue({ code: "custom", message: issue.message, path: [issue.field] });
+      ctx.addIssue({
+        code: "custom",
+        message: issue.message,
+        path: [issue.field],
+      });
     }
   });
 }
@@ -282,15 +287,12 @@ export type UnitInput = z.infer<typeof unitSchema>;
 // Employees
 // ---------------------------------------------------------------------------
 
-export const EMPLOYEE_STATUS = ["ACTIVE", "ON_LEAVE", "RESIGNED", "TERMINATED"] as const;
-
-const isoDate = z
-  .string()
-  .trim()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a date.")
-  .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)), {
-    message: "That is not a real date.",
-  });
+export const EMPLOYEE_STATUS = [
+  "ACTIVE",
+  "ON_LEAVE",
+  "RESIGNED",
+  "TERMINATED",
+] as const;
 
 export const employeeSchema = z
   .object({

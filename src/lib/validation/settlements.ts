@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isoDate } from "./date";
 
 /**
  * Receipts and payments.
@@ -91,14 +92,6 @@ export const PAYMENT_PURPOSE_LABELS: Record<
     hint: "Anything else. Goes to miscellaneous expenses.",
   },
 };
-
-const isoDate = z
-  .string()
-  .trim()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a date.")
-  .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)), {
-    message: "That is not a real date.",
-  });
 
 const amount = z
   .number({ error: "Enter the amount." })

@@ -154,6 +154,14 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: "BookOpenCheck",
         permission: "accounting.view",
         status: "ready",
+        exact: true,
+      },
+      {
+        label: "Journal",
+        href: "/app/accounting/journal",
+        icon: "NotebookPen",
+        permission: "accounting.view",
+        status: "ready",
       },
       {
         label: "GST & Tax",

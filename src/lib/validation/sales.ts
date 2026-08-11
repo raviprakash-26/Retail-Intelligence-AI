@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isoDate } from "./date";
 
 /**
  * Sales invoice input.
@@ -29,14 +30,6 @@ export const PAYMENT_MODE_LABELS: Record<PaymentModeInput, string> = {
   CHEQUE: "Cheque",
   CREDIT: "On credit",
 };
-
-const isoDate = z
-  .string()
-  .trim()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a date.")
-  .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)), {
-    message: "That is not a real date.",
-  });
 
 export const saleLineSchema = z.object({
   productId: z.string().min(1, "Choose a product."),
