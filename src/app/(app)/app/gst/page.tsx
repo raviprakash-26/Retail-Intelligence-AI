@@ -1,28 +1,63 @@
 import type { Metadata } from "next";
-import { ModulePlaceholder } from "@/components/shell/module-placeholder";
+import { GstWorkingPaperView } from "@/components/gst/gst-working-paper";
+import { MasterDataHeader } from "@/components/master-data/page-header";
 import { requirePermission } from "@/server/auth/context";
+import {
+  getGstWorkingPaper,
+  gstPeriods,
+} from "@/server/gst/gst-return-service";
 
 export const metadata: Metadata = {
-  title: "GST & Tax",
+  title: "GST",
   robots: { index: false, follow: false },
 };
 
-export default async function GstPage() {
-  await requirePermission("gst.view");
+/**
+ * The GST working paper.
+ *
+ * A preparation, never a filing. The platform reads the tax already recorded on
+ * the invoices and bills, applies the set-off rules in the order they are
+ * prescribed, reconciles the register against the ledger, and stops. Filing
+ * happens on the GST portal, by a person who has reviewed this.
+ */
+export default async function GstPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const context = await requirePermission("gst.view");
+  const params = await searchParams;
+
+  const single = (key: string): string | undefined => {
+    const value = params[key];
+    const found = Array.isArray(value) ? value[0] : value;
+    return found || undefined;
+  };
+
+  const periods = await gstPeriods(context.company.id);
+  const now = new Date();
+  const fallback = periods[0] ?? {
+    year: now.getUTCFullYear(),
+    month: now.getUTCMonth() + 1,
+  };
+
+  const year = Number(single("year") ?? fallback.year) || fallback.year;
+  const month = Number(single("month") ?? fallback.month) || fallback.month;
+
+  const paper = await getGstWorkingPaper({
+    companyId: context.company.id,
+    year,
+    month: Math.min(12, Math.max(1, month)),
+  });
 
   return (
-    <ModulePlaceholder
-      title="GST & Tax"
-      icon="Landmark"
-      phase={16}
-      description="Sales and purchase registers, input and output tax, and returns prepared for your review."
-      willInclude={[
-        "GST sales and purchase registers",
-        "Input tax credit and output tax summary",
-        "GSTR-1 and GSTR-3B working papers, marked “prepared for review”",
-        "GST reconciliation",
-        "Tax preparation workspace with estimated figures clearly labelled",
-      ]}
-    />
+    <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+      <MasterDataHeader
+        title="GST"
+        description="A working paper built from the tax on the invoices and bills you have already recorded. It is prepared for your review — filing happens on the GST portal."
+      />
+
+      <GstWorkingPaperView paper={paper} periods={periods} />
+    </div>
   );
 }

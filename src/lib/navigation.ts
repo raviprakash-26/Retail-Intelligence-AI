@@ -184,13 +184,12 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         status: "ready",
       },
       {
-        label: "GST & Tax",
+        label: "GST",
         href: "/app/gst",
         icon: "Landmark",
         permission: "gst.view",
         feature: FEATURE.GST_PREPARATION,
-        status: "planned",
-        phase: 16,
+        status: "ready",
       },
       {
         label: "Reports",

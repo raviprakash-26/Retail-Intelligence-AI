@@ -82,8 +82,13 @@ the Inventory account in the ledger and the answer is shown rather than assumed
 — and a physical count that differs can be corrected honestly, as a transaction
 that posts real accounting rather than an edit to a number.
 
-**GST preparation and the intelligence layer come next.** Sales and purchase
-_returns_ are still to come as well. Every module that is not built says so on
+**GST returns are prepared, never filed.** A working paper built from the tax
+already on your documents, with the set-off applied in the order the law
+prescribes and the tax register reconciled against the ledger. Nothing on the
+page can submit it, and it says so.
+
+**The intelligence layer comes next.** Sales and purchase _returns_ are still to
+come as well. Every module that is not built says so on
 its own page rather than showing an empty screen, and no figure anywhere in the
 product is invented to fill a gap.
 
@@ -250,12 +255,14 @@ src/
     expenses/              Expense form, list and category breakdown
     settlements/           Receipt/payment form, allocation table, ageing panel
     inventory/             Stock list, stock card, count correction
+    gst/                   GST working paper: GSTR-1 tables, set-off, reconciliation
     accounting/            Chart, journal, ledger, trial balance, statements
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
   lib/
     money.ts               Exact decimal arithmetic — money never touches a float
     tax/gst.ts             GST rules: place of supply, rate splits, round-off
+    tax/set-off.ts         Input-credit set-off, in the order the law prescribes
     inventory/valuation.ts FIFO and weighted average, as pure functions
     settlements/ageing.ts  Ageing buckets and oldest-first allocation, pure
     navigation.ts          One navigation model, gated by permission and plan
@@ -318,7 +325,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 686 tests: unit + integration
+npm run test          # 720 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -764,6 +771,44 @@ value goes — is spelled out before anything is posted.
 
 ---
 
+## GST
+
+**Nothing here is a filing, and nothing here claims to be.** The platform
+prepares a working paper from the transactions already recorded; a person
+reviews it and files on the GST portal. The banner says so, the description says
+so, and there is no control anywhere that could be mistaken for submitting —
+because a retailer who believes their return has gone in when it has not is
+worse off than one with no software at all. An end-to-end check asserts no such
+control exists.
+
+**The set-off order is applied properly.** IGST credit is used first and must be
+exhausted before CGST or SGST credit is touched; CGST credit may never be set
+against SGST, or SGST against CGST, because the two belong to different
+governments. Cess is ring-fenced to cess. Getting this wrong produces a payable
+that is arithmetically defensible and legally wrong, so the rules live in one
+pure module with the whole table under test, including the crossings that must
+never happen. The page explains the order rather than only applying it — and
+explains it even when there was no credit, which is exactly when someone asks
+why they are paying the whole amount.
+
+**Only claimable credit is set off.** Tax on a purchase marked as not
+recoverable never became an asset; it went into the cost of the goods. It is
+shown separately so the two figures add up to the tax actually paid, and
+labelled as not part of the claim.
+
+**The register is reconciled against the ledger.** GST is recorded twice — as
+rows in the tax register and as balances in the GST accounts — by different
+code. A difference means the return is being prepared from figures the books do
+not support, and the page says not to file from it until that is explained.
+
+Sales are split into the B2B table (by customer, as GSTR-1 wants) and B2C
+(summarised by rate, because names are not reported), with a rate-wise summary
+and an HSN summary. Invoices are counted as documents, not register rows: one
+invoice carrying three rates is one invoice, and counting rows would overstate
+every table on the return.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -848,7 +893,8 @@ query text is the only thing the browser controls.
 | 13    | Trial balance — two columns, and what balancing proves        | **Done** |
 | 14    | Financial statements — trading, P&L, balance sheet            | **Done** |
 | 15    | Inventory — positions, stock cards, reconciliation, counts    | **Done** |
-| 16–17 | GST and tax preparation                                       | Next     |
+| 16    | GST preparation — GSTR-1 working paper, set-off, reconciled   | **Done** |
+| 17    | Income tax preparation                                        | Next     |
 | 18–19 | Analytics and forecasting                                     |          |
 | 20–22 | AI Accountant, Auditor, Advisor                               |          |
 | 23–24 | Subscriptions and admin panel                                 |          |
