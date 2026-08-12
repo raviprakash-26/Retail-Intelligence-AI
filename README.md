@@ -102,7 +102,14 @@ figure is arithmetic on posted entries — the trend buckets add up to the reven
 on the statements because both read the same lines — and a ratio that cannot be
 worked out honestly gives its reason rather than a zero.
 
-**Forecasting comes next.** Sales and purchase _returns_ are still to
+**The next few weeks come as ranges.** Revenue is a line fitted through the
+weeks already recorded with a band drawn from how far those weeks fell from it,
+and cash is a roll-forward of invoices raised, bills received and what the shop
+actually spends to keep running. Where the history is too short or too uneven to
+narrow down, the page says so instead of putting a confident figure in the
+middle of a useless range.
+
+**The AI layer comes next.** Sales and purchase _returns_ are still to
 come as well. Every module that is not built says so on
 its own page rather than showing an empty screen, and no figure anywhere in the
 product is invented to fill a gap.
@@ -273,6 +280,7 @@ src/
     gst/                   GST working paper: GSTR-1 tables, set-off, reconciliation
     tax/                   Income tax working paper: computation, blocks, 44AD
     analytics/             Trend chart, product and customer breakdowns, ratios
+    forecast/              The projected band, cash weeks, and what is not known
     accounting/            Chart, journal, ledger, trial balance, statements
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
@@ -286,6 +294,7 @@ src/
     analytics/ratios.ts    Eleven ratios, null with a reason where honest
     analytics/health.ts    A composite indicator that is not a credit score
     analytics/range.ts     Reporting periods, shared across the client boundary
+    forecast/series.ts     Least-squares fit, prediction band, and three refusals
     inventory/valuation.ts FIFO and weighted average, as pure functions
     settlements/ageing.ts  Ageing buckets and oldest-first allocation, pure
     navigation.ts          One navigation model, gated by permission and plan
@@ -307,6 +316,7 @@ src/
     gst/                   GST working paper, periods, register reconciliation
     tax/                   Income tax computation, disallowances found in records
     analytics/             Trend from the ledger, breakdowns from the invoice lines
+    forecast/              Revenue projection and the cash commitment roll-forward
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
     company/               Settings, team, branch and onboarding services
@@ -351,7 +361,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 885 tests: unit + integration
+npm run test          # 920 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -360,7 +370,8 @@ Integration tests run against `riai_test` and refuse to start if
 
 Coverage includes the accounting rules, GST arithmetic, inventory valuation,
 income tax slabs and reliefs, depreciation blocks under the Act, the ratio
-engine and its refusals, ageing and allocation, account balances and the accounting equation, permission
+engine and its refusals, the forecasting band and when it declines to draw one,
+ageing and allocation, account balances and the accounting equation, permission
 boundaries (an auditor cannot write; a cashier
 cannot void), tenant isolation, document numbering under rollback, and every
 database constraint listed above.
@@ -961,6 +972,64 @@ be a judgement about missing data rather than about the business.
 
 ---
 
+## Forecasting
+
+**A forecast is a range, never a figure.** "Revenue will be ₹5,42,300" is a
+sentence no honest arithmetic produces, and putting it in large type invites
+decisions the numbers do not support. Everything on this page comes back as a
+band, the band is drawn from how far the shop's own history fell from the
+fitted line, and where there is a middle it is drawn thin, dashed and second.
+
+Two panels make two different kinds of claim, and the page says which is which.
+
+**Revenue is a fit.** Ordinary least squares through the weeks already
+recorded, with the textbook prediction interval — which widens the further out
+it reaches, because it should, and because that falls out of the formula rather
+than being imposed on it. The band is 80%, not 95%: a 95% band on a shop's
+weekly takings is so wide it says nothing. The method is explainable in one
+sentence to the person whose business it is, which a gradient-boosted anything
+is not.
+
+**Cash is not a fit at all.** It rolls forward commitments that already exist:
+invoices raised, bills received, and a running cost taken from what the shop
+actually spent over the last thirteen weeks. Depreciation is excluded, being a
+real cost that never moves any cash. Money from sales not yet made is
+deliberately absent, which makes the line a floor rather than a prediction —
+and money already past its due date lands in the first week rather than being
+dropped, because a projection that quietly forgets overdue money is one that
+flatters.
+
+Two cash lines are drawn, both out of the shop's own records. One has every
+invoice landing on its due date. The other shifts each invoice by the days
+customers have actually been taking past it, measured from receipts already
+allocated to invoices rather than assumed. **The gap between those lines is what
+slow collection costs, stated in weeks of cash.** Where nothing has been settled
+yet there is nothing to measure, the two lines are identical, and the page says
+why.
+
+Three refusals, each of them tested:
+
+- **Too little history is a refusal, not a guess.** Six periods is the floor;
+  below it there is a stated reason where the projection would have been.
+- **A history too uneven to narrow down says so.** Where the band is wider than
+  the figure inside it, the page tells you to read the range as the answer and
+  treat the middle of it as meaningless.
+- **A suspiciously perfect history admits it.** Every point falling exactly on
+  the line gives a band of nothing, which would be the most overconfident output
+  the module could produce.
+
+Two limitations are stated every time, including on the refusals: this is a
+straight line through what has already happened, and there is no seasonal
+adjustment — a shop whose Diwali is far bigger than its March will not see that
+pattern here. The direction of travel is words rather than a rate, because
+"trending up 3.7% a week" reads as a fact about the future.
+
+Nothing is stored. A forecast written to a table goes stale the moment the next
+invoice is posted, and a stale projection nobody remembers generating is worse
+than one computed on the spot.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -1048,8 +1117,9 @@ query text is the only thing the browser controls.
 | 16    | GST preparation — GSTR-1 working paper, set-off, reconciled   | **Done** |
 | 17    | Income tax — computation, depreciation, 44AD, advance tax     | **Done** |
 | 18    | Analytics — trend, products, customers, ratios, health        | **Done** |
-| 19    | Forecasting                                                   | Next     |
-| 20–22 | AI Accountant, Auditor, Advisor                               |          |
+| 19    | Forecasting — revenue band, cash commitments, refusals        | **Done** |
+| 20    | AI Accountant                                                 | Next     |
+| 21–22 | AI Auditor, AI Advisor                                        |          |
 | 23–24 | Subscriptions and admin panel                                 |          |
 | 25–27 | Security hardening, testing, deployment                       |          |
 
