@@ -226,8 +226,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: "TrendingUp",
         permission: "forecasting.view",
         feature: FEATURE.FORECASTING,
-        status: "planned",
-        phase: 19,
+        status: "ready",
       },
       {
         label: "AI Accountant",
