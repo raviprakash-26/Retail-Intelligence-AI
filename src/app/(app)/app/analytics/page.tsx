@@ -1,28 +1,73 @@
 import type { Metadata } from "next";
-import { ModulePlaceholder } from "@/components/shell/module-placeholder";
+import { cookies } from "next/headers";
+import { AnalyticsView } from "@/components/analytics/analytics-view";
+import { MasterDataHeader } from "@/components/master-data/page-header";
 import { requirePermission } from "@/server/auth/context";
+import {
+  FISCAL_YEAR_COOKIE,
+  resolveFiscalYear,
+} from "@/server/fiscal/fiscal-service";
+import { isRangeKey, type RangeKey } from "@/lib/analytics/range";
+import { getAnalytics } from "@/server/analytics/analytics-service";
 
 export const metadata: Metadata = {
   title: "Analytics",
   robots: { index: false, follow: false },
 };
 
-export default async function AnalyticsPage() {
-  await requirePermission("analytics.view");
+/**
+ * Analytics.
+ *
+ * Arithmetic on posted entries, read through the same balance engine as the
+ * statements — so nothing here can disagree with the profit and loss account.
+ * Nothing is predicted and nothing is modelled; forecasting is a separate thing
+ * and is labelled as such where it arrives.
+ */
+export default async function AnalyticsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const context = await requirePermission("analytics.view");
+  const params = await searchParams;
+  const cookieStore = await cookies();
+
+  const requested = params.range;
+  const single = Array.isArray(requested) ? requested[0] : requested;
+  const range: RangeKey = isRangeKey(single) ? single : "fy";
+
+  const fiscalYear = await resolveFiscalYear(
+    context.company.id,
+    cookieStore.get(FISCAL_YEAR_COOKIE)?.value,
+  );
+
+  const report = fiscalYear
+    ? await getAnalytics({
+        companyId: context.company.id,
+        range,
+        fiscalYearStart: fiscalYear.startDate,
+        fiscalYearEnd: fiscalYear.endDate,
+      })
+    : null;
 
   return (
-    <ModulePlaceholder
-      title="Analytics"
-      icon="ChartColumnBig"
-      phase={18}
-      description="Where the money actually comes from, and where it goes."
-      willInclude={[
-        "Revenue, profit and expense growth",
-        "Product and customer profitability",
-        "Inventory turnover and working capital",
-        "Eleven financial ratios with formula, trend and interpretation",
-        "Financial health score",
-      ]}
-    />
+    <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+      <MasterDataHeader
+        title="Analytics"
+        description="What the shop actually did, cut the ways you would ask about it. Every figure is arithmetic on entries you have already posted — nothing here is predicted."
+      />
+
+      {report ? (
+        <AnalyticsView report={report} />
+      ) : (
+        <div className="rounded-xl border border-dashed px-6 py-14 text-center">
+          <h2 className="text-base font-semibold">No financial year is open</h2>
+          <p className="mx-auto mt-1.5 max-w-md text-sm text-muted-foreground">
+            Analytics needs a period to report on. Finish setting the business
+            up and this fills itself in from the books.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }

@@ -218,8 +218,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: "ChartColumnBig",
         permission: "analytics.view",
         feature: FEATURE.ANALYTICS,
-        status: "planned",
-        phase: 18,
+        status: "ready",
       },
       {
         label: "Forecasting",
