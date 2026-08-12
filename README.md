@@ -95,7 +95,14 @@ limit are listed with the vouchers behind them rather than being silently
 applied, so the answer reads as the range it actually is. Section 44AD sits
 beside it for comparison. Nothing on the page files anything, and it says so.
 
-**The intelligence layer comes next.** Sales and purchase _returns_ are still to
+**The books can now be read as a business.** Revenue and gross profit over
+time, which products earn rather than merely sell, who buys, which days carry
+the week, and eleven ratios with a single indicator summarising them. Every
+figure is arithmetic on posted entries — the trend buckets add up to the revenue
+on the statements because both read the same lines — and a ratio that cannot be
+worked out honestly gives its reason rather than a zero.
+
+**Forecasting comes next.** Sales and purchase _returns_ are still to
 come as well. Every module that is not built says so on
 its own page rather than showing an empty screen, and no figure anywhere in the
 product is invented to fill a gap.
@@ -265,6 +272,7 @@ src/
     inventory/             Stock list, stock card, count correction
     gst/                   GST working paper: GSTR-1 tables, set-off, reconciliation
     tax/                   Income tax working paper: computation, blocks, 44AD
+    analytics/             Trend chart, product and customer breakdowns, ratios
     accounting/            Chart, journal, ledger, trial balance, statements
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
@@ -275,6 +283,9 @@ src/
     tax/income-tax.ts      Slabs, rebate, surcharge, cess — one table per year
     tax/depreciation.ts    Block-of-assets depreciation under the Act, pure
     tax/presumptive.ts     Section 44AD and the section 44AB audit threshold
+    analytics/ratios.ts    Eleven ratios, null with a reason where honest
+    analytics/health.ts    A composite indicator that is not a credit score
+    analytics/range.ts     Reporting periods, shared across the client boundary
     inventory/valuation.ts FIFO and weighted average, as pure functions
     settlements/ageing.ts  Ageing buckets and oldest-first allocation, pure
     navigation.ts          One navigation model, gated by permission and plan
@@ -295,6 +306,7 @@ src/
     inventory/             Positions, movements, reconciliation, adjustments
     gst/                   GST working paper, periods, register reconciliation
     tax/                   Income tax computation, disallowances found in records
+    analytics/             Trend from the ledger, breakdowns from the invoice lines
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
     company/               Settings, team, branch and onboarding services
@@ -339,7 +351,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 823 tests: unit + integration
+npm run test          # 885 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -347,8 +359,8 @@ Integration tests run against `riai_test` and refuse to start if
 `DATABASE_URL` does not name a `_test` database.
 
 Coverage includes the accounting rules, GST arithmetic, inventory valuation,
-income tax slabs and reliefs, depreciation blocks under the Act, ageing and
-allocation, account balances and the accounting equation, permission
+income tax slabs and reliefs, depreciation blocks under the Act, the ratio
+engine and its refusals, ageing and allocation, account balances and the accounting equation, permission
 boundaries (an auditor cannot write; a cashier
 cannot void), tenant isolation, document numbering under rollback, and every
 database constraint listed above.
@@ -894,6 +906,61 @@ section 288B requires.
 
 ---
 
+## Analytics
+
+**Nothing here is predicted.** Every figure is arithmetic on entries already
+posted; forecasting is a separate thing and arrives labelled as such.
+
+**The trend cannot disagree with the statements.** Revenue per bucket is the
+movement on the trading-account income accounts — the same definition the
+profit and loss account uses, on the same posted lines, grouped by date in the
+database. The buckets add up to the revenue on the statements to the paisa, and
+a test asserts exactly that. A manual entry to Sales belongs in the trend for
+the same reason it belongs in the P&L.
+
+**The breakdowns read the invoice lines, and the page says so.** Which product
+earned what cannot come from the ledger, because the ledger does not know about
+products. Where a discount or a manual entry was posted straight to an account
+the two views differ slightly, which is stated rather than reconciled away.
+
+**Product margins use the cost captured when the sale posted**, not today's
+purchase price. A margin recomputed from the current price would move every
+time a supplier changed theirs, and would say something different about last
+month every month. The page also names the case worth knowing: the biggest
+seller is often not the biggest earner, and both facts are true.
+
+**Growth against nothing is not a percentage.** Where the previous period had
+no sales the tile says there is no comparison and gives the absolute change,
+which is meaningful either way. The comparison window is always the same length
+of time immediately before, and a running year is reported up to today rather
+than to a year end that has not happened.
+
+**Concentration is an observation, not a warning.** Where one customer is 40% or
+more of a period's sales the page says so — and only where there are at least
+three names, because with two customers a 50% share is arithmetic rather than
+concentration. Whether it is a risk depends on the relationship, which the books
+cannot see.
+
+Eleven ratios sit behind all of it: margins, running costs, stock turnover and
+days, collection and payment days, the cash cycle, current and quick ratios and
+return on capital. **A ratio that cannot be computed honestly is not shown as a
+zero.** A shop holding no stock has no stock turnover, and "0 times" would say
+its stock never moves — the opposite of the truth. Each one shows the reason
+instead. Where a figure crosses a line that is factual it is flagged: a current
+ratio under 1 _means_ short-term debts exceed short-term assets. Where the right
+level depends on the trade, no verdict is offered.
+
+**The health indicator is not a credit score.** No bureau issues it, no lender
+sees it, it has no bearing on any loan, and the sentence saying so lives beside
+the computation rather than in the interface, so a second place that shows the
+figure cannot show it without the caveat. Five weighted components each state
+their rule and the figure it was applied to, so the number can be re-derived by
+hand. Where fewer than three can be measured there is no score at all — a shop
+three weeks old has nothing to say about collection days, and scoring it would
+be a judgement about missing data rather than about the business.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -980,8 +1047,8 @@ query text is the only thing the browser controls.
 | 15    | Inventory — positions, stock cards, reconciliation, counts    | **Done** |
 | 16    | GST preparation — GSTR-1 working paper, set-off, reconciled   | **Done** |
 | 17    | Income tax — computation, depreciation, 44AD, advance tax     | **Done** |
-| 18    | Analytics                                                     | Next     |
-| 19    | Forecasting                                                   |          |
+| 18    | Analytics — trend, products, customers, ratios, health        | **Done** |
+| 19    | Forecasting                                                   | Next     |
 | 20–22 | AI Accountant, Auditor, Advisor                               |          |
 | 23–24 | Subscriptions and admin panel                                 |          |
 | 25–27 | Security hardening, testing, deployment                       |          |
