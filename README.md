@@ -87,6 +87,14 @@ already on your documents, with the set-off applied in the order the law
 prescribes and the tax register reconciled against the ledger. Nothing on the
 page can submit it, and it says so.
 
+**Income tax is estimated, never advised.** The computation starts from the
+profit the statements already show, adds the book depreciation back and takes
+the Act's own figure instead, and stops where judgement begins — cash paid over
+the section 40A(3) limit and bills left unpaid past the micro-enterprise time
+limit are listed with the vouchers behind them rather than being silently
+applied, so the answer reads as the range it actually is. Section 44AD sits
+beside it for comparison. Nothing on the page files anything, and it says so.
+
 **The intelligence layer comes next.** Sales and purchase _returns_ are still to
 come as well. Every module that is not built says so on
 its own page rather than showing an empty screen, and no figure anywhere in the
@@ -256,6 +264,7 @@ src/
     settlements/           Receipt/payment form, allocation table, ageing panel
     inventory/             Stock list, stock card, count correction
     gst/                   GST working paper: GSTR-1 tables, set-off, reconciliation
+    tax/                   Income tax working paper: computation, blocks, 44AD
     accounting/            Chart, journal, ledger, trial balance, statements
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
@@ -263,6 +272,9 @@ src/
     money.ts               Exact decimal arithmetic — money never touches a float
     tax/gst.ts             GST rules: place of supply, rate splits, round-off
     tax/set-off.ts         Input-credit set-off, in the order the law prescribes
+    tax/income-tax.ts      Slabs, rebate, surcharge, cess — one table per year
+    tax/depreciation.ts    Block-of-assets depreciation under the Act, pure
+    tax/presumptive.ts     Section 44AD and the section 44AB audit threshold
     inventory/valuation.ts FIFO and weighted average, as pure functions
     settlements/ageing.ts  Ageing buckets and oldest-first allocation, pure
     navigation.ts          One navigation model, gated by permission and plan
@@ -281,6 +293,8 @@ src/
     expenses/              Expense posting: categories, capital vs revenue
     settlements/           Receipts and payments: allocation, ageing, void
     inventory/             Positions, movements, reconciliation, adjustments
+    gst/                   GST working paper, periods, register reconciliation
+    tax/                   Income tax computation, disallowances found in records
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
     company/               Settings, team, branch and onboarding services
@@ -325,7 +339,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 720 tests: unit + integration
+npm run test          # 823 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -333,7 +347,8 @@ Integration tests run against `riai_test` and refuse to start if
 `DATABASE_URL` does not name a `_test` database.
 
 Coverage includes the accounting rules, GST arithmetic, inventory valuation,
-ageing and allocation, account balances and the accounting equation, permission
+income tax slabs and reliefs, depreciation blocks under the Act, ageing and
+allocation, account balances and the accounting equation, permission
 boundaries (an auditor cannot write; a cashier
 cannot void), tenant isolation, document numbering under rollback, and every
 database constraint listed above.
@@ -809,6 +824,76 @@ every table on the return.
 
 ---
 
+## Income tax
+
+**Every figure is an estimate prepared for review, and not tax advice.** It is
+arithmetic applied to a rate table. It does not know about salary, rent,
+interest, capital gains, deductions under Chapter VI-A, or losses brought
+forward from earlier years — and for a proprietor, whose business income is
+taxed as part of their own, those are usually what decides the answer. The
+banner says so before anything else on the page, and nothing there files,
+submits or pays anything.
+
+**It starts from the books rather than beside them.** The book profit comes out
+of the same statements engine every other report reads, so the computation
+cannot disagree with the profit and loss account. Turnover is revenue net of
+returns, straight out of the trading account.
+
+**Book depreciation comes out and the Act's goes in.** They are different
+calculations on different rules and are not meant to agree. The Act pools assets
+into blocks defined by their rate, writes each block down on its written-down
+value, gives half the rate to anything bought with under 180 days of the year
+left, and takes sale proceeds off the block rather than off the asset — so
+proceeds that exhaust a block leave no depreciation at all. Where an asset
+carries no rate of its own the block is guessed from what it is called, and the
+working paper prints the guess next to the asset rather than burying it.
+
+**Disallowances are found in the records, not assumed.** Cash paid to one person
+in one day above the section 40A(3) limit is a fact about vouchers that exist,
+and it is listed with them. The limit is on the day's total, not on any single
+voucher — three payments of ₹4,000 to one supplier on one date are caught, which
+is the point of aggregating. Drawings are excluded, because money the owner
+takes out is not expenditure. Cash spent on an asset is separated out too: that
+is not disallowed as expenditure, it stops counting towards the cost for
+depreciation, which is a different consequence.
+
+**Judgement is left where it belongs.** The mechanical adjustments are applied;
+the ones turning on facts the platform cannot see are shown as a second figure.
+Supplier bills unpaid past 45 days are exposure under section 43B(h) only if the
+supplier is a registered micro or small enterprise, which is on their invoice or
+the Udyam portal and not in these books — so the page shows the amount, says
+what has to be checked, and calls the list a floor rather than the whole of it.
+The result is a range with both ends explained instead of one number carrying
+more confidence than it earned.
+
+**A loss is reported as a loss.** The computation is a statement that has to add
+up, and a figure quietly floored at nil turns three lines that should reconcile
+into three that do not. There is no tax on a loss and no refund either; it
+carries forward, which this does not track.
+
+**Section 44AD sits beside the computation, not instead of it.** Deemed income
+at 8% of turnover and at 6% on the part received through banking channels, with
+the ceiling that applies given the receipt mix — ₹2 crore, or ₹3 crore where
+cash is within 5%. The same cash share decides whether the section 44AB audit
+limit is ₹1 crore or ₹10 crore, and a shop that banks nearly everything is often
+entitled to the relaxation without knowing. That share is measured from movement
+on the cash and bank accounts, excluding opening entries: money in the drawer
+when the year opened was not received during it.
+
+**Rates are versioned by assessment year, and a carried-forward table says so.**
+A computation on the wrong year's law looks exactly like a correct one, so an
+unknown year computes nothing rather than borrowing another year's rates. The
+year in progress uses last year's rates until the Finance Act is entered, marked
+provisional on the face of every figure.
+
+Both regimes are shown side by side for anyone who has the choice, cheapest
+first — that ordering is arithmetic on this year's business income, and the page
+says as much rather than recommending one. Advance tax instalments fall on the
+prescribed dates, and the liability is rounded to the nearest ten rupees as
+section 288B requires.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -894,8 +979,9 @@ query text is the only thing the browser controls.
 | 14    | Financial statements — trading, P&L, balance sheet            | **Done** |
 | 15    | Inventory — positions, stock cards, reconciliation, counts    | **Done** |
 | 16    | GST preparation — GSTR-1 working paper, set-off, reconciled   | **Done** |
-| 17    | Income tax preparation                                        | Next     |
-| 18–19 | Analytics and forecasting                                     |          |
+| 17    | Income tax — computation, depreciation, 44AD, advance tax     | **Done** |
+| 18    | Analytics                                                     | Next     |
+| 19    | Forecasting                                                   |          |
 | 20–22 | AI Accountant, Auditor, Advisor                               |          |
 | 23–24 | Subscriptions and admin panel                                 |          |
 | 25–27 | Security hardening, testing, deployment                       |          |

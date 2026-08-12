@@ -1,0 +1,822 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { toStorageString } from "@/lib/money";
+import type { RegisterInput } from "@/lib/validation/auth";
+import type { ExpenseInput } from "@/lib/validation/expenses";
+import type {
+  CustomerInput,
+  ProductInput,
+  SupplierInput,
+} from "@/lib/validation/master-data";
+import type { PurchaseInput } from "@/lib/validation/purchases";
+import type { SaleInput } from "@/lib/validation/sales";
+import type { PaymentInput } from "@/lib/validation/settlements";
+import { registerOwner } from "@/server/auth/registration";
+import {
+  createExpense,
+  listExpenseCategories,
+} from "@/server/expenses/expense-service";
+import { createParty } from "@/server/master-data/party-service";
+import { createProduct } from "@/server/master-data/product-service";
+import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
+import { createPurchase } from "@/server/purchases/purchase-service";
+import { createSale, voidSale } from "@/server/sales/sale-service";
+import { createPayment } from "@/server/settlements/settlement-service";
+import { getFinancialStatements } from "@/server/accounting/statements-service";
+import { getTaxWorkingPaper } from "@/server/tax/income-tax-service";
+import {
+  disconnectTestDb,
+  ensurePlatformData,
+  purgeTestCompany,
+  purgeTestUsers,
+  testDb,
+  uniqueSlug,
+} from "../helpers/test-db";
+
+/**
+ * The income tax working paper.
+ *
+ * The point of these is that the computation is built out of the books rather
+ * than alongside them. The book profit has to be the profit the statements
+ * show; the disallowances have to be facts about vouchers that exist; and none
+ * of it may reach across a tenant boundary.
+ */
+
+const prisma = testDb();
+const createdCompanies: string[] = [];
+const createdEmails: string[] = [];
+
+/** Inside the fiscal year that registration opens for a business today. */
+const IN_YEAR = "2026-06-15";
+const LATER_IN_YEAR = "2026-09-20";
+
+type BusinessType = RegisterInput["business"]["businessType"];
+
+function registrationInput(
+  email: string,
+  businessType: BusinessType = "SOLE_PROPRIETORSHIP",
+): RegisterInput {
+  // A distinct name per company: the slug is derived from it, and two tenants
+  // registering under one name is a collision the fixture has no reason to
+  // exercise.
+  const businessName = `Income Tax ${uniqueSlug("Mart")}`;
+
+  return {
+    account: {
+      fullName: "Ravi Prakash",
+      email,
+      mobile: "9845012345",
+      password: "MountainRiver42!",
+      confirmPassword: "MountainRiver42!",
+      acceptTerms: true,
+    },
+    business: {
+      businessName,
+      businessType,
+      gstRegistration: "REGULAR",
+      gstin: "29AAAPR1234K1ZP",
+      pan: "AAAPR1234K",
+      addressLine1: "42 Avenue Road",
+      city: "Bengaluru",
+      stateCode: "29",
+      pincode: "560053",
+    },
+    accounting: {
+      fiscalYearStartMonth: 4,
+      currency: "INR",
+      openingCashBalance: 500000,
+      openingBankBalance: 500000,
+      inventoryMethod: "WEIGHTED_AVERAGE",
+      loadDemoData: false,
+    },
+  };
+}
+
+type Fixture = {
+  companyId: string;
+  userId: string;
+  actorEmail: string;
+  fiscalYearId: string;
+  productId: string;
+  customerId: string;
+  supplierId: string;
+  otherSupplierId: string;
+  rentCategoryId: string;
+};
+
+async function createCompany(
+  businessType: BusinessType = "SOLE_PROPRIETORSHIP",
+): Promise<Fixture> {
+  const email = `itax-${uniqueSlug("x").replace(/-/g, "")}@example.com`;
+  createdEmails.push(email);
+  const result = await registerOwner(registrationInput(email, businessType));
+  createdCompanies.push(result.companyId);
+
+  const base = {
+    companyId: result.companyId,
+    userId: result.userId,
+    actorEmail: "owner@example.com",
+  };
+
+  const year = await prisma.fiscalYear.findFirstOrThrow({
+    where: { companyId: result.companyId },
+    select: { id: true },
+  });
+
+  const taxonomy = await getProductTaxonomy(result.companyId);
+  const unit = taxonomy.units.find((entry) => entry.code === "PCS");
+  const gst18 = taxonomy.taxRates.find((entry) => entry.code === "GST18");
+  if (!unit || !gst18) throw new Error("Provisioning is incomplete");
+
+  const product = await createProduct({
+    ...base,
+    input: {
+      sku: "WIDGET",
+      name: "Widget",
+      description: "",
+      barcode: "",
+      hsnCode: "1905",
+      categoryId: "",
+      unitId: unit.id,
+      taxRateId: gst18.id,
+      purchasePrice: 60,
+      sellingPrice: 100,
+      mrp: 0,
+      isStockTracked: true,
+      openingQuantity: 60000,
+      openingRate: 60,
+      minStockLevel: 0,
+    } satisfies ProductInput,
+  });
+
+  const customer = await createParty({
+    ...base,
+    kind: "CUSTOMER",
+    input: {
+      name: "Sharma Provision Store",
+      phone: "",
+      email: "",
+      gstin: "29AABCS1429B1ZX",
+      pan: "",
+      addressLine1: "",
+      city: "",
+      stateCode: "29",
+      pincode: "",
+      creditDays: 30,
+      creditLimit: 10000000,
+      openingBalance: 0,
+      openingNature: "DEBIT",
+      notes: "",
+    } satisfies CustomerInput,
+  });
+
+  const supplierBase = {
+    phone: "",
+    email: "",
+    pan: "",
+    addressLine1: "",
+    city: "",
+    stateCode: "29",
+    pincode: "",
+    creditDays: 30,
+    openingBalance: 0,
+    openingNature: "CREDIT" as const,
+    notes: "",
+  };
+
+  const supplier = await createParty({
+    ...base,
+    kind: "SUPPLIER",
+    input: {
+      ...supplierBase,
+      name: "Metro Wholesale",
+      gstin: "29AABCM4567N1Z8",
+    } satisfies SupplierInput,
+  });
+
+  const otherSupplier = await createParty({
+    ...base,
+    kind: "SUPPLIER",
+    input: {
+      ...supplierBase,
+      name: "Krishna Traders",
+      gstin: "29AABCK7654P1Z3",
+    } satisfies SupplierInput,
+  });
+
+  const categories = await listExpenseCategories(result.companyId);
+  const rent = categories.find((entry) => entry.name === "Rent");
+  if (!rent) throw new Error("Provisioning did not seed categories");
+
+  return {
+    ...base,
+    fiscalYearId: year.id,
+    productId: product.id,
+    customerId: customer.id,
+    supplierId: supplier.id,
+    otherSupplierId: otherSupplier.id,
+    rentCategoryId: rent.id,
+  };
+}
+
+async function sell(fixture: Fixture, quantity: number, date = IN_YEAR) {
+  return createSale({
+    companyId: fixture.companyId,
+    userId: fixture.userId,
+    actorEmail: fixture.actorEmail,
+    branchId: null,
+    input: {
+      customerId: fixture.customerId,
+      invoiceDate: date,
+      paymentMode: "BANK",
+      placeOfSupply: "",
+      priceIncludesTax: false,
+      notes: "",
+      lines: [
+        {
+          productId: fixture.productId,
+          description: "",
+          quantity,
+          rate: 100,
+          discountPercent: 0,
+        },
+      ],
+    } satisfies SaleInput,
+  });
+}
+
+async function buy(
+  fixture: Fixture,
+  quantity: number,
+  options: {
+    date?: string;
+    mode?: "CASH" | "CREDIT";
+    supplierId?: string;
+  } = {},
+) {
+  return createPurchase({
+    companyId: fixture.companyId,
+    userId: fixture.userId,
+    actorEmail: fixture.actorEmail,
+    branchId: null,
+    input: {
+      supplierId: options.supplierId ?? fixture.supplierId,
+      supplierBillNo: uniqueSlug("SB").toUpperCase(),
+      billDate: options.date ?? IN_YEAR,
+      paymentMode: options.mode ?? "CREDIT",
+      priceIncludesTax: false,
+      claimInputCredit: true,
+      notes: "",
+      lines: [
+        {
+          productId: fixture.productId,
+          description: "",
+          quantity,
+          rate: 50,
+          discountPercent: 0,
+        },
+      ],
+    } satisfies PurchaseInput,
+  });
+}
+
+async function spend(fixture: Fixture, overrides: Partial<ExpenseInput> = {}) {
+  return createExpense({
+    companyId: fixture.companyId,
+    userId: fixture.userId,
+    actorEmail: fixture.actorEmail,
+    branchId: null,
+    input: {
+      categoryId: fixture.rentCategoryId,
+      expenseDate: IN_YEAR,
+      paymentMode: "CASH",
+      supplierId: "",
+      payeeName: "Landlord",
+      amount: 5000,
+      taxPercent: 0,
+      amountIncludesTax: true,
+      claimInputCredit: false,
+      isCapitalExpenditure: false,
+      assetName: "",
+      assetUsefulLifeMonths: 60,
+      referenceNo: "",
+      notes: "",
+      ...overrides,
+    } satisfies ExpenseInput,
+  });
+}
+
+async function pay(fixture: Fixture, overrides: Partial<PaymentInput> = {}) {
+  return createPayment({
+    companyId: fixture.companyId,
+    userId: fixture.userId,
+    actorEmail: fixture.actorEmail,
+    input: {
+      kind: "SUPPLIER",
+      partyId: fixture.supplierId,
+      date: IN_YEAR,
+      paymentMode: "CASH",
+      amount: 15000,
+      referenceNo: "",
+      notes: "",
+      allocations: [],
+      ...overrides,
+    } satisfies PaymentInput,
+  });
+}
+
+const paperFor = async (fixture: Fixture) => {
+  const paper = await getTaxWorkingPaper({
+    companyId: fixture.companyId,
+    fiscalYearId: fixture.fiscalYearId,
+  });
+  if (!paper) throw new Error("No working paper was produced");
+  return paper;
+};
+
+beforeAll(async () => {
+  await ensurePlatformData();
+}, 60_000);
+
+afterAll(async () => {
+  for (const companyId of createdCompanies) {
+    await purgeTestCompany(companyId).catch(() => undefined);
+  }
+  await purgeTestUsers(createdEmails);
+  await disconnectTestDb();
+});
+
+describe("the computation starts from the books", () => {
+  it("uses the profit the statements show, not one of its own", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 100);
+    await spend(fixture);
+
+    const paper = await paperFor(fixture);
+    const statements = await getFinancialStatements({
+      companyId: fixture.companyId,
+      from: paper.fiscalYear.from,
+      to: paper.fiscalYear.to,
+    });
+
+    // If these two ever disagree, one of the two reports is lying about the
+    // same underlying entries.
+    expect(paper.bookNetProfit).toBe(statements.profitAndLoss.netProfit);
+    expect(paper.turnover).toBe(statements.trading.revenueTotal);
+  });
+
+  it("takes turnover net of GST", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 100); // ₹10,000 plus ₹1,800 of GST
+
+    const paper = await paperFor(fixture);
+    expect(paper.turnover).toBe(toStorageString(10_000));
+  });
+
+  it("drops a voided invoice out of turnover", async () => {
+    const fixture = await createCompany();
+    const sale = await sell(fixture, 100);
+    await sell(fixture, 40);
+
+    const before = await paperFor(fixture);
+    await voidSale({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      saleId: sale.id,
+      reason: "Raised against the wrong customer",
+    });
+    const after = await paperFor(fixture);
+
+    expect(Number(after.turnover)).toBe(Number(before.turnover) - 10_000);
+  });
+
+  it("shows the adjustment for depreciation in both directions", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await spend(fixture, {
+      amount: 100_000,
+      paymentMode: "BANK",
+      isCapitalExpenditure: true,
+      assetName: "Chest freezer",
+      payeeName: "Cool Systems",
+    });
+
+    const paper = await paperFor(fixture);
+    const labels = paper.computation.map((line) => line.label);
+
+    expect(labels).toContain("Add: depreciation charged in the books");
+    expect(labels).toContain("Less: depreciation under the Income-tax Act");
+
+    // The Act's charge is 15% on plant and machinery, and the freezer was
+    // bought with more than 180 days of the year left.
+    expect(paper.depreciation.depreciation).toBe(toStorageString(15_000));
+
+    const profit = Number(paper.bookNetProfit);
+    const book = Number(paper.bookDepreciation);
+    const act = Number(paper.depreciation.depreciation);
+    expect(Number(paper.taxableIncome)).toBeCloseTo(profit + book - act, 2);
+  });
+
+  it("reports a loss as a loss rather than flooring it at nil", async () => {
+    // A statement has to add up. A year that spent more than it earned has a
+    // negative figure at the bottom, and quietly clamping it turns three lines
+    // that should reconcile into three that do not.
+    const fixture = await createCompany();
+    await sell(fixture, 10); // ₹1,000 of turnover
+    await spend(fixture, { amount: 60_000, paymentMode: "BANK" });
+
+    const paper = await paperFor(fixture);
+    expect(paper.loss).toBe(true);
+    expect(Number(paper.taxableIncome)).toBeLessThan(0);
+
+    const total = paper.computation.at(-1);
+    expect(total?.label).toBe("Estimated loss from business");
+    expect(total?.note).toMatch(/carried forward/i);
+
+    const parts = paper.computation
+      .slice(0, -1)
+      .reduce((sum, line) => sum + Number(line.amount), 0);
+    expect(Number(paper.taxableIncome)).toBeCloseTo(parts, 2);
+
+    // There is no tax on a loss, and no refund either.
+    for (const regime of paper.regimes) {
+      expect(regime.normal.totalTax).toBe(toStorageString(0));
+    }
+    expect(paper.advanceTaxRequired).toBe(false);
+    expect(paper.advanceTaxBasis).toMatch(/in loss/i);
+  });
+
+  it("says nothing has been computed for a business that has done nothing", async () => {
+    const fixture = await createCompany();
+    const paper = await paperFor(fixture);
+
+    expect(paper.empty).toBe(true);
+    expect(paper.turnover).toBe(toStorageString(0));
+  });
+});
+
+describe("the assessment year", () => {
+  it("is the year after the financial year", async () => {
+    const fixture = await createCompany();
+    const paper = await paperFor(fixture);
+
+    const start = Number(paper.fiscalYear.from.slice(0, 4));
+    expect(paper.assessmentYear).toBe(
+      `${start + 1}-${String((start + 2) % 100).padStart(2, "0")}`,
+    );
+    expect(paper.ratesKnown).toBe(true);
+  });
+
+  it("says out loud when the rates were carried forward", async () => {
+    const fixture = await createCompany();
+    const paper = await paperFor(fixture);
+
+    // The Finance Act for the year in progress has not been entered, so the
+    // figures are computed on last year's rates and marked as such.
+    if (paper.ratesProvisional) {
+      expect(paper.basis).toMatch(/carried forward/i);
+    } else {
+      expect(paper.basis).toMatch(/Finance Act/i);
+    }
+  });
+});
+
+describe("cash paid above the section 40A(3) limit", () => {
+  it("finds a single payment over the limit", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await pay(fixture, { amount: 15_000 });
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.cashPayments).toHaveLength(1);
+    expect(paper.flagged.cashPayments[0]?.partyName).toBe("Metro Wholesale");
+    expect(paper.flagged.cashPaymentsTotal).toBe(toStorageString(15_000));
+  });
+
+  it("adds up a day rather than looking at vouchers one at a time", async () => {
+    // Three payments of ₹4,000 to the same supplier on the same day are caught;
+    // splitting a payment to stay under the line is the thing the aggregation
+    // exists to defeat.
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await pay(fixture, { amount: 4_000 });
+    await pay(fixture, { amount: 4_000 });
+    await pay(fixture, { amount: 4_000 });
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.cashPayments).toHaveLength(1);
+    expect(paper.flagged.cashPayments[0]?.amount).toBe(toStorageString(12_000));
+    expect(paper.flagged.cashPayments[0]?.vouchers).toHaveLength(3);
+  });
+
+  it("keeps different people and different days apart", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    // ₹8,000 each to two suppliers on one day, and ₹8,000 again the next.
+    // Nothing here reaches the limit for one person on one day.
+    await pay(fixture, { amount: 8_000 });
+    await pay(fixture, { amount: 8_000, partyId: fixture.otherSupplierId });
+    await pay(fixture, { amount: 8_000, date: LATER_IN_YEAR });
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.cashPayments).toHaveLength(0);
+  });
+
+  it("ignores money that did not move in cash", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await pay(fixture, { amount: 90_000, paymentMode: "BANK" });
+    await pay(fixture, { amount: 90_000, paymentMode: "UPI" });
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.cashPayments).toHaveLength(0);
+  });
+
+  it("ignores drawings, which are not expenditure at all", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await pay(fixture, { kind: "DRAWINGS", partyId: "", amount: 50_000 });
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.cashPayments).toHaveLength(0);
+  });
+
+  it("catches a bill settled in cash at the counter", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await buy(fixture, 400, { mode: "CASH" }); // ₹20,000 plus GST
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.cashPayments).toHaveLength(1);
+    expect(paper.flagged.cashPayments[0]?.amount).toBe(toStorageString(23_600));
+  });
+
+  it("keeps cash spent on an asset out of the disallowance", async () => {
+    // A cash purchase of an asset is not disallowed as expenditure — it stops
+    // counting towards the cost for depreciation instead, which is a different
+    // consequence and belongs in a different place.
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await spend(fixture, {
+      amount: 60_000,
+      isCapitalExpenditure: true,
+      assetName: "Delivery scooter",
+      payeeName: "Ace Motors",
+    });
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.cashPayments).toHaveLength(0);
+    expect(paper.flagged.cashCapitalPaymentsTotal).toBe(
+      toStorageString(60_000),
+    );
+  });
+
+  it("widens the income when the flagged items are disallowed", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await pay(fixture, { amount: 25_000 });
+
+    const paper = await paperFor(fixture);
+    expect(Number(paper.taxableIncomeWithDisallowances)).toBeGreaterThan(
+      Number(paper.taxableIncome),
+    );
+    // And the tax follows it, in both regimes.
+    for (const regime of paper.regimes) {
+      expect(regime.withDisallowances).not.toBeNull();
+      expect(
+        Number(regime.withDisallowances?.totalTax ?? 0),
+      ).toBeGreaterThanOrEqual(Number(regime.normal.totalTax));
+    }
+  });
+});
+
+describe("depreciation under the Act", () => {
+  it("puts an asset in a block and rates it", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await spend(fixture, {
+      amount: 80_000,
+      paymentMode: "BANK",
+      isCapitalExpenditure: true,
+      assetName: "Billing computer",
+      payeeName: "Tech Bazaar",
+    });
+
+    const paper = await paperFor(fixture);
+    expect(paper.depreciation.blocks).toHaveLength(1);
+
+    const block = paper.depreciation.blocks[0];
+    // "Rent" is the category, so the name is what identifies it — and a
+    // computer is depreciated at 40%.
+    expect(block?.ratePercent).toBe(40);
+    expect(block?.depreciation).toBe(toStorageString(32_000));
+    expect(block?.assets[0]?.rateInferred).toBe(true);
+  });
+
+  it("charges half the rate on an asset bought late in the year", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await spend(fixture, {
+      expenseDate: "2027-02-01",
+      amount: 100_000,
+      paymentMode: "BANK",
+      isCapitalExpenditure: true,
+      assetName: "Chest freezer",
+      payeeName: "Cool Systems",
+    });
+
+    const paper = await paperFor(fixture);
+    expect(paper.depreciation.depreciation).toBe(toStorageString(7_500));
+    expect(paper.depreciation.blocks[0]?.assets[0]?.halfRate).toBe(true);
+  });
+
+  it("has nothing to show when there are no assets", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+
+    const paper = await paperFor(fixture);
+    expect(paper.depreciation.blocks).toHaveLength(0);
+    expect(paper.depreciation.depreciation).toBe(toStorageString(0));
+  });
+});
+
+describe("section 44AD and the audit threshold", () => {
+  it("is available to a proprietor and computes both rates", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 1000); // ₹1,00,000 of turnover, banked
+
+    const paper = await paperFor(fixture);
+    expect(paper.presumptive.eligible).toBe(true);
+    expect(paper.presumptive.incomeAtFullRate).toBe(toStorageString(8_000));
+    // Everything came in through the bank, so the whole of it is at 6%.
+    expect(paper.presumptive.incomeAtSplitRate).toBe(toStorageString(6_000));
+  });
+
+  it("is closed to a limited liability partnership", async () => {
+    const fixture = await createCompany("LLP");
+    await sell(fixture, 1000);
+
+    const paper = await paperFor(fixture);
+    expect(paper.assessee).toBe("LLP");
+    expect(paper.presumptive.eligible).toBe(false);
+    expect(paper.regimes.every((regime) => regime.presumptive === null)).toBe(
+      true,
+    );
+  });
+
+  it("taxes a partnership firm at a flat rate with no regime choice", async () => {
+    const fixture = await createCompany("PARTNERSHIP");
+    await sell(fixture, 5000);
+
+    const paper = await paperFor(fixture);
+    expect(paper.assessee).toBe("FIRM");
+    expect(paper.regimeChoice).toBe(false);
+    expect(paper.regimes).toHaveLength(1);
+    expect(paper.regimes[0]?.normal.flatRatePercent).toBe(30);
+  });
+
+  it("offers a proprietor both regimes, cheapest first", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 5000);
+
+    const paper = await paperFor(fixture);
+    expect(paper.regimeChoice).toBe(true);
+    expect(paper.regimes.map((regime) => regime.regime).sort()).toEqual([
+      "NEW",
+      "OLD",
+    ]);
+    expect(Number(paper.regimes[0]?.normal.totalTax)).toBeLessThanOrEqual(
+      Number(paper.regimes[1]?.normal.totalTax),
+    );
+  });
+
+  it("measures the cash share from the ledger, not from the documents", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await pay(fixture, { amount: 20_000, paymentMode: "CASH" });
+    await pay(fixture, { amount: 60_000, paymentMode: "BANK" });
+
+    const paper = await paperFor(fixture);
+    expect(Number(paper.cashMix.cashPayments)).toBeGreaterThanOrEqual(20_000);
+    expect(Number(paper.cashMix.bankPayments)).toBeGreaterThanOrEqual(60_000);
+    expect(paper.cashMix.cashPaymentSharePercent).toBeGreaterThan(0);
+    expect(paper.cashMix.cashPaymentSharePercent).toBeLessThan(100);
+  });
+
+  it("leaves the opening balance out of the year's receipts", async () => {
+    // Money that was in the drawer when the year opened was not received
+    // during it. Counting it would put a shop that banks everything over the
+    // 5% cash line and cost it the relaxed ceilings it is entitled to.
+    const fixture = await createCompany();
+    await sell(fixture, 500); // banked
+
+    const paper = await paperFor(fixture);
+    expect(paper.cashMix.cashReceipts).toBe(toStorageString(0));
+    expect(paper.cashMix.cashReceiptSharePercent).toBe(0);
+  });
+
+  it("does not require an audit on a small turnover", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 1000);
+
+    const paper = await paperFor(fixture);
+    expect(paper.audit.required).toBe(false);
+    // Nothing moved in cash this year, so the ₹10 crore relaxation applies
+    // rather than the ordinary ₹1 crore limit.
+    expect(paper.audit.lowCash).toBe(true);
+    expect(paper.audit.reason).toMatch(/₹10 crore limit applies/);
+  });
+});
+
+describe("bills left unpaid", () => {
+  it("lists a bill still outstanding past the time limit", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await buy(fixture, 200, { date: "2026-04-10" });
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.unpaidBills.length).toBeGreaterThan(0);
+    expect(paper.flagged.unpaidBills[0]?.supplierName).toBe("Metro Wholesale");
+    expect(paper.flagged.unpaidBills[0]?.daysAtYearEnd).toBeGreaterThan(45);
+  });
+
+  it("says nothing about a bill that was paid", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await buy(fixture, 200, { date: "2026-04-10", mode: "CASH" });
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.unpaidBills).toHaveLength(0);
+  });
+});
+
+describe("advance tax", () => {
+  it("schedules four instalments on the prescribed dates", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 20_000); // enough profit to owe something
+
+    const paper = await paperFor(fixture);
+    expect(paper.advanceTax).toHaveLength(4);
+    expect(paper.advanceTax.map((row) => row.cumulativePercent)).toEqual([
+      15, 45, 75, 100,
+    ]);
+
+    const start = Number(paper.fiscalYear.from.slice(0, 4));
+    expect(paper.advanceTax[0]?.dueDate).toBe(`${start}-06-15`);
+    expect(paper.advanceTax[3]?.dueDate).toBe(`${start + 1}-03-15`);
+  });
+
+  it("is not required where there is barely any profit", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 10);
+
+    const paper = await paperFor(fixture);
+    expect(paper.advanceTaxRequired).toBe(false);
+  });
+});
+
+describe("tenant isolation", () => {
+  it("never reads another company's payments or assets", async () => {
+    const [mine, theirs] = await Promise.all([
+      createCompany(),
+      createCompany(),
+    ]);
+
+    await sell(mine, 100);
+    await sell(theirs, 900);
+    await pay(theirs, { amount: 45_000 });
+    await spend(theirs, {
+      amount: 200_000,
+      paymentMode: "BANK",
+      isCapitalExpenditure: true,
+      assetName: "Their delivery van",
+      payeeName: "Ace Motors",
+    });
+
+    const paper = await paperFor(mine);
+    expect(paper.turnover).toBe(toStorageString(10_000));
+    expect(paper.flagged.cashPayments).toHaveLength(0);
+    expect(paper.depreciation.blocks).toHaveLength(0);
+
+    const other = await paperFor(theirs);
+    expect(other.turnover).toBe(toStorageString(90_000));
+    expect(other.flagged.cashPayments).toHaveLength(1);
+    expect(other.depreciation.blocks).toHaveLength(1);
+  });
+
+  it("refuses a fiscal year that belongs to somebody else", async () => {
+    const [mine, theirs] = await Promise.all([
+      createCompany(),
+      createCompany(),
+    ]);
+    await sell(theirs, 900);
+
+    // An id is not a permission. Asking for another tenant's year returns
+    // nothing rather than that tenant's figures.
+    const paper = await getTaxWorkingPaper({
+      companyId: mine.companyId,
+      fiscalYearId: theirs.fiscalYearId,
+    });
+    expect(paper).toBeNull();
+  });
+});

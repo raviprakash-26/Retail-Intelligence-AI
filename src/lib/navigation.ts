@@ -192,6 +192,14 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         status: "ready",
       },
       {
+        label: "Income tax",
+        href: "/app/tax",
+        icon: "Calculator",
+        permission: "tax.view",
+        feature: FEATURE.TAX_PREPARATION,
+        status: "ready",
+      },
+      {
         label: "Reports",
         href: "/app/reports",
         icon: "FileSpreadsheet",
