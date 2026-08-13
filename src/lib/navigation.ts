@@ -234,8 +234,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: "MessageSquareText",
         permission: "ai.accountant",
         feature: FEATURE.AI_ACCOUNTANT,
-        status: "planned",
-        phase: 20,
+        status: "ready",
       },
       {
         label: "AI Auditor",
