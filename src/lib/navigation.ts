@@ -244,6 +244,14 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         feature: FEATURE.AI_AUDITOR,
         status: "ready",
       },
+      {
+        label: "AI Advisor",
+        href: "/app/ai/advisor",
+        icon: "Lightbulb",
+        permission: "ai.advisor",
+        feature: FEATURE.AI_ADVISOR,
+        status: "ready",
+      },
     ],
   },
   {

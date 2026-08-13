@@ -82,6 +82,12 @@ export type AnalyticsReport = {
   revenue: Movement;
   grossProfit: Movement;
   netProfit: Movement;
+  /**
+   * What it cost to run the shop, as the profit and loss account states it —
+   * not gross profit less net profit, which would fold any other income into
+   * the costs and say something false about both.
+   */
+  operatingExpenses: Movement;
   bills: { current: number; previous: number; changePercent: number | null };
   averageBill: Movement;
 
@@ -362,6 +368,10 @@ export async function getAnalytics(params: {
     netProfit: movement(
       netProfit,
       money(previousStatements.profitAndLoss.netProfit),
+    ),
+    operatingExpenses: movement(
+      money(statements.profitAndLoss.expensesTotal),
+      money(previousStatements.profitAndLoss.expensesTotal),
     ),
     bills: {
       current: currentBills,

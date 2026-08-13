@@ -68,8 +68,13 @@ export type ForecastReport = {
 /** Half a year of weeks is enough to see a trend without chasing last year's. */
 const HISTORY_WEEKS = 26;
 
-/** Far enough to be useful, near enough that the band is still readable. */
-const HORIZON_WEEKS = 8;
+/**
+ * Far enough to be useful, near enough that the band is still readable.
+ *
+ * Exported so the advisor looks the same distance ahead as the forecasting
+ * page: a warning about a week that page does not show would be unverifiable.
+ */
+export const HORIZON_WEEKS = 8;
 
 const DAY = 86_400_000;
 

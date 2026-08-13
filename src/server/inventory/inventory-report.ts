@@ -86,23 +86,18 @@ function statusOf(quantity: Decimal, minimum: Decimal): StockRow["status"] {
   return "OK";
 }
 
-export async function getStockSummary(params: {
-  companyId: string;
-  query?: string;
-  /** "low" narrows to what needs reordering; "out" to what has run out. */
-  filter?: "low" | "out";
-  page?: number;
-}): Promise<StockSummary> {
-  const page = Math.max(1, params.page ?? 1);
-  const query = params.query?.trim() ?? "";
-
-  // Every tracked product is loaded, and the search is applied after the totals
-  // are struck. The headline value is a fact about the business, not about
-  // whatever somebody has typed in the search box — a figure that moves when
-  // you filter a list is one nobody can quote.
+/**
+ * Where every tracked product stands, before anything is filtered or paged.
+ *
+ * Exported because the advisor asks the same question of the same rows — what
+ * is sitting still, what is about to run out — and a second implementation of
+ * "what is in stock" that drifted from this one would be worse than no advice
+ * at all.
+ */
+export async function stockRows(companyId: string): Promise<StockRow[]> {
   const products = await prisma.product.findMany({
     where: {
-      companyId: params.companyId,
+      companyId,
       isStockTracked: true,
       archivedAt: null,
     },
@@ -125,7 +120,7 @@ export async function getStockSummary(params: {
   const lastMovements = await prisma.inventoryMovement.groupBy({
     by: ["productId"],
     where: {
-      companyId: params.companyId,
+      companyId,
       productId: { in: products.map((product) => product.id) },
     },
     _max: { movementDate: true },
@@ -134,7 +129,7 @@ export async function getStockSummary(params: {
     lastMovements.map((row) => [row.productId, row._max.movementDate]),
   );
 
-  const all: StockRow[] = products.map((product) => {
+  return products.map((product) => {
     // A product can hold stock at several branches; the summary is the whole
     // business, so the branch positions are added together.
     const quantity = add(
@@ -163,6 +158,23 @@ export async function getStockSummary(params: {
       lastMovementAt: lastByProduct.get(product.id) ?? null,
     };
   });
+}
+
+export async function getStockSummary(params: {
+  companyId: string;
+  query?: string;
+  /** "low" narrows to what needs reordering; "out" to what has run out. */
+  filter?: "low" | "out";
+  page?: number;
+}): Promise<StockSummary> {
+  const page = Math.max(1, params.page ?? 1);
+  const query = params.query?.trim() ?? "";
+
+  // Every tracked product is loaded, and the search is applied after the totals
+  // are struck. The headline value is a fact about the business, not about
+  // whatever somebody has typed in the search box — a figure that moves when
+  // you filter a list is one nobody can quote.
+  const all = await stockRows(params.companyId);
 
   const needle = query.toLowerCase();
   const matches = (row: StockRow) =>
