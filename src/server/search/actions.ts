@@ -3,7 +3,10 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { getCompanyContext } from "@/server/auth/context";
-import { FISCAL_YEAR_COOKIE, listFiscalYears } from "@/server/fiscal/fiscal-service";
+import {
+  FISCAL_YEAR_COOKIE,
+  listFiscalYears,
+} from "@/server/fiscal/fiscal-service";
 import { markRead } from "@/server/notifications/notification-service";
 import {
   globalSearch,
@@ -30,7 +33,9 @@ function searchableKinds(
   return kinds;
 }
 
-export async function globalSearchAction(query: string): Promise<SearchResult[]> {
+export async function globalSearchAction(
+  query: string,
+): Promise<SearchResult[]> {
   const context = await getCompanyContext();
   if (!context) return [];
 

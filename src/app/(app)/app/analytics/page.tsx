@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { AnalyticsView } from "@/components/analytics/analytics-view";
 import { MasterDataHeader } from "@/components/master-data/page-header";
+import { FEATURE } from "@/lib/billing/plans";
+import { PlanLocked } from "@/components/billing/plan-locked";
+import { featureGate } from "@/server/billing/guards";
 import { requirePermission } from "@/server/auth/context";
 import {
   FISCAL_YEAR_COOKIE,
@@ -29,6 +32,21 @@ export default async function AnalyticsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const context = await requirePermission("analytics.view");
+
+  // The navigation marks this when a plan does not include it, but marking is
+  // presentation. Anybody can type the URL, so the page asks as well.
+  const gate = await featureGate(context.company.id, FEATURE.ANALYTICS);
+  if (!gate.included) {
+    return (
+      <div className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
+        <PlanLocked
+          feature={FEATURE.ANALYTICS}
+          planName={gate.entitlements.planName}
+          availableOn={gate.availableOn}
+        />
+      </div>
+    );
+  }
   const params = await searchParams;
   const cookieStore = await cookies();
 

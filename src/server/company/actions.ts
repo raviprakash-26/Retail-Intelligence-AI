@@ -25,6 +25,7 @@ import {
   zodFieldErrors,
   type ActionResult,
 } from "@/server/auth/action-result";
+import { billingRefusal } from "@/server/billing/guards";
 import {
   assertPermission,
   getAuthSession,
@@ -188,6 +189,11 @@ export async function createBranchAction(
   if (originError) return originError;
 
   const context = await assertPermission("branches.manage");
+
+  const refusal = await billingRefusal(context.company.id, {
+    limit: "branches",
+  });
+  if (refusal) return refusal;
   const parsed = branchSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the details below.", {
@@ -296,6 +302,9 @@ export async function inviteMemberAction(
   if (originError) return originError;
 
   const context = await assertPermission("users.manage");
+
+  const refusal = await billingRefusal(context.company.id, { limit: "users" });
+  if (refusal) return refusal;
   const parsed = inviteMemberSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the details below.", {

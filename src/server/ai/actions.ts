@@ -7,6 +7,8 @@ import {
   ok,
   type ActionResult,
 } from "@/server/auth/action-result";
+import { FEATURE } from "@/lib/billing/plans";
+import { billingRefusal } from "@/server/billing/guards";
 import { assertPermission } from "@/server/auth/context";
 import { resolveFiscalYear } from "@/server/fiscal/fiscal-service";
 import {
@@ -37,6 +39,12 @@ export async function askAccountantAction(
   }
 
   const context = await assertPermission("ai.accountant");
+
+  const refusal = await billingRefusal(context.company.id, {
+    feature: FEATURE.AI_ACCOUNTANT,
+    limit: "aiMessagesPerMonth",
+  });
+  if (refusal) return refusal;
 
   const question = String(formData.get("question") ?? "").trim();
   if (!question) {

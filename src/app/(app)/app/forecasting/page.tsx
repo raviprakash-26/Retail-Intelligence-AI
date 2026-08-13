@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { ForecastView } from "@/components/forecast/forecast-view";
 import { MasterDataHeader } from "@/components/master-data/page-header";
+import { FEATURE } from "@/lib/billing/plans";
+import { PlanLocked } from "@/components/billing/plan-locked";
+import { featureGate } from "@/server/billing/guards";
 import { requirePermission } from "@/server/auth/context";
 import { getForecast } from "@/server/forecast/forecast-service";
 
@@ -19,6 +22,21 @@ export const metadata: Metadata = {
  */
 export default async function ForecastingPage() {
   const context = await requirePermission("forecasting.view");
+
+  // The navigation marks this when a plan does not include it, but marking is
+  // presentation. Anybody can type the URL, so the page asks as well.
+  const gate = await featureGate(context.company.id, FEATURE.FORECASTING);
+  if (!gate.included) {
+    return (
+      <div className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
+        <PlanLocked
+          feature={FEATURE.FORECASTING}
+          planName={gate.entitlements.planName}
+          availableOn={gate.availableOn}
+        />
+      </div>
+    );
+  }
   const report = await getForecast({ companyId: context.company.id });
 
   return (

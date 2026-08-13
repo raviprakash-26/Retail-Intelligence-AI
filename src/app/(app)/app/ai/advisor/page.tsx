@@ -3,6 +3,9 @@ import { cookies } from "next/headers";
 import { AdvisorView } from "@/components/advisor/advisor-view";
 import { MasterDataHeader } from "@/components/master-data/page-header";
 import { isRangeKey, type RangeKey } from "@/lib/analytics/range";
+import { FEATURE } from "@/lib/billing/plans";
+import { PlanLocked } from "@/components/billing/plan-locked";
+import { featureGate } from "@/server/billing/guards";
 import { requirePermission } from "@/server/auth/context";
 import {
   FISCAL_YEAR_COOKIE,
@@ -29,6 +32,21 @@ export default async function AdvisorPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const context = await requirePermission("ai.advisor");
+
+  // The navigation marks this when a plan does not include it, but marking is
+  // presentation. Anybody can type the URL, so the page asks as well.
+  const gate = await featureGate(context.company.id, FEATURE.AI_ADVISOR);
+  if (!gate.included) {
+    return (
+      <div className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
+        <PlanLocked
+          feature={FEATURE.AI_ADVISOR}
+          planName={gate.entitlements.planName}
+          availableOn={gate.availableOn}
+        />
+      </div>
+    );
+  }
   const params = await searchParams;
   const cookieStore = await cookies();
 

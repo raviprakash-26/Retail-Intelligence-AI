@@ -5,8 +5,17 @@ import {
   LIMIT_LABEL,
   type Entitlements,
 } from "@/lib/billing/entitlements";
-import type { FeatureKey, PlanLimits } from "@/lib/billing/plans";
+import {
+  PLAN_DEFINITIONS,
+  type FeatureKey,
+  type PlanLimits,
+} from "@/lib/billing/plans";
 import { getCompanyContext, type CompanyContext } from "@/server/auth/context";
+import {
+  ACTION_ERROR,
+  fail,
+  type ActionResult,
+} from "@/server/auth/action-result";
 import { unauthorized } from "next/navigation";
 import {
   entitlementsFor,
@@ -65,6 +74,8 @@ export class LimitReachedError extends Error {
 export type FeatureGate = {
   included: boolean;
   entitlements: Entitlements;
+  /** The cheapest plan that has it, for the locked page to name. */
+  availableOn: string | null;
 };
 
 /** For a page: whether to render the module or the explanation. */
@@ -73,7 +84,29 @@ export async function featureGate(
   feature: FeatureKey,
 ): Promise<FeatureGate> {
   const entitlements = await entitlementsFor(companyId);
-  return { included: entitlements.features.has(feature), entitlements };
+  return {
+    included: entitlements.features.has(feature),
+    entitlements,
+    availableOn: entitlements.features.has(feature)
+      ? null
+      : cheapestPlanWith(feature),
+  };
+}
+
+/**
+ * The least expensive plan that includes something.
+ *
+ * Read from the seed definitions rather than the database: this is a sentence
+ * on a locked page, and one more query on every gated page to render marketing
+ * copy is not worth it. A plan renamed in the admin panel shows its old name
+ * here until the definitions are updated — a small, visible inaccuracy in
+ * exchange for not querying, and never used for an entitlement decision.
+ */
+function cheapestPlanWith(feature: FeatureKey): string | null {
+  const candidates = PLAN_DEFINITIONS.filter((plan) =>
+    plan.features.includes(feature),
+  ).sort((a, b) => a.priceMinor - b.priceMinor);
+  return candidates[0]?.name ?? null;
 }
 
 /**
@@ -152,5 +185,53 @@ export function billingMessage(error: unknown): string | null {
   if (error instanceof FeatureNotIncludedError) return error.readable;
   if (error instanceof LimitReachedError) return error.readable;
   if (error instanceof SubscriptionReadOnlyError) return error.message;
+  return null;
+}
+
+/**
+ * The billing check a server action makes before it writes anything.
+ *
+ * Returns a failed `ActionResult` to render, or null to carry on — actions in
+ * this codebase do not throw for outcomes a form has to display, and "your
+ * plan does not include this" is an outcome rather than an exception.
+ *
+ * Checked in the order a person would ask: is this thing in the plan at all,
+ * is the subscription in a state where anything may be recorded, and is there
+ * room inside the allowance for one more.
+ */
+export async function billingRefusal(
+  companyId: string,
+  options: { feature?: FeatureKey; limit?: keyof PlanLimits } = {},
+): Promise<ActionResult<never> | null> {
+  const entitlements = await entitlementsFor(companyId);
+
+  if (options.feature && !entitlements.features.has(options.feature)) {
+    return fail(new FeatureNotIncludedError(options.feature).readable, {
+      code: ACTION_ERROR.FEATURE_NOT_INCLUDED,
+    });
+  }
+
+  if (entitlements.readOnly) {
+    return fail(
+      entitlements.readOnlyReason ??
+        "This subscription is not active. Everything already recorded stays readable and exportable.",
+      { code: ACTION_ERROR.SUBSCRIPTION_READ_ONLY },
+    );
+  }
+
+  if (options.limit) {
+    const usage = await getUsage(companyId);
+    const limit = entitlements.limits[options.limit];
+    const current = usage[options.limit as keyof typeof usage];
+    if (typeof current === "number" && !isWithinLimit(limit, current)) {
+      return fail(
+        new LimitReachedError(options.limit, limit, current).readable,
+        {
+          code: ACTION_ERROR.PLAN_LIMIT_REACHED,
+        },
+      );
+    }
+  }
+
   return null;
 }

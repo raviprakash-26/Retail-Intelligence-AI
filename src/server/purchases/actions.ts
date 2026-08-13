@@ -17,6 +17,7 @@ import {
   zodFieldErrors,
   type ActionResult,
 } from "@/server/auth/action-result";
+import { billingRefusal } from "@/server/billing/guards";
 import { assertPermission } from "@/server/auth/context";
 import {
   NoFiscalPeriodError,
@@ -42,7 +43,12 @@ import {
  */
 
 function revalidatePurchases(): void {
-  for (const path of ["/app", "/app/purchases", "/app/products", "/app/suppliers"]) {
+  for (const path of [
+    "/app",
+    "/app/purchases",
+    "/app/products",
+    "/app/suppliers",
+  ]) {
     revalidatePath(path);
   }
 }
@@ -68,13 +74,19 @@ function fromServiceError(error: unknown): ActionResult<never> {
   if (error instanceof MissingAccountError) {
     return fail(error.message, { code: "NO_ACCOUNT" });
   }
-  if (error instanceof PeriodClosedError || error instanceof NoFiscalPeriodError) {
+  if (
+    error instanceof PeriodClosedError ||
+    error instanceof NoFiscalPeriodError
+  ) {
     return fail(error.message, { code: "PERIOD_UNAVAILABLE" });
   }
   console.error("Purchase action failed", error);
-  return fail("Something went wrong. Nothing was recorded — please try again.", {
-    code: ACTION_ERROR.UNEXPECTED,
-  });
+  return fail(
+    "Something went wrong. Nothing was recorded — please try again.",
+    {
+      code: ACTION_ERROR.UNEXPECTED,
+    },
+  );
 }
 
 export async function createPurchaseAction(
@@ -84,6 +96,11 @@ export async function createPurchaseAction(
   if (originError) return originError;
 
   const context = await assertPermission("purchases.create");
+
+  const refusal = await billingRefusal(context.company.id, {
+    limit: "transactionsPerMonth",
+  });
+  if (refusal) return refusal;
   const parsed = purchaseSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the bill below.", {
@@ -115,6 +132,9 @@ export async function voidPurchaseAction(
   if (originError) return originError;
 
   const context = await assertPermission("purchases.void");
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const parsed = voidPurchaseSchema.safeParse(input);
   if (!parsed.success) {
     return fail("A reason is required.", {
@@ -172,8 +192,12 @@ export async function searchPurchasableProductsAction(
       ...(trimmed.length >= 1
         ? {
             OR: [
-              { name: { contains: trimmed, mode: Prisma.QueryMode.insensitive } },
-              { sku: { contains: trimmed, mode: Prisma.QueryMode.insensitive } },
+              {
+                name: { contains: trimmed, mode: Prisma.QueryMode.insensitive },
+              },
+              {
+                sku: { contains: trimmed, mode: Prisma.QueryMode.insensitive },
+              },
               { barcode: { contains: trimmed } },
             ],
           }

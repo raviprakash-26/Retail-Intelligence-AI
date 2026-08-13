@@ -44,6 +44,12 @@ export const ACTION_ERROR = {
   TOKEN_INVALID: "TOKEN_INVALID",
   NOT_AUTHENTICATED: "NOT_AUTHENTICATED",
   FORBIDDEN: "FORBIDDEN",
+  /** The plan does not include it. Distinct from FORBIDDEN, which is a role. */
+  FEATURE_NOT_INCLUDED: "FEATURE_NOT_INCLUDED",
+  /** The subscription has lapsed: nothing new may be posted. */
+  SUBSCRIPTION_READ_ONLY: "SUBSCRIPTION_READ_ONLY",
+  /** A numeric allowance on the plan is used up. */
+  PLAN_LIMIT_REACHED: "PLAN_LIMIT_REACHED",
   UNEXPECTED: "UNEXPECTED",
 } as const;
 

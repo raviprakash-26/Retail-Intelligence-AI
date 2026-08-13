@@ -14,6 +14,7 @@ import {
   zodFieldErrors,
   type ActionResult,
 } from "@/server/auth/action-result";
+import { billingRefusal } from "@/server/billing/guards";
 import { assertPermission } from "@/server/auth/context";
 import {
   NoFiscalPeriodError,
@@ -63,6 +64,9 @@ export async function createStockAdjustmentAction(
   if (originError) return originError;
 
   const context = await assertPermission("inventory.adjust");
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const parsed = stockAdjustmentSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the details below.", {

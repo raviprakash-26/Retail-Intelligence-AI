@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { AuditorView } from "@/components/auditor/auditor-view";
 import { MasterDataHeader } from "@/components/master-data/page-header";
+import { FEATURE } from "@/lib/billing/plans";
+import { PlanLocked } from "@/components/billing/plan-locked";
+import { featureGate } from "@/server/billing/guards";
 import { requirePermission } from "@/server/auth/context";
 import { getLatestAudit } from "@/server/auditor/audit-service";
 
@@ -19,6 +22,21 @@ export const metadata: Metadata = {
  */
 export default async function AuditorPage() {
   const context = await requirePermission("ai.auditor");
+
+  // The navigation marks this when a plan does not include it, but marking is
+  // presentation. Anybody can type the URL, so the page asks as well.
+  const gate = await featureGate(context.company.id, FEATURE.AI_AUDITOR);
+  if (!gate.included) {
+    return (
+      <div className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
+        <PlanLocked
+          feature={FEATURE.AI_AUDITOR}
+          planName={gate.entitlements.planName}
+          availableOn={gate.availableOn}
+        />
+      </div>
+    );
+  }
   const report = await getLatestAudit({ companyId: context.company.id });
 
   return (

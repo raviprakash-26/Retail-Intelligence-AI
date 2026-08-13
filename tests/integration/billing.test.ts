@@ -8,6 +8,7 @@ import {
   getEntitlements,
   getUsage,
 } from "@/server/billing/entitlement-service";
+import { billingRefusal } from "@/server/billing/guards";
 import {
   cancelSubscription,
   changePlan,
@@ -367,5 +368,97 @@ describe("per-business overrides", () => {
 
     const entitlements = await getEntitlements(companyId);
     expect(entitlements.limits.users).toBe(25);
+  }, 60_000);
+});
+
+describe("the gates an action passes through", () => {
+  it("lets an ordinary write through on a live subscription", async () => {
+    const { companyId } = await createCompany();
+    expect(
+      await billingRefusal(companyId, { limit: "transactionsPerMonth" }),
+    ).toBeNull();
+  }, 60_000);
+
+  it("refuses a write once the subscription has lapsed", async () => {
+    const { companyId } = await createCompany();
+    await prisma.subscription.update({
+      where: { companyId },
+      data: {
+        status: SubscriptionStatus.EXPIRED,
+        trialEndsAt: new Date(Date.now() - 30 * DAY),
+        currentPeriodEnd: new Date(Date.now() - 30 * DAY),
+      },
+    });
+
+    const refusal = await billingRefusal(companyId);
+    expect(refusal?.ok).toBe(false);
+    if (!refusal || refusal.ok) return;
+    expect(refusal.code).toBe("SUBSCRIPTION_READ_ONLY");
+    // And says, in the refusal itself, that the books are still there.
+    expect(refusal.message).toMatch(/still here|stays? readable|all here/i);
+  }, 60_000);
+
+  it("refuses a feature the plan does not include", async () => {
+    const { companyId } = await createCompany();
+    const refusal = await billingRefusal(companyId, {
+      feature: FEATURE.AI_AUDITOR,
+    });
+    expect(refusal?.ok).toBe(false);
+    if (!refusal || refusal.ok) return;
+    expect(refusal.code).toBe("FEATURE_NOT_INCLUDED");
+    // Names the thing, not the key.
+    expect(refusal.message).toContain("AI Auditor");
+    expect(refusal.message).not.toContain("ai.auditor");
+  }, 60_000);
+
+  it("refuses one more than the allowance, naming both numbers", async () => {
+    const { companyId } = await createCompany();
+    await prisma.subscription.update({
+      where: { companyId },
+      data: { limitOverrides: { users: 1 } },
+    });
+
+    const refusal = await billingRefusal(companyId, { limit: "users" });
+    expect(refusal?.ok).toBe(false);
+    if (!refusal || refusal.ok) return;
+    expect(refusal.code).toBe("PLAN_LIMIT_REACHED");
+    expect(refusal.message).toMatch(/1 team members/);
+  }, 60_000);
+
+  it("counts an invitation nobody has accepted as a seat", async () => {
+    // Otherwise a two-seat business invites twenty people and finds out on the
+    // day they all sign in.
+    const { companyId, userId } = await createCompany();
+    await prisma.verificationToken.create({
+      data: {
+        tokenHash: `test-${companyId}`,
+        purpose: "MEMBER_INVITATION",
+        email: "pending@example.com",
+        companyId,
+        expiresAt: new Date(Date.now() + 7 * DAY),
+      },
+    });
+
+    const usage = await getUsage(companyId);
+    expect(usage.users).toBe(2);
+    expect(userId).toBeTruthy();
+  }, 60_000);
+
+  it("checks the plan before it checks the allowance", async () => {
+    // Being told "you have used your 500 AI messages" on a plan that has none
+    // would be a strange way to learn the feature is not included.
+    const { companyId } = await createCompany();
+    await prisma.subscription.update({
+      where: { companyId },
+      data: { featureOverrides: { [FEATURE.AI_ACCOUNTANT]: false } },
+    });
+
+    const refusal = await billingRefusal(companyId, {
+      feature: FEATURE.AI_ACCOUNTANT,
+      limit: "aiMessagesPerMonth",
+    });
+    expect(refusal?.ok).toBe(false);
+    if (!refusal || refusal.ok) return;
+    expect(refusal.code).toBe("FEATURE_NOT_INCLUDED");
   }, 60_000);
 });

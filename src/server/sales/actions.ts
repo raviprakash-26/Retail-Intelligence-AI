@@ -17,6 +17,7 @@ import {
   zodFieldErrors,
   type ActionResult,
 } from "@/server/auth/action-result";
+import { billingRefusal } from "@/server/billing/guards";
 import { assertPermission } from "@/server/auth/context";
 import {
   NoFiscalPeriodError,
@@ -26,7 +27,12 @@ import {
   getRequestContext,
   isSameOrigin,
 } from "@/server/security/request-context";
-import { createSale, voidSale, SaleError, type PostedSale } from "./sale-service";
+import {
+  createSale,
+  voidSale,
+  SaleError,
+  type PostedSale,
+} from "./sale-service";
 
 /**
  * Sales actions.
@@ -38,7 +44,12 @@ import { createSale, voidSale, SaleError, type PostedSale } from "./sale-service
  */
 
 function revalidateSales(): void {
-  for (const path of ["/app", "/app/sales", "/app/products", "/app/customers"]) {
+  for (const path of [
+    "/app",
+    "/app/sales",
+    "/app/products",
+    "/app/customers",
+  ]) {
     revalidatePath(path);
   }
 }
@@ -61,7 +72,10 @@ function fromServiceError(error: unknown): ActionResult<never> {
       fieldErrors: error.field ? { [error.field]: error.message } : undefined,
     });
   }
-  if (error instanceof PeriodClosedError || error instanceof NoFiscalPeriodError) {
+  if (
+    error instanceof PeriodClosedError ||
+    error instanceof NoFiscalPeriodError
+  ) {
     return fail(error.message, { code: "PERIOD_UNAVAILABLE" });
   }
   console.error("Sales action failed", error);
@@ -78,6 +92,11 @@ export async function createSaleAction(
   if (originError) return originError;
 
   const context = await assertPermission("sales.create");
+
+  const refusal = await billingRefusal(context.company.id, {
+    limit: "transactionsPerMonth",
+  });
+  if (refusal) return refusal;
   const parsed = saleSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the invoice below.", {
@@ -111,6 +130,9 @@ export async function voidSaleAction(
   if (originError) return originError;
 
   const context = await assertPermission("sales.void");
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const parsed = voidSaleSchema.safeParse(input);
   if (!parsed.success) {
     return fail("A reason is required.", {
@@ -168,8 +190,12 @@ export async function searchSellableProductsAction(
       ...(trimmed.length >= 1
         ? {
             OR: [
-              { name: { contains: trimmed, mode: Prisma.QueryMode.insensitive } },
-              { sku: { contains: trimmed, mode: Prisma.QueryMode.insensitive } },
+              {
+                name: { contains: trimmed, mode: Prisma.QueryMode.insensitive },
+              },
+              {
+                sku: { contains: trimmed, mode: Prisma.QueryMode.insensitive },
+              },
               { barcode: { contains: trimmed } },
             ],
           }

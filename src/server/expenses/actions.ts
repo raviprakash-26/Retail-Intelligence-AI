@@ -14,6 +14,7 @@ import {
   zodFieldErrors,
   type ActionResult,
 } from "@/server/auth/action-result";
+import { billingRefusal } from "@/server/billing/guards";
 import { assertPermission } from "@/server/auth/context";
 import {
   NoFiscalPeriodError,
@@ -66,13 +67,19 @@ function fromServiceError(error: unknown): ActionResult<never> {
   if (error instanceof MissingAccountError) {
     return fail(error.message, { code: "NO_ACCOUNT" });
   }
-  if (error instanceof PeriodClosedError || error instanceof NoFiscalPeriodError) {
+  if (
+    error instanceof PeriodClosedError ||
+    error instanceof NoFiscalPeriodError
+  ) {
     return fail(error.message, { code: "PERIOD_UNAVAILABLE" });
   }
   console.error("Expense action failed", error);
-  return fail("Something went wrong. Nothing was recorded — please try again.", {
-    code: ACTION_ERROR.UNEXPECTED,
-  });
+  return fail(
+    "Something went wrong. Nothing was recorded — please try again.",
+    {
+      code: ACTION_ERROR.UNEXPECTED,
+    },
+  );
 }
 
 export async function createExpenseAction(
@@ -82,6 +89,11 @@ export async function createExpenseAction(
   if (originError) return originError;
 
   const context = await assertPermission("expenses.create");
+
+  const refusal = await billingRefusal(context.company.id, {
+    limit: "transactionsPerMonth",
+  });
+  if (refusal) return refusal;
   const parsed = expenseSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the details below.", {
@@ -113,6 +125,9 @@ export async function voidExpenseAction(
   if (originError) return originError;
 
   const context = await assertPermission("expenses.void");
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const parsed = voidExpenseSchema.safeParse(input);
   if (!parsed.success) {
     return fail("A reason is required.", {

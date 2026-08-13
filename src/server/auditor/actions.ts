@@ -8,6 +8,8 @@ import {
   ok,
   type ActionResult,
 } from "@/server/auth/action-result";
+import { FEATURE } from "@/lib/billing/plans";
+import { billingRefusal } from "@/server/billing/guards";
 import { assertPermission } from "@/server/auth/context";
 import { resolveFiscalYear } from "@/server/fiscal/fiscal-service";
 import {
@@ -42,6 +44,12 @@ export async function runAuditAction(): Promise<
   }
 
   const context = await assertPermission("audit.run");
+
+  const refusal = await billingRefusal(context.company.id, {
+    feature: FEATURE.AI_AUDITOR,
+  });
+  if (refusal) return refusal;
+
   const year = await resolveFiscalYear(context.company.id);
 
   const to = new Date();

@@ -111,6 +111,7 @@ export const entitlementsFor = cache(
 );
 
 export type UsageSnapshot = {
+  /** Active members plus invitations sent and not yet accepted. */
   users: number;
   branches: number;
   productsPerCompany: number;
@@ -140,21 +141,40 @@ export async function getUsage(
   );
   const month = { gte: periodStart, lt: periodEnd };
 
-  const [users, branches, products, sales, purchases, expenses, messages] =
-    await Promise.all([
-      prisma.membership.count({ where: { companyId, status: "ACTIVE" } }),
-      prisma.branch.count({ where: { companyId, isActive: true } }),
-      prisma.product.count({ where: { companyId, archivedAt: null } }),
-      prisma.sale.count({ where: { companyId, createdAt: month } }),
-      prisma.purchase.count({ where: { companyId, createdAt: month } }),
-      prisma.expense.count({ where: { companyId, createdAt: month } }),
-      prisma.aiMessage.count({
-        where: { companyId, role: "USER", createdAt: month },
-      }),
-    ]);
+  const [
+    members,
+    pendingInvitations,
+    branches,
+    products,
+    sales,
+    purchases,
+    expenses,
+    messages,
+  ] = await Promise.all([
+    prisma.membership.count({ where: { companyId, status: "ACTIVE" } }),
+    // An invitation is a seat somebody is about to take. Counting only
+    // accepted ones would let a business on a two-seat plan invite twenty
+    // people and be surprised on the day they all sign in.
+    prisma.verificationToken.count({
+      where: {
+        companyId,
+        purpose: "MEMBER_INVITATION",
+        consumedAt: null,
+        expiresAt: { gt: now },
+      },
+    }),
+    prisma.branch.count({ where: { companyId, isActive: true } }),
+    prisma.product.count({ where: { companyId, archivedAt: null } }),
+    prisma.sale.count({ where: { companyId, createdAt: month } }),
+    prisma.purchase.count({ where: { companyId, createdAt: month } }),
+    prisma.expense.count({ where: { companyId, createdAt: month } }),
+    prisma.aiMessage.count({
+      where: { companyId, role: "USER", createdAt: month },
+    }),
+  ]);
 
   return {
-    users,
+    users: members + pendingInvitations,
     branches,
     productsPerCompany: products,
     // What a shopkeeper would call a transaction: something they entered.

@@ -17,6 +17,7 @@ import {
   zodFieldErrors,
   type ActionResult,
 } from "@/server/auth/action-result";
+import { billingRefusal } from "@/server/billing/guards";
 import { assertPermission } from "@/server/auth/context";
 import {
   NoFiscalPeriodError,
@@ -101,6 +102,9 @@ export async function createReceiptAction(
   if (originError) return originError;
 
   const context = await assertPermission("receipts.create");
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const parsed = receiptSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the details below.", {
@@ -130,6 +134,9 @@ export async function createPaymentAction(
   if (originError) return originError;
 
   const context = await assertPermission("payments.create");
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const parsed = paymentSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the details below.", {
@@ -160,6 +167,9 @@ export async function voidReceiptAction(
   if (originError) return originError;
 
   const context = await assertPermission("receipts.void");
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const parsed = voidSettlementSchema.safeParse(input);
   if (!parsed.success) {
     return fail("A reason is required.", {
@@ -192,6 +202,9 @@ export async function voidPaymentAction(
   if (originError) return originError;
 
   const context = await assertPermission("payments.void");
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const parsed = voidSettlementSchema.safeParse(input);
   if (!parsed.success) {
     return fail("A reason is required.", {

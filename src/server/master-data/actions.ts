@@ -22,18 +22,19 @@ import {
   zodFieldErrors,
   type ActionResult,
 } from "@/server/auth/action-result";
+import { billingRefusal } from "@/server/billing/guards";
 import { assertPermission } from "@/server/auth/context";
 import {
   NoFiscalPeriodError,
   PeriodClosedError,
 } from "@/server/accounting/post-journal-entry";
-import { getRequestContext, isSameOrigin } from "@/server/security/request-context";
+import {
+  getRequestContext,
+  isSameOrigin,
+} from "@/server/security/request-context";
 import { MasterDataError } from "./errors";
 import { OpeningBalanceError } from "./opening-balance";
-import {
-  createEmployee,
-  updateEmployee,
-} from "./employee-service";
+import { createEmployee, updateEmployee } from "./employee-service";
 import {
   createParty,
   setPartyArchived,
@@ -102,7 +103,10 @@ function fromServiceError(error: unknown): ActionResult<never> {
   if (error instanceof OpeningBalanceError) {
     return fail(error.message, { code: error.code });
   }
-  if (error instanceof PeriodClosedError || error instanceof NoFiscalPeriodError) {
+  if (
+    error instanceof PeriodClosedError ||
+    error instanceof NoFiscalPeriodError
+  ) {
     return fail(error.message, { code: "PERIOD_UNAVAILABLE" });
   }
   console.error("Master data action failed", error);
@@ -117,11 +121,18 @@ function fromServiceError(error: unknown): ActionResult<never> {
 
 export async function createProductAction(
   input: ProductInput,
-): Promise<ActionResult<{ id: string; sku: string; openingEntry: string | null }>> {
+): Promise<
+  ActionResult<{ id: string; sku: string; openingEntry: string | null }>
+> {
   const originError = await guardOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("products.manage");
+
+  const refusal = await billingRefusal(context.company.id, {
+    limit: "productsPerCompany",
+  });
+  if (refusal) return refusal;
   const parsed = productSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the details below.", {
@@ -211,11 +222,16 @@ const PARTY_PERMISSION = {
 export async function createPartyAction(
   kind: PartyKind,
   input: CustomerInput | SupplierInput,
-): Promise<ActionResult<{ id: string; code: string; openingEntry: string | null }>> {
+): Promise<
+  ActionResult<{ id: string; code: string; openingEntry: string | null }>
+> {
   const originError = await guardOrigin();
   if (originError) return originError;
 
   const context = await assertPermission(PARTY_PERMISSION[kind].manage);
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const schema = kind === "CUSTOMER" ? customerSchema : supplierSchema;
   const parsed = schema.safeParse(input);
   if (!parsed.success) {
@@ -310,6 +326,9 @@ export async function createEmployeeAction(
   if (originError) return originError;
 
   const context = await assertPermission("employees.manage");
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const parsed = employeeSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the details below.", {
@@ -374,6 +393,9 @@ export async function createCategoryAction(
   if (originError) return originError;
 
   const context = await assertPermission("products.manage");
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const parsed = categorySchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the details below.", {
@@ -455,6 +477,9 @@ export async function createUnitAction(
   if (originError) return originError;
 
   const context = await assertPermission("products.manage");
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const parsed = unitSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the details below.", {
