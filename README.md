@@ -13,10 +13,12 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–8 of 27 complete** — project foundation, database schema, design
-system, public website, working authentication, company onboarding, the
-application shell, master data, sales invoicing, supplier bills and expenses.
-See [Roadmap](#roadmap) for what is built and what is not.
+**Phases 1–21 of 27 complete** — project foundation, database schema, design
+system, public website, authentication, company onboarding, the application
+shell, master data, the full transaction set, the accounting engine and its
+reports, inventory, GST and income tax preparation, analytics, forecasting, the
+AI accountant and the AI auditor. See [Roadmap](#roadmap) for what is built and
+what is not.
 
 You can register a business, sign in and out, reset a password, confirm an email
 address, edit your business and accounting settings, manage branches, invite
@@ -115,10 +117,16 @@ those queries returned, and shows them behind every answer. Where no provider is
 configured it says so and answers nothing, rather than substituting something
 plausible.
 
-**The auditor and the advisor come next.** Sales and purchase _returns_ are
-still to come as well. Every module that is not built says so on
-its own page rather than showing an empty screen, and no figure anywhere in the
-product is invented to fill a gap.
+**The auditor observes, and accuses nobody.** Nine checks run as queries over
+the books — a ledger that does not balance, cash that goes below zero, a
+duplicate invoice number, a sale below cost — and each finding carries the
+evidence that made it fire alongside the ordinary reasons it usually happens.
+The score is arithmetic on the severities, re-derivable by hand, and says on the
+page that it is not a measure of honesty.
+
+**The advisor comes next.** Sales and purchase _returns_ are still to come as
+well. Every module that is not built says so on its own page rather than showing
+an empty screen, and no figure anywhere in the product is invented to fill a gap.
 
 ---
 
@@ -288,6 +296,7 @@ src/
     analytics/             Trend chart, product and customer breakdowns, ratios
     forecast/              The projected band, cash weeks, and what is not known
     ai/                    The assistant, with the queries behind each answer
+    auditor/               Findings with their evidence and ordinary explanations
     accounting/            Chart, journal, ledger, trial balance, statements
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
@@ -304,6 +313,7 @@ src/
     forecast/series.ts     Least-squares fit, prediction band, and three refusals
     ai/tools.ts            Nine read-only queries, none of which takes a company
     ai/prompt.ts           The rules, and the unverified-figure check
+    auditor/rules.ts       The rule catalogue, the score, and the words it may not use
     inventory/valuation.ts FIFO and weighted average, as pure functions
     settlements/ageing.ts  Ageing buckets and oldest-first allocation, pure
     navigation.ts          One navigation model, gated by permission and plan
@@ -327,6 +337,7 @@ src/
     analytics/             Trend from the ledger, breakdowns from the invoice lines
     forecast/              Revenue projection and the cash commitment roll-forward
     ai/                    Tool runner bound to one tenant, provider, transcript
+    auditor/               Nine checks as queries, the run, and settled findings
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
     company/               Settings, team, branch and onboarding services
@@ -371,7 +382,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 962 tests: unit + integration
+npm run test          # 994 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -381,8 +392,9 @@ Integration tests run against `riai_test` and refuse to start if
 Coverage includes the accounting rules, GST arithmetic, inventory valuation,
 income tax slabs and reliefs, depreciation blocks under the Act, the ratio
 engine and its refusals, the forecasting band and when it declines to draw one,
-the assistant's tenant binding and its read-only guarantee, ageing and
-allocation, account balances and the accounting equation, permission
+the assistant's tenant binding and its read-only guarantee, the vocabulary of
+the auditor — checked against the rule catalogue and against the findings a real
+run produces — ageing and allocation, account balances and the accounting equation, permission
 boundaries (an auditor cannot write; a cashier
 cannot void), tenant isolation, document numbering under rollback, and every
 database constraint listed above.
@@ -1087,6 +1099,68 @@ quote figures their role is not allowed to see.
 
 ---
 
+## The AI Auditor
+
+**Nothing here accuses anybody of anything.** A set of database queries has no
+standing to call a person dishonest, and a shop owner reading "possible fraud"
+about their own books is being told something the software does not know. So the
+vocabulary is enforced rather than intended: a list of words the auditor may not
+use — fraud, theft, stolen, embezzlement, criminal, dishonest, and the rest — is
+tested against every title, description, recommendation and explanation in the
+catalogue, and again against the findings a real run produces on seeded books.
+The end-to-end pass reads the rendered page and asserts the same thing.
+
+**No model produced any of it.** The checks are SQL, the severities are fixed in
+the catalogue, and the score is arithmetic on them. The word "AI" in the name of
+the page describes where it sits in the product, not how the findings were
+reached — which is why the same run on the same books gives the same answer
+twice.
+
+**Every finding carries the other half of the sentence.** Alongside the evidence
+that made it fire, each one lists the ordinary reasons it usually happens: stock
+going negative is far more often a sale entered before its purchase than
+anything else, and a round-figure cluster is far more often a shop that prices in
+round figures. Those explanations sit in the catalogue, are read at display time
+rather than frozen into the row, and are required by test to exist and to be
+long enough to say something.
+
+**The score can be worked out by hand.** It starts at 100 and each finding takes
+off a fixed amount for its severity — 40, 15, 6, 2, and nothing at all for the
+informational ones — floored at zero. The risk level is the worst single finding
+and does not rise with the count, because twenty small things are still twenty
+small things and inflating the level would make the word meaningless. Beside the
+number the page says what it is not: not a measure of honesty, not comparable
+with any other business, and seen by nobody outside the account.
+
+**A run replaces what is still open, and leaves alone what somebody has
+answered.** Findings marked seen, sorted, or not-a-problem-here survive the next
+run and stay out of the score. A judgement about a finding is worth more than the
+finding, and re-raising it every night is how a list teaches people to ignore it.
+Each run records the rule-set version that produced it, so a finding that
+vanishes next month can be explained by the rules changing rather than the books.
+
+**A check that fails is named, not hidden.** The checks run independently and the
+run reports which could not be completed. An audit that returned nothing because
+one query broke would be worse than one that says which one broke.
+
+One check earned its keep before shipping: the backdated-entry rule fired on
+every newly registered company, because the opening-balance entry is dated the
+first day of the financial year and created at signup, so it is late by
+construction. That was fixed in the check — opening and closing entries are
+excluded from anything measuring when work was entered — rather than tested
+around. A rule that fires on clean books on day one is precisely how a findings
+list gets ignored.
+
+Ten of the eleven rules in the catalogue have a check behind them. The eleventh,
+the GST register against the ledger, is reconciled on the GST page but is not yet
+part of an audit run — it is listed here because the catalogue is the honest
+place to see what is and is not covered.
+
+Passing every check is not an audit in the statutory sense, and the page says so.
+A purchase recorded against Rent passes every one of them and is still wrong.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -1154,32 +1228,32 @@ query text is the only thing the browser controls.
 
 ## Roadmap
 
-| Phase | Scope                                                         | Status   |
-| ----- | ------------------------------------------------------------- | -------- |
-| 1     | Foundation, schema, design system, public site, auth UI       | **Done** |
-| 2     | Authentication — sessions, verification, rate limiting, audit | **Done** |
-| 3     | Company onboarding — settings, branches, team, invitations    | **Done** |
-| 4     | Application shell — navigation, search, dashboard             | **Done** |
-| 5     | Master data — products, parties, staff, opening balances      | **Done** |
-| 6     | Sales — invoicing, GST split, stock issue, void               | **Done** |
-| 7     | Purchases — bills, input tax credit, landed cost, void        | **Done** |
-| 8     | Expenses — categories, GST, capital vs revenue, void          | **Done** |
-| 9     | Receipts & payments — allocation, ageing, void                | **Done** |
-| 10    | Accounting engine — chart of accounts, balances, the equation | **Done** |
-| 11    | Journal — register, manual entries, reversal                  | **Done** |
-| 12    | Ledger — running balance, party statements                    | **Done** |
-| 13    | Trial balance — two columns, and what balancing proves        | **Done** |
-| 14    | Financial statements — trading, P&L, balance sheet            | **Done** |
-| 15    | Inventory — positions, stock cards, reconciliation, counts    | **Done** |
-| 16    | GST preparation — GSTR-1 working paper, set-off, reconciled   | **Done** |
-| 17    | Income tax — computation, depreciation, 44AD, advance tax     | **Done** |
-| 18    | Analytics — trend, products, customers, ratios, health        | **Done** |
-| 19    | Forecasting — revenue band, cash commitments, refusals        | **Done** |
-| 20    | AI Accountant — read-only tools, traceable answers            | **Done** |
-| 21    | AI Auditor                                                    | Next     |
-| 22    | AI Business Advisor                                           |          |
-| 23–24 | Subscriptions and admin panel                                 |          |
-| 25–27 | Security hardening, testing, deployment                       |          |
+| Phase | Scope                                                           | Status   |
+| ----- | --------------------------------------------------------------- | -------- |
+| 1     | Foundation, schema, design system, public site, auth UI         | **Done** |
+| 2     | Authentication — sessions, verification, rate limiting, audit   | **Done** |
+| 3     | Company onboarding — settings, branches, team, invitations      | **Done** |
+| 4     | Application shell — navigation, search, dashboard               | **Done** |
+| 5     | Master data — products, parties, staff, opening balances        | **Done** |
+| 6     | Sales — invoicing, GST split, stock issue, void                 | **Done** |
+| 7     | Purchases — bills, input tax credit, landed cost, void          | **Done** |
+| 8     | Expenses — categories, GST, capital vs revenue, void            | **Done** |
+| 9     | Receipts & payments — allocation, ageing, void                  | **Done** |
+| 10    | Accounting engine — chart of accounts, balances, the equation   | **Done** |
+| 11    | Journal — register, manual entries, reversal                    | **Done** |
+| 12    | Ledger — running balance, party statements                      | **Done** |
+| 13    | Trial balance — two columns, and what balancing proves          | **Done** |
+| 14    | Financial statements — trading, P&L, balance sheet              | **Done** |
+| 15    | Inventory — positions, stock cards, reconciliation, counts      | **Done** |
+| 16    | GST preparation — GSTR-1 working paper, set-off, reconciled     | **Done** |
+| 17    | Income tax — computation, depreciation, 44AD, advance tax       | **Done** |
+| 18    | Analytics — trend, products, customers, ratios, health          | **Done** |
+| 19    | Forecasting — revenue band, cash commitments, refusals          | **Done** |
+| 20    | AI Accountant — read-only tools, traceable answers              | **Done** |
+| 21    | AI Auditor — deterministic checks, observations not allegations | **Done** |
+| 22    | AI Business Advisor                                             | Next     |
+| 23–24 | Subscriptions and admin panel                                   |          |
+| 25–27 | Security hardening, testing, deployment                         |          |
 
 ---
 
