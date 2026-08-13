@@ -109,8 +109,14 @@ actually spends to keep running. Where the history is too short or too uneven to
 narrow down, the page says so instead of putting a confident figure in the
 middle of a useless range.
 
-**The AI layer comes next.** Sales and purchase _returns_ are still to
-come as well. Every module that is not built says so on
+**The assistant answers from the books, and computes nothing.** It reads
+through a fixed set of read-only queries bound to one tenant, quotes only what
+those queries returned, and shows them behind every answer. Where no provider is
+configured it says so and answers nothing, rather than substituting something
+plausible.
+
+**The auditor and the advisor come next.** Sales and purchase _returns_ are
+still to come as well. Every module that is not built says so on
 its own page rather than showing an empty screen, and no figure anywhere in the
 product is invented to fill a gap.
 
@@ -281,6 +287,7 @@ src/
     tax/                   Income tax working paper: computation, blocks, 44AD
     analytics/             Trend chart, product and customer breakdowns, ratios
     forecast/              The projected band, cash weeks, and what is not known
+    ai/                    The assistant, with the queries behind each answer
     accounting/            Chart, journal, ledger, trial balance, statements
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
@@ -295,6 +302,8 @@ src/
     analytics/health.ts    A composite indicator that is not a credit score
     analytics/range.ts     Reporting periods, shared across the client boundary
     forecast/series.ts     Least-squares fit, prediction band, and three refusals
+    ai/tools.ts            Nine read-only queries, none of which takes a company
+    ai/prompt.ts           The rules, and the unverified-figure check
     inventory/valuation.ts FIFO and weighted average, as pure functions
     settlements/ageing.ts  Ageing buckets and oldest-first allocation, pure
     navigation.ts          One navigation model, gated by permission and plan
@@ -317,6 +326,7 @@ src/
     tax/                   Income tax computation, disallowances found in records
     analytics/             Trend from the ledger, breakdowns from the invoice lines
     forecast/              Revenue projection and the cash commitment roll-forward
+    ai/                    Tool runner bound to one tenant, provider, transcript
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
     company/               Settings, team, branch and onboarding services
@@ -361,7 +371,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 920 tests: unit + integration
+npm run test          # 962 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -371,7 +381,8 @@ Integration tests run against `riai_test` and refuse to start if
 Coverage includes the accounting rules, GST arithmetic, inventory valuation,
 income tax slabs and reliefs, depreciation blocks under the Act, the ratio
 engine and its refusals, the forecasting band and when it declines to draw one,
-ageing and allocation, account balances and the accounting equation, permission
+the assistant's tenant binding and its read-only guarantee, ageing and
+allocation, account balances and the accounting equation, permission
 boundaries (an auditor cannot write; a cashier
 cannot void), tenant isolation, document numbering under rollback, and every
 database constraint listed above.
@@ -1030,6 +1041,52 @@ than one computed on the spot.
 
 ---
 
+## The AI Accountant
+
+**The assistant does no arithmetic.** Every figure it states comes from a tool
+result it has just received, and each of those nine tools is a thin wrapper
+over a service that already exists — the same balance engine the statements
+read, the same GST working paper the GST page shows, the same ratio set
+analytics displays. The model is never in a position to calculate a financial
+figure, because it never has the pieces: it asks a question and receives an
+answer application code computed.
+
+**No tool takes a company.** Not one input schema has a `companyId`, and a test
+walks every schema — nested fields included — asserting none ever appears. The
+tenant is bound by the runner from the session. A call carrying `companyId`,
+`tenantId` and `company` pointing at another business returns this business's
+figures, because validation strips fields the schema does not have and the
+identifier has nowhere to land. That case has a test of its own.
+
+**No tool writes.** Every entry is marked read-only, the runner checks it before
+dispatching rather than trusting the catalogue, and a tripwire test fails on any
+tool name containing create, post, update, delete, void, edit, write or remove.
+Asked to record something, the assistant says it cannot and names the page that
+can.
+
+**Every answer carries the queries behind it.** Tool calls are persisted against
+the message with their arguments and results, and the interface puts them one
+click away — so a figure quoted in June can be traced in December.
+
+**An answer that quotes money without asking for any is marked.** That check is
+deterministic and runs before anybody reads the reply: no tool call in the turn
+plus a rupee figure in the text means the number came from the model's own head,
+and the interface says the figure could not be traced to a query. It does not
+depend on the model admitting anything.
+
+**Where no provider is configured, nothing is faked.** A fresh installation has
+`AI_DRIVER=disabled`; in that state the page says the assistant is not switched
+on, the composer is disabled, and no substitute answers anything. An assistant
+that invented plausible replies when its provider was missing would be worse
+than one that is honestly off. The API key is read in one module, used in one
+header, and never returned, logged, or put into an error message.
+
+A transcript belongs to one user of one company. A conversation id from somebody
+else's session resolves to nothing rather than to their transcript, which may
+quote figures their role is not allowed to see.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -1118,8 +1175,9 @@ query text is the only thing the browser controls.
 | 17    | Income tax — computation, depreciation, 44AD, advance tax     | **Done** |
 | 18    | Analytics — trend, products, customers, ratios, health        | **Done** |
 | 19    | Forecasting — revenue band, cash commitments, refusals        | **Done** |
-| 20    | AI Accountant                                                 | Next     |
-| 21–22 | AI Auditor, AI Advisor                                        |          |
+| 20    | AI Accountant — read-only tools, traceable answers            | **Done** |
+| 21    | AI Auditor                                                    | Next     |
+| 22    | AI Business Advisor                                           |          |
 | 23–24 | Subscriptions and admin panel                                 |          |
 | 25–27 | Security hardening, testing, deployment                       |          |
 
