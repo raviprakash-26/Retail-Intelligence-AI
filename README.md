@@ -13,12 +13,12 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–22 of 27 complete** — project foundation, database schema, design
+**Phases 1–23 of 27 complete** — project foundation, database schema, design
 system, public website, authentication, company onboarding, the application
 shell, master data, the full transaction set, the accounting engine and its
 reports, inventory, GST and income tax preparation, analytics, forecasting, the
-AI accountant, the AI auditor and the AI advisor. See [Roadmap](#roadmap) for
-what is built and what is not.
+AI accountant, the AI auditor, the AI advisor and subscriptions. See
+[Roadmap](#roadmap) for what is built and what is not.
 
 You can register a business, sign in and out, reset a password, confirm an email
 address, edit your business and accounting settings, manage branches, invite
@@ -132,10 +132,16 @@ ignore it. What a suggestion is worth is either an amount already in the books, 
 band with its assumption printed beside it, or an admission that there is no
 honest figure.
 
-**Subscriptions and the admin panel come next.** Sales and purchase _returns_ are
-still to come as well. Every module that is not built says so on its own page
-rather than showing an empty screen, and no figure anywhere in the product is
-invented to fill a gap.
+**A plan decides what is available, and the server decides that.** Every
+feature-gated page and every action that adds to the books checks the
+subscription rather than trusting the sidebar. What a lapsed subscription stops
+is new entries and nothing else: the books already recorded stay readable,
+printable and exportable, and the refusal says so in the same breath.
+
+**The admin panel comes next.** Sales and purchase _returns_ are still to come
+as well. Every module that is not built says so on its own page rather than
+showing an empty screen, and no figure anywhere in the product is invented to
+fill a gap.
 
 ---
 
@@ -307,6 +313,7 @@ src/
     ai/                    The assistant, with the queries behind each answer
     auditor/               Findings with their evidence and ordinary explanations
     advisor/               Suggestions with what they are worth and when to ignore them
+    billing/               The plan, what it includes, and what has been used
     accounting/            Chart, journal, ledger, trial balance, statements
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
@@ -326,6 +333,7 @@ src/
     auditor/rules.ts       The rule catalogue, the score, and the words it may not use
     advisor/catalogue.ts   What may be suggested, and the words it may not promise
     advisor/impact.ts      Recorded, estimated or unquantified — and the ordering
+    billing/entitlements.ts Features, allowances, and what lapsing may not do
     inventory/valuation.ts FIFO and weighted average, as pure functions
     settlements/ageing.ts  Ageing buckets and oldest-first allocation, pure
     navigation.ts          One navigation model, gated by permission and plan
@@ -351,6 +359,7 @@ src/
     ai/                    Tool runner bound to one tenant, provider, transcript
     auditor/               Nine checks as queries, the run, and settled findings
     advisor/               Ten detectors over figures the platform already computes
+    billing/               Entitlement resolution, usage counts, plan changes
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
     company/               Settings, team, branch and onboarding services
@@ -395,7 +404,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1044 tests: unit + integration
+npm run test          # 1098 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -407,7 +416,8 @@ income tax slabs and reliefs, depreciation blocks under the Act, the ratio
 engine and its refusals, the forecasting band and when it declines to draw one,
 the assistant's tenant binding and its read-only guarantee, the vocabulary of
 the auditor and of the advisor — each checked against its own catalogue and
-against the sentences a real run produces — ageing and allocation, account balances and the accounting equation, permission
+against the sentences a real run produces — entitlements and what a lapsed
+subscription may not touch, ageing and allocation, account balances and the accounting equation, permission
 boundaries (an auditor cannot write; a cashier
 cannot void), tenant isolation, document numbering under rollback, and every
 database constraint listed above.
@@ -1245,6 +1255,67 @@ page like this gets ignored on day one and never opened again.
 
 ---
 
+## Subscriptions
+
+**Entitlements are data, and the server is what checks them.** A plan's
+features are a list on a row rather than a `plan === "business"` conditional, so
+packaging changes without a deployment and one customer can be given something
+without a special case nobody will remember to remove. Every feature-gated page
+asks for itself and every action that adds to the books asks before it writes.
+Until this phase the sidebar marked what a plan did not include and nothing else
+stopped anybody — a Starter customer could type `/app/ai/auditor` and use it.
+
+A tripwire test reads the page sources and fails if a feature-gated navigation
+item has a page that does not call `featureGate` with that same feature. It
+cannot prove the gate returns the right answer — the integration tests do that —
+but it catches the mistake actually worth catching, which is somebody adding the
+eleventh gated module and forgetting.
+
+**A lapsed subscription stops new entries. It never seals the ledger.**
+Everything already recorded stays readable, printable and exportable for as long
+as the account exists, the modules stay on the page, and every read-only refusal
+says so in the same breath as the refusal — asserted against all three messages,
+including that none of them uses the words delete, lost or removed. A shopkeeper
+who stopped paying in March still has a return to file in July, and software
+that holds their own accounting hostage to collect a debt is not something worth
+building.
+
+Editing what is already there stays open when a subscription lapses; only adding
+stops. And a downgrade never reaches into the records: five users moving to a
+two-user plan all keep working, nothing is deleted, and adding a sixth is what
+waits.
+
+**Three refusals, deliberately kept apart.** `FEATURE_NOT_INCLUDED` is about
+packaging, `FORBIDDEN` is about a role, and `SUBSCRIPTION_READ_ONLY` is about
+payment. They are checked in the order a person would ask, so nobody on a plan
+without the assistant is told they have used up their AI messages. All three are
+returned as results rather than thrown, because an action in this codebase does
+not throw for something a form has to render.
+
+**Status is worked out, not trusted.** A trial past its end is expired whether
+or not a nightly job has run, and a period that ended without a renewal is late
+— a subscription that is only correct after a sweep is one that is wrong every
+night. A declined payment gets a week of grace before anything stops, because a
+declined card is usually a declined card rather than a decision.
+
+**Usage is counted from the records.** Members, branches, products, this month's
+transactions and this month's AI messages are counted by querying, not by
+keeping a running total beside them: a counter that has drifted is how a
+business ends up unable to add the third of the three users it is paying for. A
+pending invitation counts as a seat, because counting only accepted ones lets a
+two-seat business invite twenty people and find out on the day they all sign in.
+
+**This build cannot charge anybody, and says so.** The environment schema knows
+about Razorpay and Stripe, the tables carry the provider columns, and there is a
+seam for an integration — but none is written, and nothing pretends otherwise. A
+plan change that would cost money is declined with the reason. Downgrades and
+cancellations, which cost nothing, apply immediately. No upgrade is granted that
+nobody paid for and no invoice is marked paid that no bank has seen. A working-
+looking "Pay now" button that resolved against nothing would be a lie told to a
+shopkeeper about their own money.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -1336,7 +1407,8 @@ query text is the only thing the browser controls.
 | 20    | AI Accountant — read-only tools, traceable answers              | **Done** |
 | 21    | AI Auditor — deterministic checks, observations not allegations | **Done** |
 | 22    | AI Business Advisor — detectors, bands, and when to ignore them | **Done** |
-| 23–24 | Subscriptions and admin panel                                   | Next     |
+| 23    | Subscriptions — entitlements, allowances, server-side gates     | **Done** |
+| 24    | Admin panel                                                     | Next     |
 | 25–27 | Security hardening, testing, deployment                         |          |
 
 ---
