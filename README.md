@@ -13,12 +13,12 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–21 of 27 complete** — project foundation, database schema, design
+**Phases 1–22 of 27 complete** — project foundation, database schema, design
 system, public website, authentication, company onboarding, the application
 shell, master data, the full transaction set, the accounting engine and its
 reports, inventory, GST and income tax preparation, analytics, forecasting, the
-AI accountant and the AI auditor. See [Roadmap](#roadmap) for what is built and
-what is not.
+AI accountant, the AI auditor and the AI advisor. See [Roadmap](#roadmap) for
+what is built and what is not.
 
 You can register a business, sign in and out, reset a password, confirm an email
 address, edit your business and accounting settings, manage branches, invite
@@ -124,9 +124,18 @@ evidence that made it fire alongside the ordinary reasons it usually happens.
 The score is arithmetic on the severities, re-derivable by hand, and says on the
 page that it is not a measure of honesty.
 
-**The advisor comes next.** Sales and purchase _returns_ are still to come as
-well. Every module that is not built says so on its own page rather than showing
-an empty screen, and no figure anywhere in the product is invented to fill a gap.
+**The advisor suggests, and promises nothing.** Ten detectors over figures the
+platform has already computed — cash sitting with customers, stock sitting still,
+margin slipping, costs outrunning sales — each saying what the books show, what it
+is worth, and the reasons a shopkeeper who knows their trade would be right to
+ignore it. What a suggestion is worth is either an amount already in the books, a
+band with its assumption printed beside it, or an admission that there is no
+honest figure.
+
+**Subscriptions and the admin panel come next.** Sales and purchase _returns_ are
+still to come as well. Every module that is not built says so on its own page
+rather than showing an empty screen, and no figure anywhere in the product is
+invented to fill a gap.
 
 ---
 
@@ -297,6 +306,7 @@ src/
     forecast/              The projected band, cash weeks, and what is not known
     ai/                    The assistant, with the queries behind each answer
     auditor/               Findings with their evidence and ordinary explanations
+    advisor/               Suggestions with what they are worth and when to ignore them
     accounting/            Chart, journal, ledger, trial balance, statements
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
@@ -314,6 +324,8 @@ src/
     ai/tools.ts            Nine read-only queries, none of which takes a company
     ai/prompt.ts           The rules, and the unverified-figure check
     auditor/rules.ts       The rule catalogue, the score, and the words it may not use
+    advisor/catalogue.ts   What may be suggested, and the words it may not promise
+    advisor/impact.ts      Recorded, estimated or unquantified — and the ordering
     inventory/valuation.ts FIFO and weighted average, as pure functions
     settlements/ageing.ts  Ageing buckets and oldest-first allocation, pure
     navigation.ts          One navigation model, gated by permission and plan
@@ -338,6 +350,7 @@ src/
     forecast/              Revenue projection and the cash commitment roll-forward
     ai/                    Tool runner bound to one tenant, provider, transcript
     auditor/               Nine checks as queries, the run, and settled findings
+    advisor/               Ten detectors over figures the platform already computes
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
     company/               Settings, team, branch and onboarding services
@@ -382,7 +395,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 994 tests: unit + integration
+npm run test          # 1044 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -393,8 +406,8 @@ Coverage includes the accounting rules, GST arithmetic, inventory valuation,
 income tax slabs and reliefs, depreciation blocks under the Act, the ratio
 engine and its refusals, the forecasting band and when it declines to draw one,
 the assistant's tenant binding and its read-only guarantee, the vocabulary of
-the auditor — checked against the rule catalogue and against the findings a real
-run produces — ageing and allocation, account balances and the accounting equation, permission
+the auditor and of the advisor — each checked against its own catalogue and
+against the sentences a real run produces — ageing and allocation, account balances and the accounting equation, permission
 boundaries (an auditor cannot write; a cashier
 cannot void), tenant isolation, document numbering under rollback, and every
 database constraint listed above.
@@ -1161,6 +1174,77 @@ A purchase recorded against Rent passes every one of them and is still wrong.
 
 ---
 
+## The AI Business Advisor
+
+**No model produced any of this either.** Ten detectors run over figures the
+platform has already computed — the receivables ageing, the cash projection, the
+analytics report, the stock positions — and every threshold in them is a named
+constant. The same books produce the same list every time, which is the whole
+point: a suggestion you disagree with is one worth arguing with rather than one
+worth re-rolling until it says something else.
+
+**Nothing here promises an outcome.** The advisor is reading one shop's books
+and nothing else. It has not met the customers, does not know which supplier is
+reliable, and cannot tell a deliberately quiet month from a bad one. So a list of
+words that promise — guarantee, will increase, risk-free, you must — is tested
+against the catalogue and against the sentences a real run actually produces. It
+matches whole words, because "indefinitely" contains "definitely" and a shop
+whose stock turns faster than its suppliers' credit can run below a current ratio
+of one indefinitely without anybody promising anyone anything.
+
+**What a suggestion is worth is said three different ways, and the difference is
+the point.**
+
+- **Recorded.** Overdue receivables are not an estimate of anything. That money
+  has been earned, invoiced, and is sitting somewhere other than the bank, and
+  the figure quoted is the figure the ageing report shows — asserted by test
+  against the same query the receipts page reads.
+- **Estimated.** A margin slip is worth something only under an assumption, so
+  the assumption is printed beside the amount and the answer is a band rather
+  than a point. The band is not vagueness; it is the actual precision. Estimates
+  rank on the low end of their own band, because ordering the list by the
+  optimistic end would put the most speculative suggestions at the top.
+- **Unquantified.** What an empty shelf costs is not in any ledger, because a
+  sale that did not happen is not recorded anywhere. Putting a figure on it would
+  mean inventing the customers who turned round and walked out, so the page says
+  there is no honest figure instead.
+
+**Every suggestion carries the case against itself.** Beside what to do sits
+_when this does not apply_ — the seasonal line whose season has not come, the
+large buyer whose payment run is monthly, the loss leader that brings people
+through the door, the owner's loan sitting in current liabilities that is not
+going to be called. These get the same room on the page as the suggestion, and
+each is required by test to be there and to say something. A shopkeeper who knows
+their trade will often read one of these and be right to ignore it; the page is
+built for that reader rather than against them.
+
+**Urgency is arithmetic, not adjectives.** Each suggestion starts at the urgency
+its kind deserves — running out of cash next month outranks a long cash cycle
+whatever the amounts — and rises one step when the amount at stake passes a tenth
+of the period's revenue, because "when you can" is the wrong label on a tenth of
+the year's turnover. Nothing is ever de-escalated: a small overdue balance is
+still money somebody owes. The page says when a suggestion was moved and why.
+
+**Nothing is padded.** A detector that finds nothing returns nothing, there is no
+minimum list length, and a shop with nothing to fix is told that rather than
+handed three vague ideas so the screen looks busy. Where one of the four readings
+of the books fails, it is named — a short list is not the same as a clean one.
+
+**Two decisions were about not duplicating logic.** Concentration defers entirely
+to the threshold the analytics service already applies, because two rules for one
+fact is two pages that can disagree about it. And the stock detectors read the
+same rows the inventory page builds, extracted rather than reimplemented.
+
+The slow-moving-stock detector fired on every newly registered company before it
+shipped, for the same reason the auditor's backdated-entry check did: opening
+stock is dated the first day of the financial year whatever day it was entered.
+It now declines to judge staleness until the books are older than the window it
+measures, and never claims stock has been still for longer than the books have
+existed. Greeting a new business by telling it all of its stock is dead is how a
+page like this gets ignored on day one and never opened again.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -1251,8 +1335,8 @@ query text is the only thing the browser controls.
 | 19    | Forecasting — revenue band, cash commitments, refusals          | **Done** |
 | 20    | AI Accountant — read-only tools, traceable answers              | **Done** |
 | 21    | AI Auditor — deterministic checks, observations not allegations | **Done** |
-| 22    | AI Business Advisor                                             | Next     |
-| 23–24 | Subscriptions and admin panel                                   |          |
+| 22    | AI Business Advisor — detectors, bands, and when to ignore them | **Done** |
+| 23–24 | Subscriptions and admin panel                                   | Next     |
 | 25–27 | Security hardening, testing, deployment                         |          |
 
 ---
