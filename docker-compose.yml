@@ -42,20 +42,37 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       DATABASE_URL: "postgresql://${POSTGRES_USER:-riai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-riai}?schema=public"
       APP_URL: "${APP_URL:?set APP_URL in .env}"
       AUTH_SECRET: "${AUTH_SECRET:?generate one with openssl rand -base64 48}"
-      # One instance, so in-memory rate limiting is honest here. Two would
-      # need Redis, and the environment validator says so rather than letting
-      # the limits quietly halve.
-      RATE_LIMIT_ALLOW_IN_MEMORY: "true"
+      # Redis is in this file now, so the limiter shares one counter and this
+      # deployment can be scaled to more than one container without the limits
+      # quietly becoming per-replica. Drop the driver back to "memory" and set
+      # RATE_LIMIT_ALLOW_IN_MEMORY=true if you would rather run without it —
+      # the environment validator will hold you to saying so out loud.
+      RATE_LIMIT_DRIVER: redis
+      REDIS_URL: "redis://redis:6379"
       # Nothing is seeded into a production database by default: the demo
       # tenant and the development administrator both refuse to run here.
       SEED_DEMO_DATA: "false"
     ports:
       - "${APP_PORT:-3000}:3000"
+
+  # Shared rate-limit counters, so two application containers enforce one
+  # budget rather than one each.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   # A nightly dump into a local volume, and nothing more than that.
   #

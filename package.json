@@ -2,7 +2,7 @@
   "name": "retail-intelligence-ai",
   "version": "0.1.0",
   "private": true,
-  "description": "Retail Intelligence AI \u2014 Smart Accounting. Intelligent Auditing. Better Business Decisions.",
+  "description": "Retail Intelligence AI — Smart Accounting. Intelligent Auditing. Better Business Decisions.",
   "engines": {
     "node": ">=20.11.0"
   },
@@ -63,6 +63,7 @@
     "react-dom": "19.2.8",
     "react-hook-form": "^7.85.0",
     "recharts": "^3.10.1",
+    "redis": "^5.12.1",
     "server-only": "^0.0.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.3.1",
