@@ -37,6 +37,19 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+      # The Redis rate limiter is tested against a real server: a mock would
+      # only prove the code calls the functions it calls, and the properties
+      # worth proving — a shared counter, an expiry, an atomic increment — are
+      # all properties of Redis itself.
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       # The integration suite refuses to run against a database whose name
       # does not end in _test, so this cannot be pointed at anything real by

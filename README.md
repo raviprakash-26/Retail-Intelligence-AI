@@ -458,7 +458,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1276 tests: unit + integration
+npm run test          # 1283 tests: unit + integration
 npm run test:unit     # unit only, no database required
 npm run test:e2e      # 46 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
@@ -1777,6 +1777,51 @@ Both are excluded from the middleware matcher. A probe hit every few seconds
 that runs through the same request pipeline it exists to observe is a probe that
 cannot tell you that pipeline is broken.
 
+### Rate limiting across more than one instance
+
+```bash
+RATE_LIMIT_DRIVER=redis
+REDIS_URL=redis://redis:6379
+```
+
+The in-memory driver keeps its counts in one process, so a second replica
+silently doubles every limit somebody configured. A production build refuses to
+start on it unless `RATE_LIMIT_ALLOW_IN_MEMORY=true` says out loud that this is
+a single-instance deployment — that guard existed before the Redis driver did,
+and it is why the gap was safe rather than merely undocumented.
+
+**The counter is incremented and given its lifetime in one script.** As two
+commands there is a window where the process dies after `INCR` and before
+`EXPIRE`, and a counter with no expiry never resets — that identifier is locked
+out permanently. One `EVAL`, one round trip, no window. A test hammers the same
+key twenty-five times concurrently and asserts the TTL is never `-1`.
+
+**Every check is bounded at one second.** node-redis retries a dead server
+indefinitely by default, so `connect()` never rejects — which means the
+fallback below was unreachable when it was first written and a sign-in would
+have waited forever, which is worse than either failing open or failing closed.
+The bound is what makes the fallback reachable at all, and there is a test that
+points the limiter at a dead port and asserts it answers quickly.
+
+**If Redis is unreachable the request is allowed, and the failure is made
+loud.** That is a deliberate trade. Failing closed would mean a Redis blip locks
+every customer out of signing in — a total outage of the product to protect one
+control. So the attempt proceeds, an error goes to the log, and
+`riai_rate_limit_unavailable_total` goes up. A limiter that has quietly stopped
+working is the thing worth preventing, and that counter is what an operator
+alerts on.
+
+In CI a missing Redis is a failure rather than a skip. A skipped suite reports
+green, which makes "the tests ran" indistinguishable from "the service never
+came up" — and exercising a real server was the entire point of declaring one.
+Locally it still skips, because not having Redis installed is a fact about the
+machine.
+
+The tests run against a real Redis rather than a mock. Everything worth proving
+here — that the counter is shared between connections, that it expires, that the
+increment and the expiry are atomic — is a property of Redis, and none of them
+survives being mocked.
+
 ### Backups, and the restore nobody rehearsed
 
 ```bash
@@ -1878,9 +1923,10 @@ avoids.
   not a dead disk. For books somebody will need in a tax dispute three years
   from now, use managed Postgres with point-in-time recovery and copy the dumps
   somewhere else.
-- **One instance, no horizontal scaling story.** Rate limiting is in-memory
-  unless Redis is configured, and nothing has been tested behind more than one
-  process.
+- **Nothing has been tested behind more than one process.** Rate limiting now
+  shares a counter through Redis, which was the structural blocker, but no part
+  of this has actually been run as two replicas — and the metrics counters are
+  still per-process.
 - **Observability stops at logs and a scrape.** Errors are structured JSON and
   there is a token-gated Prometheus endpoint, but there is no tracing, no
   alerting, and the counters are per-process — two replicas each report their
