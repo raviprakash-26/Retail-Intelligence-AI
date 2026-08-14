@@ -21,10 +21,7 @@ import {
   PeriodClosedError,
 } from "@/server/accounting/post-journal-entry";
 import { MissingAccountError } from "@/server/documents/accounts";
-import {
-  getRequestContext,
-  isSameOrigin,
-} from "@/server/security/request-context";
+import { requireSameOrigin } from "@/server/security/request-context";
 import {
   createStockAdjustment,
   readBookQuantity,
@@ -46,21 +43,10 @@ function revalidateInventory(): void {
   }
 }
 
-async function guardOrigin(): Promise<ActionResult<never> | null> {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail(
-      "This request could not be verified. Please reload and try again.",
-      { code: ACTION_ERROR.FORBIDDEN },
-    );
-  }
-  return null;
-}
-
 export async function createStockAdjustmentAction(
   input: StockAdjustmentInput,
 ): Promise<ActionResult<PostedAdjustment>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("inventory.adjust");

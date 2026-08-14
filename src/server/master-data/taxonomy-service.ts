@@ -340,7 +340,10 @@ export async function updateUnit(params: {
   if (existing.code !== params.input.code) {
     const duplicate = await prisma.unit.findUnique({
       where: {
-        companyId_code: { companyId: params.companyId, code: params.input.code },
+        companyId_code: {
+          companyId: params.companyId,
+          code: params.input.code,
+        },
       },
       select: { id: true },
     });

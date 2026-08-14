@@ -27,9 +27,10 @@ import {
 } from "@/server/email/mailer";
 import { checkRateLimit, clearRateLimit } from "@/server/security/rate-limit";
 import {
+  assertSameOrigin,
   getRequestContext,
-  isSameOrigin,
   rateLimitKey,
+  requireSameOrigin,
 } from "@/server/security/request-context";
 import {
   ACTION_ERROR,
@@ -72,20 +73,6 @@ function lockoutDuration(failedCount: number): number {
     LOCKOUT_STEPS_MS.length - 1,
   );
   return LOCKOUT_STEPS_MS[index] ?? 60 * 60_000;
-}
-
-/** Blocks a cross-site POST before it reaches any credential logic. */
-async function requireSameOrigin(): Promise<ActionResult<never> | null> {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail(
-      "This request could not be verified. Please reload and try again.",
-      {
-        code: ACTION_ERROR.FORBIDDEN,
-      },
-    );
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -321,6 +308,8 @@ export async function signInAction(
 // ---------------------------------------------------------------------------
 
 export async function signOutAction(): Promise<never> {
+  await assertSameOrigin();
+
   const session = await getAuthSession();
   const context = await getRequestContext();
 
@@ -635,6 +624,8 @@ export type VerifyEmailOutcome =
 export async function verifyEmailAction(
   token: string,
 ): Promise<VerifyEmailOutcome> {
+  await assertSameOrigin();
+
   const record = await prisma.verificationToken.findUnique({
     where: { tokenHash: hashToken(token) },
     select: {
@@ -689,6 +680,9 @@ export async function verifyEmailAction(
 export async function resendVerificationAction(): Promise<
   ActionResult<{ sent: true }>
 > {
+  const originError = await requireSameOrigin();
+  if (originError) return originError;
+
   const session = await getAuthSession();
   if (!session) {
     return fail("Please sign in first.", {
@@ -749,6 +743,8 @@ export async function resendVerificationAction(): Promise<
 
 /** Signs the user out of every device. Used from account security settings. */
 export async function signOutEverywhereAction(): Promise<never> {
+  await assertSameOrigin();
+
   const session = await getAuthSession();
   if (!session) redirect("/login");
 

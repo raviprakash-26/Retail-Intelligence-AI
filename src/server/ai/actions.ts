@@ -9,12 +9,10 @@ import {
 } from "@/server/auth/action-result";
 import { FEATURE } from "@/lib/billing/plans";
 import { billingRefusal } from "@/server/billing/guards";
+import { checkRateLimit } from "@/server/security/rate-limit";
 import { assertPermission } from "@/server/auth/context";
 import { resolveFiscalYear } from "@/server/fiscal/fiscal-service";
-import {
-  getRequestContext,
-  isSameOrigin,
-} from "@/server/security/request-context";
+import { requireSameOrigin } from "@/server/security/request-context";
 import { askAccountant } from "@/server/ai/accountant";
 
 /**
@@ -31,12 +29,8 @@ export async function askAccountantAction(
   _previous: ActionResult<{ conversationId: string }> | null,
   formData: FormData,
 ): Promise<ActionResult<{ conversationId: string }>> {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail("That request did not look right.", {
-      code: ACTION_ERROR.FORBIDDEN,
-    });
-  }
+  const originError = await requireSameOrigin();
+  if (originError) return originError;
 
   const context = await assertPermission("ai.accountant");
 
@@ -45,6 +39,17 @@ export async function askAccountantAction(
     limit: "aiMessagesPerMonth",
   });
   if (refusal) return refusal;
+
+  // The plan's monthly allowance is the commercial limit. This is the safety
+  // one: a loop calling this a thousand times a minute spends real money at the
+  // provider long before a monthly count notices.
+  const burst = await checkRateLimit("AI_MESSAGE_USER", context.user.id);
+  if (!burst.allowed) {
+    return fail("That is a lot of questions at once. Give it a moment.", {
+      code: ACTION_ERROR.RATE_LIMITED,
+      retryAfterSeconds: burst.retryAfterSeconds,
+    });
+  }
 
   const question = String(formData.get("question") ?? "").trim();
   if (!question) {

@@ -264,10 +264,17 @@ export async function createProduct(params: {
 }): Promise<{ id: string; sku: string; openingEntry: string | null }> {
   return prisma.$transaction(async (tx) => {
     await assertSkuIsFree(tx, params.companyId, params.input.sku);
-    const references = await resolveReferences(tx, params.companyId, params.input);
+    const references = await resolveReferences(
+      tx,
+      params.companyId,
+      params.input,
+    );
 
     const stockValue = params.input.isStockTracked
-      ? openingStockValue(params.input.openingQuantity, params.input.openingRate)
+      ? openingStockValue(
+          params.input.openingQuantity,
+          params.input.openingRate,
+        )
       : openingStockValue(0, 0);
 
     const product = await tx.product.create({
@@ -393,10 +400,18 @@ export async function updateProduct(params: {
   await prisma.$transaction(async (tx) => {
     const existing = await tx.product.findFirst({
       where: { id: params.productId, companyId: params.companyId },
-      select: { id: true, sku: true, isStockTracked: true, openingQuantity: true },
+      select: {
+        id: true,
+        sku: true,
+        isStockTracked: true,
+        openingQuantity: true,
+      },
     });
     if (!existing) {
-      throw new MasterDataError("That product could not be found.", "NOT_FOUND");
+      throw new MasterDataError(
+        "That product could not be found.",
+        "NOT_FOUND",
+      );
     }
 
     await assertSkuIsFree(
@@ -405,7 +420,11 @@ export async function updateProduct(params: {
       params.input.sku,
       params.productId,
     );
-    const references = await resolveReferences(tx, params.companyId, params.input);
+    const references = await resolveReferences(
+      tx,
+      params.companyId,
+      params.input,
+    );
 
     // Turning stock tracking off on a product that already holds stock would
     // strand its value in the Inventory account with nothing to explain it.
@@ -460,7 +479,10 @@ export async function setProductArchived(params: {
       select: { id: true, sku: true, name: true },
     });
     if (!existing) {
-      throw new MasterDataError("That product could not be found.", "NOT_FOUND");
+      throw new MasterDataError(
+        "That product could not be found.",
+        "NOT_FOUND",
+      );
     }
 
     await tx.product.update({
@@ -473,7 +495,9 @@ export async function setProductArchived(params: {
 
     await recordAuditLog(
       {
-        action: params.archived ? PRODUCT_AUDIT.ARCHIVED : PRODUCT_AUDIT.RESTORED,
+        action: params.archived
+          ? PRODUCT_AUDIT.ARCHIVED
+          : PRODUCT_AUDIT.RESTORED,
         module: "Inventory",
         companyId: params.companyId,
         userId: params.userId,

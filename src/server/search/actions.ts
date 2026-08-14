@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { getCompanyContext } from "@/server/auth/context";
+import { assertSameOrigin } from "@/server/security/request-context";
 import {
   FISCAL_YEAR_COOKIE,
   listFiscalYears,
@@ -55,6 +56,8 @@ export async function globalSearchAction(
 export async function setFiscalYearAction(
   fiscalYearId: string,
 ): Promise<{ ok: boolean }> {
+  await assertSameOrigin();
+
   const context = await getCompanyContext();
   if (!context) return { ok: false };
 
@@ -78,6 +81,8 @@ export async function setFiscalYearAction(
 export async function markNotificationsReadAction(
   notificationIds?: string[],
 ): Promise<{ ok: boolean; count: number }> {
+  await assertSameOrigin();
+
   const context = await getCompanyContext();
   if (!context) return { ok: false, count: 0 };
 

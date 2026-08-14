@@ -104,4 +104,3 @@ export async function listPeriods(
     entryCount: period._count.journalEntries,
   }));
 }
-

@@ -15,10 +15,7 @@ import {
   type ActionResult,
 } from "@/server/auth/action-result";
 import { assertPermission } from "@/server/auth/context";
-import {
-  getRequestContext,
-  isSameOrigin,
-} from "@/server/security/request-context";
+import { requireSameOrigin } from "@/server/security/request-context";
 import {
   createAccount,
   isDuplicateAccountCode,
@@ -38,17 +35,6 @@ import {
 function revalidateAccounting(): void {
   revalidatePath("/app/accounting");
   revalidatePath("/app/reports");
-}
-
-async function guardOrigin(): Promise<ActionResult<never> | null> {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail(
-      "This request could not be verified. Please reload and try again.",
-      { code: ACTION_ERROR.FORBIDDEN },
-    );
-  }
-  return null;
 }
 
 function fromServiceError(error: unknown): ActionResult<never> {
@@ -73,7 +59,7 @@ function fromServiceError(error: unknown): ActionResult<never> {
 export async function createAccountAction(
   input: AccountInput,
 ): Promise<ActionResult<{ id: string; code: string; name: string }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("accounting.accounts.manage");
@@ -103,7 +89,7 @@ export async function updateAccountAction(
   accountId: string,
   input: AccountEditInput,
 ): Promise<ActionResult<{ id: string; name: string }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("accounting.accounts.manage");
@@ -134,7 +120,7 @@ export async function setAccountActiveAction(
   accountId: string,
   isActive: boolean,
 ): Promise<ActionResult<{ id: string; name: string; isActive: boolean }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("accounting.accounts.manage");

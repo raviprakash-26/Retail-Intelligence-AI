@@ -12,10 +12,7 @@ import { FEATURE } from "@/lib/billing/plans";
 import { billingRefusal } from "@/server/billing/guards";
 import { assertPermission } from "@/server/auth/context";
 import { resolveFiscalYear } from "@/server/fiscal/fiscal-service";
-import {
-  getRequestContext,
-  isSameOrigin,
-} from "@/server/security/request-context";
+import { requireSameOrigin } from "@/server/security/request-context";
 import { runAudit, settleFinding } from "@/server/auditor/audit-service";
 
 /**
@@ -36,12 +33,8 @@ const SETTLEMENTS: Record<string, AuditFindingStatus> = {
 export async function runAuditAction(): Promise<
   ActionResult<{ score: number }>
 > {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail("That request did not look right.", {
-      code: ACTION_ERROR.FORBIDDEN,
-    });
-  }
+  const originError = await requireSameOrigin();
+  if (originError) return originError;
 
   const context = await assertPermission("audit.run");
 
@@ -70,12 +63,8 @@ export async function settleFindingAction(
   _previous: ActionResult<{ settled: true }> | null,
   formData: FormData,
 ): Promise<ActionResult<{ settled: true }>> {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail("That request did not look right.", {
-      code: ACTION_ERROR.FORBIDDEN,
-    });
-  }
+  const originError = await requireSameOrigin();
+  if (originError) return originError;
 
   const context = await assertPermission("audit.run");
 

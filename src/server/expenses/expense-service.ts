@@ -16,13 +16,7 @@ import {
   resolveSupplyType,
   type SupplyType,
 } from "@/lib/tax/gst";
-import {
-  type Decimal,
-  add,
-  isZero,
-  money,
-  toStorageString,
-} from "@/lib/money";
+import { type Decimal, add, isZero, money, toStorageString } from "@/lib/money";
 import type { ExpenseInput } from "@/lib/validation/expenses";
 import { postJournalEntry } from "@/server/accounting/post-journal-entry";
 import { recordAuditLog } from "@/server/audit/audit-log";
@@ -452,7 +446,10 @@ export async function voidExpense(params: {
       );
     }
     if (expense.status !== DocumentStatus.POSTED) {
-      throw new ExpenseError("Only a posted expense can be voided.", "NOT_POSTED");
+      throw new ExpenseError(
+        "Only a posted expense can be voided.",
+        "NOT_POSTED",
+      );
     }
 
     const entryId = expense.journalEntryId;
@@ -625,7 +622,12 @@ export async function listExpenses(params: {
                 mode: Prisma.QueryMode.insensitive,
               },
             },
-            { payeeName: { contains: query, mode: Prisma.QueryMode.insensitive } },
+            {
+              payeeName: {
+                contains: query,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
             {
               referenceNo: {
                 contains: query,
@@ -666,7 +668,12 @@ export async function listExpenses(params: {
       }),
       prisma.expense.aggregate({
         where: { ...posted, isCapitalExpenditure: false },
-        _sum: { taxableAmount: true, cgstAmount: true, sgstAmount: true, igstAmount: true },
+        _sum: {
+          taxableAmount: true,
+          cgstAmount: true,
+          sgstAmount: true,
+          igstAmount: true,
+        },
       }),
       prisma.expense.aggregate({
         where: { ...posted, isCapitalExpenditure: true },

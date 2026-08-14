@@ -1,6 +1,12 @@
 import "server-only";
 import { headers } from "next/headers";
+import { forbidden } from "next/navigation";
 import { env } from "@/lib/env";
+import {
+  ACTION_ERROR,
+  fail,
+  type ActionResult,
+} from "@/server/auth/action-result";
 
 /**
  * Facts about the current request, used for audit logging and rate limiting.
@@ -89,4 +95,39 @@ export function isSameOrigin(
   } catch {
     return false;
   }
+}
+
+/**
+ * The origin check every state-changing action makes.
+ *
+ * One function with one name, rather than a `guardOrigin` here and a `guard`
+ * there and an inline `isSameOrigin` somewhere else. That mattered enough to
+ * standardise: the coverage test can only assert what it can recognise, and
+ * three spellings of the same check is how one of them quietly stops being
+ * made. Returns a failed result to render, or null to carry on.
+ *
+ * Read-only actions do not need it — a cross-origin page can cause a request
+ * but cannot read the response — but they are named in the coverage test
+ * rather than left to be inferred from the absence of a call.
+ */
+export async function requireSameOrigin(): Promise<ActionResult<never> | null> {
+  const { origin, host } = await getRequestContext();
+  if (isSameOrigin(origin, host)) return null;
+
+  return fail("That request did not look right.", {
+    code: ACTION_ERROR.FORBIDDEN,
+  });
+}
+
+/**
+ * The same check, for actions that redirect or return their own shape.
+ *
+ * Not every action returns an `ActionResult` — signing out redirects, switching
+ * business redirects, and a couple return a small bespoke object. Those cannot
+ * render a failed result, so this interrupts with a 403 instead. The check
+ * itself is identical; only what happens afterwards differs.
+ */
+export async function assertSameOrigin(): Promise<void> {
+  const { origin, host } = await getRequestContext();
+  if (!isSameOrigin(origin, host)) forbidden();
 }

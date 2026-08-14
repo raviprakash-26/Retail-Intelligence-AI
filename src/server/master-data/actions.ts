@@ -28,10 +28,7 @@ import {
   NoFiscalPeriodError,
   PeriodClosedError,
 } from "@/server/accounting/post-journal-entry";
-import {
-  getRequestContext,
-  isSameOrigin,
-} from "@/server/security/request-context";
+import { requireSameOrigin } from "@/server/security/request-context";
 import { MasterDataError } from "./errors";
 import { OpeningBalanceError } from "./opening-balance";
 import { createEmployee, updateEmployee } from "./employee-service";
@@ -75,17 +72,6 @@ function revalidateMasterData(): void {
   for (const path of MASTER_PATHS) revalidatePath(path);
 }
 
-async function guardOrigin(): Promise<ActionResult<never> | null> {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail(
-      "This request could not be verified. Please reload and try again.",
-      { code: ACTION_ERROR.FORBIDDEN },
-    );
-  }
-  return null;
-}
-
 /**
  * Turns a service failure into something a form can render.
  *
@@ -124,7 +110,7 @@ export async function createProductAction(
 ): Promise<
   ActionResult<{ id: string; sku: string; openingEntry: string | null }>
 > {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("products.manage");
@@ -159,7 +145,7 @@ export async function updateProductAction(
   productId: string,
   input: ProductInput,
 ): Promise<ActionResult<{ saved: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("products.manage");
@@ -190,7 +176,7 @@ export async function setProductArchivedAction(
   productId: string,
   archived: boolean,
 ): Promise<ActionResult<{ saved: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("products.manage");
@@ -225,7 +211,7 @@ export async function createPartyAction(
 ): Promise<
   ActionResult<{ id: string; code: string; openingEntry: string | null }>
 > {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission(PARTY_PERMISSION[kind].manage);
@@ -261,7 +247,7 @@ export async function updatePartyAction(
   partyId: string,
   input: CustomerInput | SupplierInput,
 ): Promise<ActionResult<{ openingEntry: string | null }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission(PARTY_PERMISSION[kind].manage);
@@ -295,7 +281,7 @@ export async function setPartyArchivedAction(
   partyId: string,
   archived: boolean,
 ): Promise<ActionResult<{ saved: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission(PARTY_PERMISSION[kind].manage);
@@ -322,7 +308,7 @@ export async function setPartyArchivedAction(
 export async function createEmployeeAction(
   input: EmployeeInput,
 ): Promise<ActionResult<{ id: string; employeeCode: string }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("employees.manage");
@@ -355,7 +341,7 @@ export async function updateEmployeeAction(
   employeeId: string,
   input: EmployeeInput,
 ): Promise<ActionResult<{ saved: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("employees.manage");
@@ -389,7 +375,7 @@ export async function updateEmployeeAction(
 export async function createCategoryAction(
   input: CategoryInput,
 ): Promise<ActionResult<{ id: string }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("products.manage");
@@ -422,7 +408,7 @@ export async function updateCategoryAction(
   categoryId: string,
   input: CategoryInput,
 ): Promise<ActionResult<{ saved: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("products.manage");
@@ -452,7 +438,7 @@ export async function updateCategoryAction(
 export async function archiveCategoryAction(
   categoryId: string,
 ): Promise<ActionResult<{ saved: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("products.manage");
@@ -473,7 +459,7 @@ export async function archiveCategoryAction(
 export async function createUnitAction(
   input: UnitInput,
 ): Promise<ActionResult<{ id: string }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("products.manage");
@@ -506,7 +492,7 @@ export async function updateUnitAction(
   unitId: string,
   input: UnitInput,
 ): Promise<ActionResult<{ precisionLocked: boolean }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("products.manage");

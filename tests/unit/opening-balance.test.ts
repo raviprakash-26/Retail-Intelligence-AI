@@ -18,7 +18,9 @@ describe("signedOpening", () => {
   });
 
   it("makes a payable a negative debit", () => {
-    expect(signedOpening(30_000, AccountNature.CREDIT).toString()).toBe("-30000");
+    expect(signedOpening(30_000, AccountNature.CREDIT).toString()).toBe(
+      "-30000",
+    );
   });
 
   it("treats zero the same on either side", () => {
@@ -105,9 +107,7 @@ describe("correction deltas", () => {
       signedOpening(to[0], to[1]),
       signedOpening(from[0], from[1]),
     );
-    expect(toStorageString(delta)).toBe(
-      toStorageString(expected),
-    );
+    expect(toStorageString(delta)).toBe(toStorageString(expected));
   });
 
   it("nets back to zero when a change is reversed", () => {

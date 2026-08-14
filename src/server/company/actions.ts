@@ -35,9 +35,10 @@ import { createSession, setSessionCompany } from "@/server/auth/session";
 import { AUDIT_ACTION, recordAuditLog } from "@/server/audit/audit-log";
 import { invitationEmail, sendEmail } from "@/server/email/mailer";
 import {
+  assertSameOrigin,
   getRequestContext,
-  isSameOrigin,
   rateLimitKey,
+  requireSameOrigin,
 } from "@/server/security/request-context";
 import { checkRateLimit } from "@/server/security/rate-limit";
 import {
@@ -80,19 +81,6 @@ function revalidateSettings(): void {
   for (const path of SETTINGS_PATHS) revalidatePath(path);
 }
 
-async function guardOrigin(): Promise<ActionResult<never> | null> {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail(
-      "This request could not be verified. Please reload and try again.",
-      {
-        code: ACTION_ERROR.FORBIDDEN,
-      },
-    );
-  }
-  return null;
-}
-
 /** Converts a service-layer failure into a form-level result. */
 function fromTeamError(error: unknown): ActionResult<never> {
   if (error instanceof TeamOperationError) {
@@ -114,7 +102,7 @@ function fromTeamError(error: unknown): ActionResult<never> {
 export async function updateBusinessProfileAction(
   input: CompanyProfileInput,
 ): Promise<ActionResult<{ saved: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("settings.manage");
@@ -146,7 +134,7 @@ export async function updateBusinessProfileAction(
 export async function updateAccountingSettingsAction(
   input: CompanyAccountingInput,
 ): Promise<ActionResult<{ saved: true; ignoredFields: string[] }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("settings.manage");
@@ -185,7 +173,7 @@ export async function updateAccountingSettingsAction(
 export async function createBranchAction(
   input: BranchInput,
 ): Promise<ActionResult<{ id: string }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("branches.manage");
@@ -220,7 +208,7 @@ export async function updateBranchAction(
   branchId: string,
   input: BranchInput,
 ): Promise<ActionResult<{ saved: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("branches.manage");
@@ -251,7 +239,7 @@ export async function setBranchActiveAction(
   branchId: string,
   isActive: boolean,
 ): Promise<ActionResult<{ saved: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("branches.manage");
@@ -273,7 +261,7 @@ export async function setBranchActiveAction(
 export async function setPrimaryBranchAction(
   branchId: string,
 ): Promise<ActionResult<{ saved: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("branches.manage");
@@ -298,13 +286,24 @@ export async function setPrimaryBranchAction(
 export async function inviteMemberAction(
   input: InviteMemberInput,
 ): Promise<ActionResult<{ email: string; existingUser: boolean }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("users.manage");
 
   const refusal = await billingRefusal(context.company.id, { limit: "users" });
   if (refusal) return refusal;
+
+  // Invitations send email to addresses the recipient never gave us. The plan's
+  // seat count limits how many can be accepted; this limits how many strangers
+  // can be written to in an hour.
+  const invites = await checkRateLimit("INVITE_COMPANY", context.company.id);
+  if (!invites.allowed) {
+    return fail("That is a lot of invitations at once. Try again later.", {
+      code: ACTION_ERROR.RATE_LIMITED,
+      retryAfterSeconds: invites.retryAfterSeconds,
+    });
+  }
   const parsed = inviteMemberSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the details below.", {
@@ -351,7 +350,7 @@ export async function inviteMemberAction(
 export async function revokeInvitationAction(
   invitationId: string,
 ): Promise<ActionResult<{ revoked: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("users.manage");
@@ -372,7 +371,7 @@ export async function revokeInvitationAction(
 export async function changeMemberRoleAction(
   input: ChangeMemberRoleInput,
 ): Promise<ActionResult<{ saved: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("users.manage");
@@ -407,7 +406,7 @@ export async function setMemberStatusAction(
   membershipId: string,
   status: "ACTIVE" | "SUSPENDED" | "REVOKED",
 ): Promise<ActionResult<{ saved: true }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("users.manage");
@@ -436,7 +435,7 @@ export async function setMemberStatusAction(
 export async function acceptInvitationAction(
   input: AcceptInvitationInput,
 ): Promise<ActionResult<{ redirectTo: string }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const parsed = acceptInvitationSchema.safeParse(input);
@@ -510,6 +509,8 @@ export async function acceptInvitationAction(
  * the user does not belong to.
  */
 export async function switchCompanyAction(companyId: string): Promise<never> {
+  await assertSameOrigin();
+
   const session = await getAuthSession();
   if (!session) redirect("/login");
 

@@ -202,7 +202,10 @@ describe("computeLine", () => {
 describe("totalLines", () => {
   it("rounds the invoice to the rupee and records the difference", () => {
     const lines = [
-      computeLine({ quantity: 3, rate: "33.33", taxPercent: 18 }, "INTRA_STATE"),
+      computeLine(
+        { quantity: 3, rate: "33.33", taxPercent: 18 },
+        "INTRA_STATE",
+      ),
     ];
     const totals = totalLines(lines);
 
@@ -215,7 +218,10 @@ describe("totalLines", () => {
 
   it("rounds down as readily as up", () => {
     const lines = [
-      computeLine({ quantity: 1, rate: "100.20", taxPercent: 0 }, "INTRA_STATE"),
+      computeLine(
+        { quantity: 1, rate: "100.20", taxPercent: 0 },
+        "INTRA_STATE",
+      ),
     ];
     const totals = totalLines(lines);
 
@@ -226,7 +232,10 @@ describe("totalLines", () => {
 
   it("leaves the exact figure alone when rounding is off", () => {
     const lines = [
-      computeLine({ quantity: 3, rate: "33.33", taxPercent: 18 }, "INTRA_STATE"),
+      computeLine(
+        { quantity: 3, rate: "33.33", taxPercent: 18 },
+        "INTRA_STATE",
+      ),
     ];
     const totals = totalLines(lines, { roundToRupee: false });
 
@@ -259,7 +268,8 @@ describe("totalLines", () => {
     };
 
     for (let invoice = 0; invoice < 100; invoice += 1) {
-      const supplyType: SupplyType = next() > 0.5 ? "INTRA_STATE" : "INTER_STATE";
+      const supplyType: SupplyType =
+        next() > 0.5 ? "INTRA_STATE" : "INTER_STATE";
       const lines = Array.from({ length: 1 + Math.floor(next() * 6) }, () =>
         computeLine(
           {
@@ -283,15 +293,35 @@ describe("totalLines", () => {
 describe("groupByRate", () => {
   it("groups lines the way a GST return reports them", () => {
     const lines = [
-      { ...computeLine({ quantity: 1, rate: 100, taxPercent: 18 }, "INTRA_STATE"), hsnCode: "1905" },
-      { ...computeLine({ quantity: 2, rate: 100, taxPercent: 18 }, "INTRA_STATE"), hsnCode: "1905" },
-      { ...computeLine({ quantity: 1, rate: 100, taxPercent: 5 }, "INTRA_STATE"), hsnCode: "1701" },
+      {
+        ...computeLine(
+          { quantity: 1, rate: 100, taxPercent: 18 },
+          "INTRA_STATE",
+        ),
+        hsnCode: "1905",
+      },
+      {
+        ...computeLine(
+          { quantity: 2, rate: 100, taxPercent: 18 },
+          "INTRA_STATE",
+        ),
+        hsnCode: "1905",
+      },
+      {
+        ...computeLine(
+          { quantity: 1, rate: 100, taxPercent: 5 },
+          "INTRA_STATE",
+        ),
+        hsnCode: "1701",
+      },
     ];
 
     const groups = groupByRate(lines);
     expect(groups).toHaveLength(2);
 
-    const eighteen = groups.find((group) => group.taxPercent.toString() === "18");
+    const eighteen = groups.find(
+      (group) => group.taxPercent.toString() === "18",
+    );
     expect(eighteen?.taxableAmount.toString()).toBe("300");
     expect(eighteen?.totalTax.toString()).toBe("54");
     expect(eighteen?.hsnCode).toBe("1905");
@@ -299,8 +329,20 @@ describe("groupByRate", () => {
 
   it("keeps the same rate apart when the HSN differs", () => {
     const lines = [
-      { ...computeLine({ quantity: 1, rate: 100, taxPercent: 18 }, "INTRA_STATE"), hsnCode: "1905" },
-      { ...computeLine({ quantity: 1, rate: 100, taxPercent: 18 }, "INTRA_STATE"), hsnCode: "3401" },
+      {
+        ...computeLine(
+          { quantity: 1, rate: 100, taxPercent: 18 },
+          "INTRA_STATE",
+        ),
+        hsnCode: "1905",
+      },
+      {
+        ...computeLine(
+          { quantity: 1, rate: 100, taxPercent: 18 },
+          "INTRA_STATE",
+        ),
+        hsnCode: "3401",
+      },
     ];
     expect(groupByRate(lines)).toHaveLength(2);
   });

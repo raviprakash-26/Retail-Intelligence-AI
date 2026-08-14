@@ -24,10 +24,7 @@ import {
   PeriodClosedError,
 } from "@/server/accounting/post-journal-entry";
 import { MissingAccountError } from "@/server/documents/accounts";
-import {
-  getRequestContext,
-  isSameOrigin,
-} from "@/server/security/request-context";
+import { requireSameOrigin } from "@/server/security/request-context";
 import {
   createPurchase,
   voidPurchase,
@@ -51,17 +48,6 @@ function revalidatePurchases(): void {
   ]) {
     revalidatePath(path);
   }
-}
-
-async function guardOrigin(): Promise<ActionResult<never> | null> {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail(
-      "This request could not be verified. Please reload and try again.",
-      { code: ACTION_ERROR.FORBIDDEN },
-    );
-  }
-  return null;
 }
 
 function fromServiceError(error: unknown): ActionResult<never> {
@@ -92,7 +78,7 @@ function fromServiceError(error: unknown): ActionResult<never> {
 export async function createPurchaseAction(
   input: PurchaseInput,
 ): Promise<ActionResult<PostedPurchase>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("purchases.create");
@@ -128,7 +114,7 @@ export async function voidPurchaseAction(
   purchaseId: string,
   input: VoidPurchaseInput,
 ): Promise<ActionResult<{ entryNumber: string }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("purchases.void");

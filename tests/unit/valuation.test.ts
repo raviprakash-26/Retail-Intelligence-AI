@@ -10,7 +10,11 @@ import {
 } from "@/lib/inventory/valuation";
 import { money } from "@/lib/money";
 
-function layer(sequence: number, quantity: string, unitCost: string): CostLayer {
+function layer(
+  sequence: number,
+  quantity: string,
+  unitCost: string,
+): CostLayer {
   return { sequence, quantity: money(quantity), unitCost: money(unitCost) };
 }
 
@@ -47,7 +51,11 @@ describe("weighted average", () => {
 
   it("reports what was available so the message can name figures", () => {
     try {
-      consumeWeightedAverage({ onHandQuantity: 3, averageCost: 10, quantity: 8 });
+      consumeWeightedAverage({
+        onHandQuantity: 3,
+        averageCost: 10,
+        quantity: 8,
+      });
       expect.unreachable("should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(InsufficientStockError);
@@ -95,7 +103,11 @@ describe("FIFO", () => {
 
   it("respects the sequence even when the layers arrive out of order", () => {
     const result = consumeFifo({
-      layers: [layer(2, "10", "60"), layer(0, "10", "40"), layer(1, "10", "50")],
+      layers: [
+        layer(2, "10", "60"),
+        layer(0, "10", "40"),
+        layer(1, "10", "50"),
+      ],
       quantity: 10,
     });
     expect(result.unitCost.toString()).toBe("40");

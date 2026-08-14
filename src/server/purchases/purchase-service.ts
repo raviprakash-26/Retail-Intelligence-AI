@@ -613,7 +613,11 @@ export async function voidPurchase(params: {
               lineTotal: true,
               discountAmount: true,
               product: {
-                select: { name: true, isStockTracked: true, unit: { select: { code: true } } },
+                select: {
+                  name: true,
+                  isStockTracked: true,
+                  unit: { select: { code: true } },
+                },
               },
             },
           },
@@ -630,7 +634,10 @@ export async function voidPurchase(params: {
         );
       }
       if (purchase.status !== DocumentStatus.POSTED) {
-        throw new PurchaseError("Only a posted bill can be voided.", "NOT_POSTED");
+        throw new PurchaseError(
+          "Only a posted bill can be voided.",
+          "NOT_POSTED",
+        );
       }
 
       const entryId = purchase.journalEntryId;
@@ -805,7 +812,12 @@ export async function listPurchases(params: {
     ...(query.length >= 1
       ? {
           OR: [
-            { billNumber: { contains: query, mode: Prisma.QueryMode.insensitive } },
+            {
+              billNumber: {
+                contains: query,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
             {
               supplierBillNo: {
                 contains: query,
@@ -822,58 +834,59 @@ export async function listPurchases(params: {
       : {}),
   };
 
-  const [total, purchases, postedTotals, credit, outstanding] = await Promise.all([
-    prisma.purchase.count({ where }),
-    prisma.purchase.findMany({
-      where,
-      select: {
-        id: true,
-        billNumber: true,
-        supplierBillNo: true,
-        billDate: true,
-        dueDate: true,
-        status: true,
-        paymentMode: true,
-        supplyType: true,
-        itcEligible: true,
-        taxableAmount: true,
-        cgstAmount: true,
-        sgstAmount: true,
-        igstAmount: true,
-        cessAmount: true,
-        totalAmount: true,
-        supplier: { select: { name: true } },
-      },
-      orderBy: [{ billDate: "desc" }, { billNumber: "desc" }],
-      skip: (page - 1) * PURCHASE_PAGE_SIZE,
-      take: PURCHASE_PAGE_SIZE,
-    }),
-    prisma.purchase.aggregate({
-      where: { ...where, status: DocumentStatus.POSTED },
-      _sum: { totalAmount: true },
-    }),
-    prisma.purchase.aggregate({
-      where: {
-        companyId: params.companyId,
-        status: DocumentStatus.POSTED,
-        itcEligible: true,
-      },
-      _sum: {
-        cgstAmount: true,
-        sgstAmount: true,
-        igstAmount: true,
-        cessAmount: true,
-      },
-    }),
-    prisma.purchase.aggregate({
-      where: {
-        companyId: params.companyId,
-        status: DocumentStatus.POSTED,
-        paymentMode: "CREDIT",
-      },
-      _sum: { totalAmount: true, paidAmount: true },
-    }),
-  ]);
+  const [total, purchases, postedTotals, credit, outstanding] =
+    await Promise.all([
+      prisma.purchase.count({ where }),
+      prisma.purchase.findMany({
+        where,
+        select: {
+          id: true,
+          billNumber: true,
+          supplierBillNo: true,
+          billDate: true,
+          dueDate: true,
+          status: true,
+          paymentMode: true,
+          supplyType: true,
+          itcEligible: true,
+          taxableAmount: true,
+          cgstAmount: true,
+          sgstAmount: true,
+          igstAmount: true,
+          cessAmount: true,
+          totalAmount: true,
+          supplier: { select: { name: true } },
+        },
+        orderBy: [{ billDate: "desc" }, { billNumber: "desc" }],
+        skip: (page - 1) * PURCHASE_PAGE_SIZE,
+        take: PURCHASE_PAGE_SIZE,
+      }),
+      prisma.purchase.aggregate({
+        where: { ...where, status: DocumentStatus.POSTED },
+        _sum: { totalAmount: true },
+      }),
+      prisma.purchase.aggregate({
+        where: {
+          companyId: params.companyId,
+          status: DocumentStatus.POSTED,
+          itcEligible: true,
+        },
+        _sum: {
+          cgstAmount: true,
+          sgstAmount: true,
+          igstAmount: true,
+          cessAmount: true,
+        },
+      }),
+      prisma.purchase.aggregate({
+        where: {
+          companyId: params.companyId,
+          status: DocumentStatus.POSTED,
+          paymentMode: "CREDIT",
+        },
+        _sum: { totalAmount: true, paidAmount: true },
+      }),
+    ]);
 
   return {
     rows: purchases.map((purchase) => ({
@@ -950,7 +963,13 @@ export async function getPurchase(params: {
       voidReason: true,
       journalEntryId: true,
       supplier: {
-        select: { id: true, name: true, gstin: true, city: true, stateCode: true },
+        select: {
+          id: true,
+          name: true,
+          gstin: true,
+          city: true,
+          stateCode: true,
+        },
       },
       branch: { select: { name: true } },
       items: {
@@ -970,7 +989,12 @@ export async function getPurchase(params: {
           lineTotal: true,
           unitCost: true,
           product: {
-            select: { id: true, name: true, sku: true, unit: { select: { code: true } } },
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              unit: { select: { code: true } },
+            },
           },
         },
         orderBy: { lineNumber: "asc" },

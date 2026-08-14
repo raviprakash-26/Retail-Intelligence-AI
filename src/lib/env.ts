@@ -1,3 +1,4 @@
+import "server-only";
 import { z } from "zod";
 
 /**
@@ -7,9 +8,10 @@ import { z } from "zod";
  * startup with a precise message is far safer for a financial system than
  * discovering a missing key when a user tries to post an invoice.
  *
- * Server-only values live in `env`; anything the browser may see lives in
- * `publicEnv`. Importing `env` from a client component is a build error
- * because of the `server-only` guard below.
+ * Server-only values live here; anything the browser may see lives in
+ * `public-env.ts`. Importing this module from a client component is a build
+ * error, which is what the `server-only` import above is for — the comment
+ * used to claim that guard existed before the import did.
  */
 
 const nonEmpty = (label: string) =>
@@ -249,15 +251,3 @@ export function assertEnv(): void {
 export function resetEnvCacheForTests(): void {
   cached = undefined;
 }
-
-/**
- * Values that are safe to render in the browser. Next.js inlines
- * `process.env.NEXT_PUBLIC_*` at build time, so these must be referenced by
- * their full literal name rather than looked up dynamically.
- */
-export const publicEnv = {
-  appName: process.env.NEXT_PUBLIC_APP_NAME ?? "Retail Intelligence AI",
-  appShortName: process.env.NEXT_PUBLIC_APP_SHORT_NAME ?? "RIAI",
-  defaultCurrency: process.env.NEXT_PUBLIC_DEFAULT_CURRENCY ?? "INR",
-  defaultLocale: process.env.NEXT_PUBLIC_DEFAULT_LOCALE ?? "en-IN",
-} as const;

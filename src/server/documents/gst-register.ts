@@ -61,8 +61,9 @@ export async function writeGstRows(
     data: groups.map((group) => ({
       companyId: params.companyId,
       taxRateId:
-        rateByKey.get(`${group.hsnCode ?? ""}|${group.taxPercent.toFixed(4)}`) ??
-        null,
+        rateByKey.get(
+          `${group.hsnCode ?? ""}|${group.taxPercent.toFixed(4)}`,
+        ) ?? null,
       direction: params.direction,
       documentType: params.documentType,
       documentId: params.documentId,

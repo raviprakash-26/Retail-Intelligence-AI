@@ -4,7 +4,10 @@ import { prisma, type DbClient } from "@/lib/db";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import { findStateByCode, gstinStateCode } from "@/lib/constants/india";
 import { toStorageString } from "@/lib/money";
-import type { CustomerInput, SupplierInput } from "@/lib/validation/master-data";
+import type {
+  CustomerInput,
+  SupplierInput,
+} from "@/lib/validation/master-data";
 import { recordAuditLog } from "@/server/audit/audit-log";
 import { MasterDataError } from "./errors";
 import { allocateMasterCode } from "./master-code";
@@ -100,7 +103,9 @@ type ListParams = {
   page?: number;
 };
 
-export async function listParties(params: ListParams): Promise<PartyListResult> {
+export async function listParties(
+  params: ListParams,
+): Promise<PartyListResult> {
   const page = Math.max(1, params.page ?? 1);
   const query = params.query?.trim() ?? "";
 
@@ -149,7 +154,11 @@ export async function listParties(params: ListParams): Promise<PartyListResult> 
       ? await Promise.all([
           prisma.customer.count({ where }),
           prisma.customer
-            .findMany({ where, select: { ...select, creditLimit: true }, ...paging })
+            .findMany({
+              where,
+              select: { ...select, creditLimit: true },
+              ...paging,
+            })
             .then((records) =>
               records.map((record) => ({
                 ...toRow(record),
@@ -306,7 +315,12 @@ export async function createParty(params: {
   const config = PARTY_KIND[params.kind];
 
   return prisma.$transaction(async (tx) => {
-    await assertNameIsFree(tx, params.kind, params.companyId, params.input.name);
+    await assertNameIsFree(
+      tx,
+      params.kind,
+      params.companyId,
+      params.input.name,
+    );
 
     const opening = await resolveOpeningContext(tx, params.companyId);
     const controlAccountId = await resolveSystemAccountId(
@@ -328,7 +342,11 @@ export async function createParty(params: {
       },
     });
 
-    const data = { ...toRecordData(params.input), companyId: params.companyId, code };
+    const data = {
+      ...toRecordData(params.input),
+      companyId: params.companyId,
+      code,
+    };
     const created =
       params.kind === "CUSTOMER"
         ? await tx.customer.create({
@@ -350,7 +368,10 @@ export async function createParty(params: {
       partyId: created.id,
       source: config.source,
       sourceId: created.id,
-      target: signedOpening(params.input.openingBalance, params.input.openingNature),
+      target: signedOpening(
+        params.input.openingBalance,
+        params.input.openingNature,
+      ),
       posted: 0,
       narration: `Opening balance — ${params.input.name}`,
       createdById: params.userId,

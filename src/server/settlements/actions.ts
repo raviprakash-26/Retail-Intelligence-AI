@@ -24,10 +24,7 @@ import {
   PeriodClosedError,
 } from "@/server/accounting/post-journal-entry";
 import { MissingAccountError } from "@/server/documents/accounts";
-import {
-  getRequestContext,
-  isSameOrigin,
-} from "@/server/security/request-context";
+import { requireSameOrigin } from "@/server/security/request-context";
 import { openBills, openInvoices, type OpenDocument } from "./outstanding";
 import {
   createPayment,
@@ -59,17 +56,6 @@ function revalidateSettlements(): void {
   }
 }
 
-async function guardOrigin(): Promise<ActionResult<never> | null> {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail(
-      "This request could not be verified. Please reload and try again.",
-      { code: ACTION_ERROR.FORBIDDEN },
-    );
-  }
-  return null;
-}
-
 function fromServiceError(error: unknown): ActionResult<never> {
   if (error instanceof SettlementError) {
     return fail(error.message, {
@@ -98,7 +84,7 @@ function fromServiceError(error: unknown): ActionResult<never> {
 export async function createReceiptAction(
   input: ReceiptInput,
 ): Promise<ActionResult<PostedSettlement>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("receipts.create");
@@ -130,7 +116,7 @@ export async function createReceiptAction(
 export async function createPaymentAction(
   input: PaymentInput,
 ): Promise<ActionResult<PostedSettlement>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("payments.create");
@@ -163,7 +149,7 @@ export async function voidReceiptAction(
   receiptId: string,
   input: VoidSettlementInput,
 ): Promise<ActionResult<{ entryNumber: string }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("receipts.void");
@@ -198,7 +184,7 @@ export async function voidPaymentAction(
   paymentId: string,
   input: VoidSettlementInput,
 ): Promise<ActionResult<{ entryNumber: string }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("payments.void");

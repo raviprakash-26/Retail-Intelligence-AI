@@ -8,10 +8,7 @@ import {
   type ActionResult,
 } from "@/server/auth/action-result";
 import { assertPermission } from "@/server/auth/context";
-import {
-  getRequestContext,
-  isSameOrigin,
-} from "@/server/security/request-context";
+import { requireSameOrigin } from "@/server/security/request-context";
 import {
   cancelSubscription,
   changePlan,
@@ -29,20 +26,10 @@ import {
  * that would need money to change hands returns the reason instead.
  */
 
-async function guardOrigin(): Promise<ActionResult<never> | null> {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail("That request did not look right.", {
-      code: ACTION_ERROR.FORBIDDEN,
-    });
-  }
-  return null;
-}
-
 export async function changePlanAction(
   planKey: string,
 ): Promise<ActionResult<{ planName: string; overLimit: string[] }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("billing.manage");
@@ -71,7 +58,7 @@ export async function changePlanAction(
 export async function cancelSubscriptionAction(): Promise<
   ActionResult<{ cancelled: true }>
 > {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("billing.manage");
@@ -94,7 +81,7 @@ export async function cancelSubscriptionAction(): Promise<
 export async function resumeSubscriptionAction(): Promise<
   ActionResult<{ resumed: true }>
 > {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("billing.manage");

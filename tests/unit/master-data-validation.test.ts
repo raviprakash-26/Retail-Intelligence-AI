@@ -90,7 +90,10 @@ describe("GSTIN cross-checks", () => {
   });
 
   it("names the state the GSTIN actually belongs to", () => {
-    const issue = gstIdentityIssue({ gstin: "29AABCS1429B1ZX", stateCode: "27" });
+    const issue = gstIdentityIssue({
+      gstin: "29AABCS1429B1ZX",
+      stateCode: "27",
+    });
     expect(issue?.field).toBe("gstin");
     // The message has to be actionable: "does not match" alone leaves the user
     // guessing which of the two fields is wrong.
@@ -111,7 +114,9 @@ describe("GSTIN cross-checks", () => {
   });
 
   it("ignores a malformed GSTIN, which the format rule reports instead", () => {
-    expect(gstIdentityIssue({ gstin: "NOTAGSTIN", stateCode: "29" })).toBeNull();
+    expect(
+      gstIdentityIssue({ gstin: "NOTAGSTIN", stateCode: "29" }),
+    ).toBeNull();
   });
 });
 
@@ -143,9 +148,9 @@ describe("customer and supplier schemas", () => {
   });
 
   it("rejects credit days beyond a year", () => {
-    expect(customerSchema.safeParse(customer({ creditDays: 400 })).success).toBe(
-      false,
-    );
+    expect(
+      customerSchema.safeParse(customer({ creditDays: 400 })).success,
+    ).toBe(false);
   });
 
   it("uppercases a GSTIN typed in lower case", () => {
@@ -174,7 +179,9 @@ describe("product schema", () => {
   });
 
   it.each(["1006", "100610", "10061010"])("accepts a %s-digit HSN", (hsn) => {
-    expect(productSchema.safeParse(product({ hsnCode: hsn })).success).toBe(true);
+    expect(productSchema.safeParse(product({ hsnCode: hsn })).success).toBe(
+      true,
+    );
   });
 
   it.each(["100", "10061", "1006101012", "ABCD"])(
@@ -269,9 +276,9 @@ describe("employee schema", () => {
   });
 
   it("rejects an IFSC in the wrong shape", () => {
-    expect(employeeSchema.safeParse(employee({ ifsc: "CNRB123" })).success).toBe(
-      false,
-    );
+    expect(
+      employeeSchema.safeParse(employee({ ifsc: "CNRB123" })).success,
+    ).toBe(false);
     expect(
       employeeSchema.safeParse(employee({ ifsc: "CNRB0000421" })).success,
     ).toBe(true);
@@ -281,8 +288,11 @@ describe("employee schema", () => {
 describe("taxonomy schemas", () => {
   it("accepts a category with just a name", () => {
     expect(
-      categorySchema.safeParse({ name: "Staples", parentId: "", description: "" })
-        .success,
+      categorySchema.safeParse({
+        name: "Staples",
+        parentId: "",
+        description: "",
+      }).success,
     ).toBe(true);
   });
 

@@ -19,13 +19,7 @@ import {
   totalLines,
   type SupplyType,
 } from "@/lib/tax/gst";
-import {
-  type Decimal,
-  add,
-  isZero,
-  money,
-  toStorageString,
-} from "@/lib/money";
+import { type Decimal, add, isZero, money, toStorageString } from "@/lib/money";
 import type { SaleInput } from "@/lib/validation/sales";
 import { postJournalEntry } from "@/server/accounting/post-journal-entry";
 import { recordAuditLog } from "@/server/audit/audit-log";
@@ -143,7 +137,10 @@ async function resolveProducts(
     if (!map.has(id)) {
       // An id from another tenant resolves to nothing here, which is the same
       // answer as an id that never existed.
-      throw new SaleError("A product on this invoice could not be found.", "NOT_FOUND");
+      throw new SaleError(
+        "A product on this invoice could not be found.",
+        "NOT_FOUND",
+      );
     }
   }
 
@@ -207,7 +204,11 @@ export async function createSale(params: {
         : null;
 
       if (input.customerId && !customer) {
-        throw new SaleError("That customer could not be found.", "NOT_FOUND", "customerId");
+        throw new SaleError(
+          "That customer could not be found.",
+          "NOT_FOUND",
+          "customerId",
+        );
       }
       if (customer?.archivedAt) {
         throw new SaleError(
@@ -236,7 +237,10 @@ export async function createSale(params: {
       const computed = input.lines.map((line) => {
         const product = products.get(line.productId);
         if (!product) {
-          throw new SaleError("A product on this invoice could not be found.", "NOT_FOUND");
+          throw new SaleError(
+            "A product on this invoice could not be found.",
+            "NOT_FOUND",
+          );
         }
         const result = computeLine(
           {
@@ -430,8 +434,14 @@ export async function createSale(params: {
       if (!isZero(totals.roundOff)) {
         lines.push(
           totals.roundOff.greaterThan(0)
-            ? { accountId: accountId(SYSTEM_ACCOUNT.ROUND_OFF), credit: totals.roundOff }
-            : { accountId: accountId(SYSTEM_ACCOUNT.ROUND_OFF), debit: totals.roundOff.abs() },
+            ? {
+                accountId: accountId(SYSTEM_ACCOUNT.ROUND_OFF),
+                credit: totals.roundOff,
+              }
+            : {
+                accountId: accountId(SYSTEM_ACCOUNT.ROUND_OFF),
+                debit: totals.roundOff.abs(),
+              },
         );
       }
 
@@ -594,10 +604,16 @@ export async function voidSale(params: {
         throw new SaleError("That invoice could not be found.", "NOT_FOUND");
       }
       if (sale.status === DocumentStatus.VOIDED) {
-        throw new SaleError("This invoice has already been voided.", "ALREADY_VOIDED");
+        throw new SaleError(
+          "This invoice has already been voided.",
+          "ALREADY_VOIDED",
+        );
       }
       if (sale.status !== DocumentStatus.POSTED) {
-        throw new SaleError("Only a posted invoice can be voided.", "NOT_POSTED");
+        throw new SaleError(
+          "Only a posted invoice can be voided.",
+          "NOT_POSTED",
+        );
       }
 
       const company = await tx.company.findUniqueOrThrow({
@@ -902,7 +918,13 @@ export async function getSale(params: { companyId: string; saleId: string }) {
       postedAt: true,
       journalEntryId: true,
       customer: {
-        select: { id: true, name: true, gstin: true, city: true, stateCode: true },
+        select: {
+          id: true,
+          name: true,
+          gstin: true,
+          city: true,
+          stateCode: true,
+        },
       },
       branch: { select: { name: true } },
       items: {
@@ -922,7 +944,14 @@ export async function getSale(params: { companyId: string; saleId: string }) {
           cessAmount: true,
           lineTotal: true,
           unitCost: true,
-          product: { select: { id: true, name: true, sku: true, unit: { select: { code: true } } } },
+          product: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              unit: { select: { code: true } },
+            },
+          },
         },
         orderBy: { lineNumber: "asc" },
       },

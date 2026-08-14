@@ -50,6 +50,17 @@ export const RATE_LIMITS = {
   PASSWORD_RESET_ACCOUNT: { limit: 4, windowSeconds: 3600 },
   /** Verification-email resends for one account. */
   RESEND_VERIFICATION: { limit: 4, windowSeconds: 3600 },
+  /**
+   * Questions to the assistant, per user.
+   *
+   * The monthly allowance on the plan is the commercial limit; this is the
+   * safety one. A loop calling the action a thousand times in a minute spends
+   * real money at the provider before the monthly count catches up, and the
+   * person it charges is us.
+   */
+  AI_MESSAGE_USER: { limit: 20, windowSeconds: 60 },
+  /** Invitations sent from one company. Email sent to strangers, so capped. */
+  INVITE_COMPANY: { limit: 20, windowSeconds: 3600 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export type RateLimitName = keyof typeof RATE_LIMITS;

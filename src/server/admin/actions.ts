@@ -9,10 +9,7 @@ import {
   type ActionResult,
 } from "@/server/auth/action-result";
 import { requirePlatformAdmin } from "@/server/auth/context";
-import {
-  getRequestContext,
-  isSameOrigin,
-} from "@/server/security/request-context";
+import { requireSameOrigin } from "@/server/security/request-context";
 import {
   setCompanyStatus,
   setEntitlementOverride,
@@ -31,16 +28,6 @@ import {
  * disclosure through a different door.
  */
 
-async function guard(): Promise<ActionResult<never> | null> {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail("That request did not look right.", {
-      code: ACTION_ERROR.FORBIDDEN,
-    });
-  }
-  return null;
-}
-
 const STATUSES: Record<string, CompanyStatus> = {
   ACTIVE: CompanyStatus.ACTIVE,
   SUSPENDED: CompanyStatus.SUSPENDED,
@@ -52,7 +39,7 @@ export async function setCompanyStatusAction(
   status: string,
   reason?: string,
 ): Promise<ActionResult<{ status: string }>> {
-  const originError = await guard();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const session = await requirePlatformAdmin();
@@ -88,7 +75,7 @@ export async function setFeatureOverrideAction(
   granted: boolean | null,
   current: Record<string, boolean>,
 ): Promise<ActionResult<{ overrides: Record<string, boolean> }>> {
-  const originError = await guard();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const session = await requirePlatformAdmin();
@@ -120,7 +107,7 @@ export async function updatePlanAction(
   planId: string,
   input: { name?: string; priceMinor?: number; isPublic?: boolean },
 ): Promise<ActionResult<{ planId: string }>> {
-  const originError = await guard();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const session = await requirePlatformAdmin();

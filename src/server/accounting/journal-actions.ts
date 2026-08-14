@@ -20,10 +20,7 @@ import {
   NoFiscalPeriodError,
   PeriodClosedError,
 } from "@/server/accounting/post-journal-entry";
-import {
-  getRequestContext,
-  isSameOrigin,
-} from "@/server/security/request-context";
+import { requireSameOrigin } from "@/server/security/request-context";
 import {
   createManualEntry,
   reverseManualEntry,
@@ -44,17 +41,6 @@ function revalidateJournal(): void {
   for (const path of ["/app", "/app/accounting", "/app/accounting/journal"]) {
     revalidatePath(path);
   }
-}
-
-async function guardOrigin(): Promise<ActionResult<never> | null> {
-  const { origin, host } = await getRequestContext();
-  if (!isSameOrigin(origin, host)) {
-    return fail(
-      "This request could not be verified. Please reload and try again.",
-      { code: ACTION_ERROR.FORBIDDEN },
-    );
-  }
-  return null;
 }
 
 function fromServiceError(error: unknown): ActionResult<never> {
@@ -79,7 +65,7 @@ function fromServiceError(error: unknown): ActionResult<never> {
 export async function createJournalEntryAction(
   input: JournalEntryInput,
 ): Promise<ActionResult<PostedManualEntry>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("accounting.journal.create");
@@ -111,7 +97,7 @@ export async function reverseJournalEntryAction(
   entryId: string,
   input: VoidJournalEntryInput,
 ): Promise<ActionResult<{ entryNumber: string }>> {
-  const originError = await guardOrigin();
+  const originError = await requireSameOrigin();
   if (originError) return originError;
 
   const context = await assertPermission("accounting.journal.void");

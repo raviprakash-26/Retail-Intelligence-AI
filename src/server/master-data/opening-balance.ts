@@ -41,7 +41,8 @@ export const OPENING_SOURCE = {
   PRODUCT: "PRODUCT_OPENING",
 } as const;
 
-export type OpeningSource = (typeof OPENING_SOURCE)[keyof typeof OPENING_SOURCE];
+export type OpeningSource =
+  (typeof OPENING_SOURCE)[keyof typeof OPENING_SOURCE];
 
 export class OpeningBalanceError extends Error {
   constructor(
@@ -194,17 +195,13 @@ export async function postOpeningDelta(
     partyType: params.partyType ?? null,
     partyId: params.partyId ?? null,
     narration: params.narration,
-    ...(debitsControlAccount
-      ? { debit: magnitude }
-      : { credit: magnitude }),
+    ...(debitsControlAccount ? { debit: magnitude } : { credit: magnitude }),
   };
 
   const capitalLine = {
     accountId: params.context.capitalAccountId,
     narration: "Owner's capital — opening position",
-    ...(debitsControlAccount
-      ? { credit: magnitude }
-      : { debit: magnitude }),
+    ...(debitsControlAccount ? { credit: magnitude } : { debit: magnitude }),
   };
 
   const entry = await postJournalEntry(tx, {

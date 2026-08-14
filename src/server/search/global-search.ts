@@ -13,11 +13,7 @@ import { prisma } from "@/lib/db";
  */
 
 export type SearchResultKind =
-  | "customer"
-  | "supplier"
-  | "product"
-  | "account"
-  | "page";
+  "customer" | "supplier" | "product" | "account" | "page";
 
 export type SearchResult = {
   id: string;
@@ -49,7 +45,12 @@ export async function globalSearch(params: {
           where: {
             companyId,
             archivedAt: null,
-            OR: [{ name: contains }, { code: contains }, { phone: contains }, { gstin: contains }],
+            OR: [
+              { name: contains },
+              { code: contains },
+              { phone: contains },
+              { gstin: contains },
+            ],
           },
           select: { id: true, name: true, code: true, phone: true },
           take: PER_KIND_LIMIT,
@@ -62,7 +63,12 @@ export async function globalSearch(params: {
           where: {
             companyId,
             archivedAt: null,
-            OR: [{ name: contains }, { code: contains }, { phone: contains }, { gstin: contains }],
+            OR: [
+              { name: contains },
+              { code: contains },
+              { phone: contains },
+              { gstin: contains },
+            ],
           },
           select: { id: true, name: true, code: true, phone: true },
           take: PER_KIND_LIMIT,
@@ -75,7 +81,12 @@ export async function globalSearch(params: {
           where: {
             companyId,
             archivedAt: null,
-            OR: [{ name: contains }, { sku: contains }, { barcode: contains }, { hsnCode: contains }],
+            OR: [
+              { name: contains },
+              { sku: contains },
+              { barcode: contains },
+              { hsnCode: contains },
+            ],
           },
           select: { id: true, name: true, sku: true, sellingPrice: true },
           take: PER_KIND_LIMIT,
