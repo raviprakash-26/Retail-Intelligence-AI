@@ -364,6 +364,7 @@ export async function provisionCompany(
     { key: "RECEIPT", prefix: "RCP-" },
     { key: "PAYMENT", prefix: "PAY-" },
     { key: "JOURNAL", prefix: "JV-" },
+    { key: "PAYROLL", prefix: "SAL-" },
     { key: "CUSTOMER", prefix: "CUS-" },
     { key: "SUPPLIER", prefix: "SUP-" },
     { key: "EMPLOYEE", prefix: "EMP-" },

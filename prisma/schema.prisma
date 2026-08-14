@@ -532,6 +532,13 @@ model Company {
   /// 1-12. April (4) is the Indian default.
   fiscalYearStartMonth Int                    @default(4)
   inventoryMethod    InventoryValuationMethod @default(WEIGHTED_AVERAGE)
+  /// Whether the establishment is registered under each scheme. Facts about
+  /// the business, not something derivable from anything else stored here.
+  providentFundApplicable Boolean               @default(false)
+  esiApplicable           Boolean               @default(false)
+  /// Monthly professional tax, or null where the state levies none or the
+  /// business has not said. Never guessed from the address.
+  professionalTaxMonthly  Decimal?              @db.Decimal(18, 4)
   /// True for seeded sample tenants; surfaced in the UI as a demo banner.
   isDemo             Boolean                  @default(false)
   onboardingStep     Int                      @default(0)
@@ -1832,6 +1839,8 @@ model Payroll {
   status         PayrollStatus @default(DRAFT)
   grossAmount    Decimal       @default(0) @db.Decimal(18, 4)
   deductionAmount Decimal      @default(0) @db.Decimal(18, 4)
+  /// Employer PF and ESI: on top of gross, not withheld from it.
+  employerContributions Decimal @default(0) @db.Decimal(18, 4)
   netAmount      Decimal       @default(0) @db.Decimal(18, 4)
   journalEntryId String?       @db.Uuid
   postedAt       DateTime?
@@ -1854,7 +1863,17 @@ model PayrollItem {
   employeeId  String   @db.Uuid
   basicSalary Decimal  @default(0) @db.Decimal(18, 4)
   allowances  Decimal  @default(0) @db.Decimal(18, 4)
+  /// Total withheld. The components below add up to it; both are stored so a
+  /// payslip and a remittance can be answered from the same row.
   deductions  Decimal  @default(0) @db.Decimal(18, 4)
+  employeeProvidentFund  Decimal @default(0) @db.Decimal(18, 4)
+  employeeStateInsurance Decimal @default(0) @db.Decimal(18, 4)
+  professionalTax        Decimal @default(0) @db.Decimal(18, 4)
+  /// Entered by whoever runs the payroll. This platform does not compute TDS.
+  taxDeductedAtSource    Decimal @default(0) @db.Decimal(18, 4)
+  /// The employer's own contributions: a cost, not a deduction.
+  employerProvidentFund  Decimal @default(0) @db.Decimal(18, 4)
+  employerStateInsurance Decimal @default(0) @db.Decimal(18, 4)
   netSalary   Decimal  @default(0) @db.Decimal(18, 4)
   paidAt      DateTime?
   notes       String?

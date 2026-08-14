@@ -21,6 +21,21 @@ export async function purgeCompany(companyId: string): Promise<void> {
     await tx.$executeRaw(
       Prisma.sql`SET LOCAL app.allow_financial_purge = 'on'`,
     );
+
+    // Payroll first, and explicitly.
+    //
+    // A payslip references its employee with ON DELETE RESTRICT, which is the
+    // right rule everywhere else: somebody who has been paid cannot be erased
+    // from under the record of paying them. Deleting the company cascades to
+    // employees and to payroll runs independently, and nothing orders those
+    // two against each other — so the employee delete can reach the constraint
+    // before the run that owns the payslip has gone.
+    //
+    // Clearing the runs here removes their items by cascade and leaves the
+    // employees free. The restriction stays in force for every ordinary
+    // delete, which is the point of having it.
+    await tx.payroll.deleteMany({ where: { companyId } });
+
     await tx.company.delete({ where: { id: companyId } });
   });
 }
