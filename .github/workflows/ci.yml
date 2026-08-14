@@ -56,6 +56,19 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
 
+      # The backup round trip shells out to pg_dump and pg_restore, and a
+      # client older than the server refuses to dump at all. The runner ships
+      # some version of these; this pins them to the server's major so the
+      # round trip is actually exercised rather than skipped.
+      - name: Postgres client tools
+        run: |
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client-16
+          pg_dump --version
+
       - name: Typecheck
         run: npm run typecheck
 
