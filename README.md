@@ -460,10 +460,11 @@ a lapsed subscription still cannot touch a record, that platform administration
 never returns a figure from a tenant's books, that document numbering survives a
 rollback, and that one company cannot see another's anything.
 
-**End-to-end tests** run in a browser against a production build, not the dev
-server: the content security policy, static versus dynamic rendering and the
-contents of the client bundle all behave differently under `next dev`, and a
-suite that passes only there is checking a build nobody ships. They cover the
+**End-to-end tests** run in a browser against the standalone server — the exact
+artefact the container runs — rather than the dev server or even `next start`:
+the content security policy, static versus dynamic rendering and the contents of
+the client bundle all behave differently under `next dev`, and a suite that
+passes only there is checking a build nobody ships. They cover the
 layer the other two cannot reach — server actions need a request context, so
 they sit at zero percent in the unit and integration suites — and they check
 what a person actually sees: that a sale entered through the form posts its own

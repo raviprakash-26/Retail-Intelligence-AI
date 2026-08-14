@@ -29,7 +29,8 @@
     "test:db:setup": "NODE_ENV=test prisma migrate deploy",
     "test:unit": "vitest run tests/unit",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "start:standalone": "rm -rf .next/standalone/.next/static .next/standalone/public && cp -R .next/static .next/standalone/.next/static && cp -R public .next/standalone/public && node .next/standalone/server.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",

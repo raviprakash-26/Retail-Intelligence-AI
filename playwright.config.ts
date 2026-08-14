@@ -77,7 +77,14 @@ export default defineConfig({
   webServer: process.env.E2E_NO_SERVER
     ? undefined
     : {
-        command: `npx next start -p ${PORT}`,
+        // The standalone server, not `next start`. With `output: "standalone"`
+        // the artefact that ships is `.next/standalone/server.js` — the one the
+        // container runs — and `next start` warns it does not work with that
+        // configuration. Testing the thing that is deployed is the whole reason
+        // this suite runs against a production build rather than the dev
+        // server; running a different server would quietly undo that.
+        command: "npm run start:standalone",
+        env: { PORT: String(PORT) },
         url: BASE_URL,
         reuseExistingServer: true,
         timeout: 120_000,
