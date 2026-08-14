@@ -32,7 +32,7 @@ jobs:
           POSTGRES_DB: riai_test
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U riai"
+          --health-cmd "pg_isready -U riai -d riai_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -82,14 +82,24 @@ jobs:
           POSTGRES_DB: riai_dev
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U riai"
+          --health-cmd "pg_isready -U riai -d riai_dev"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
 
     env:
       DATABASE_URL: postgresql://riai:riai@localhost:5432/riai_dev?schema=public
-      AUTH_SECRET: test-only-secret-value-at-least-32-characters-long
+      # `next start` boots in production mode, so this job is subject to the
+      # production hardening in lib/env.ts — which refused to start the server
+      # on a placeholder secret and on unacknowledged in-memory rate limiting.
+      # The validator was right and this configuration was wrong: a job that
+      # runs a production server has to be configured like one.
+      #
+      # Not a real secret and not treated as one: it signs sessions for a
+      # throwaway database that lives for the length of this job.
+      AUTH_SECRET: 7Qx2mVnB4kRt9YpL6wZcHs3JdEaFgU8vNiObTrXyMlPq
+      RATE_LIMIT_ALLOW_IN_MEMORY: "true"
+      # http is permitted on localhost; the validator rejects it anywhere else.
       APP_URL: http://localhost:3111
       # The browser suite signs in as the seeded demo tenant and the seeded
       # development administrator, so this job wants both.
