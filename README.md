@@ -1811,6 +1811,12 @@ control. So the attempt proceeds, an error goes to the log, and
 working is the thing worth preventing, and that counter is what an operator
 alerts on.
 
+In CI a missing Redis is a failure rather than a skip. A skipped suite reports
+green, which makes "the tests ran" indistinguishable from "the service never
+came up" — and exercising a real server was the entire point of declaring one.
+Locally it still skips, because not having Redis installed is a fact about the
+machine.
+
 The tests run against a real Redis rather than a mock. Everything worth proving
 here — that the counter is shared between connections, that it expires, that the
 increment and the expiry are atomic — is a property of Redis, and none of them

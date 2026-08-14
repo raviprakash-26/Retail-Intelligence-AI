@@ -52,6 +52,25 @@ const probe: RedisClientType | undefined = await (async () => {
   }
 })();
 
+/**
+ * In CI a missing Redis is a failure, not a skip.
+ *
+ * A skipped suite reports green, which makes "the tests ran" indistinguishable
+ * from "the service never came up" — and the whole point of adding a Redis
+ * service to the workflow was to exercise a real server. Encoding that here
+ * means the build says so, rather than somebody remembering to read a log.
+ *
+ * Locally it still skips: not having Redis installed is a fact about the
+ * machine rather than a defect.
+ */
+if (probe === undefined && process.env.CI === "true") {
+  throw new Error(
+    `Redis is required in CI and none answered at ${REDIS_URL}. ` +
+      "The workflow declares a redis service; if it did not start, fix that " +
+      "rather than letting these tests skip into a green build.",
+  );
+}
+
 const available = probe !== undefined;
 
 afterAll(async () => {
