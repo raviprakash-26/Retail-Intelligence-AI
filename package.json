@@ -2,7 +2,7 @@
   "name": "retail-intelligence-ai",
   "version": "0.1.0",
   "private": true,
-  "description": "Retail Intelligence AI — Smart Accounting. Intelligent Auditing. Better Business Decisions.",
+  "description": "Retail Intelligence AI \u2014 Smart Accounting. Intelligent Auditing. Better Business Decisions.",
   "engines": {
     "node": ">=20.11.0"
   },
@@ -27,7 +27,9 @@
     "db:reset": "prisma migrate reset --force",
     "verify": "npm run typecheck && npm run lint && npm run test",
     "test:db:setup": "NODE_ENV=test prisma migrate deploy",
-    "test:unit": "vitest run tests/unit"
+    "test:unit": "vitest run tests/unit",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",
@@ -67,6 +69,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "4.3.3",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",

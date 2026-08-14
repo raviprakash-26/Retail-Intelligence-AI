@@ -49,3 +49,10 @@ prisma/*.db-journal
 
 # local postgres data dir used by scripts/dev-db.sh
 /.pgdata
+
+# Playwright: saved sessions, traces, screenshots and the HTML report.
+# The sessions are real credentials for the development seed; none of it
+# belongs in a commit.
+/test-results
+/playwright-report
+/blob-report
