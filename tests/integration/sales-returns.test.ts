@@ -327,6 +327,65 @@ describe("a return posts its own accounting", () => {
     ).toBeCloseTo(0, 2);
   }, 90_000);
 
+  it("balances a return whose exact value ends in paise", async () => {
+    // ₹49.90 × 3 plus GST does not land on a rupee. The credit note is issued
+    // at the whole rupee, like the invoice it reverses, so the fraction has to
+    // be posted to Round Off. A service that computes a rounded total and
+    // never posts the rounding produces a one-sided entry — and fails here and
+    // nowhere else, because every round-figure fixture hides it.
+    const fixture = await createCompany();
+    const sale = await sell(fixture, 3, 49.9);
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+    });
+
+    const posted = await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: sale.id,
+        returnDate: today,
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 3 }],
+      },
+    });
+
+    // Credited at a whole rupee, with the fraction accounted for.
+    expect(Number(posted.totalAmount) % 1).toBeCloseTo(0, 6);
+
+    const record = await prisma.salesReturn.findUniqueOrThrow({
+      where: { id: posted.id },
+      select: {
+        taxableAmount: true,
+        cgstAmount: true,
+        sgstAmount: true,
+        igstAmount: true,
+        roundOff: true,
+        totalAmount: true,
+      },
+    });
+
+    // The rounding is real, and the stored figures reconcile to the paisa.
+    expect(Number(record.roundOff)).not.toBe(0);
+    expect(
+      Number(record.taxableAmount) +
+        Number(record.cgstAmount) +
+        Number(record.sgstAmount) +
+        Number(record.igstAmount) +
+        Number(record.roundOff),
+    ).toBeCloseTo(Number(record.totalAmount), 4);
+
+    const trial = await getTrialBalance({
+      companyId: fixture.companyId,
+      to: today,
+    });
+    expect(trial.balanced).toBe(true);
+  }, 90_000);
+
   it("writes the credit note into the GST register as a negative supply", async () => {
     const fixture = await createCompany();
     const sale = await sell(fixture, 10);

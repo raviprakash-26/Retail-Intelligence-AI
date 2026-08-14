@@ -29,6 +29,7 @@ import { writeGstRows } from "@/server/documents/gst-register";
 import { recordInward } from "@/server/inventory/stock-service";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { ReturnError } from "@/server/returns/errors";
+import type { ReturnableLine } from "@/server/returns/return-queries";
 
 /**
  * Sales returns — a credit note against an invoice.
@@ -258,6 +259,7 @@ export async function createSalesReturn(params: {
           sgstAmount: toStorageString(totals.sgstAmount),
           igstAmount: toStorageString(totals.igstAmount),
           cessAmount: toStorageString(totals.cessAmount),
+          roundOff: toStorageString(totals.roundOff),
           totalAmount: toStorageString(totals.totalAmount),
           costOfGoodsReturned: toStorageString(costOfGoodsReturned),
           createdById: params.userId,
@@ -318,6 +320,7 @@ export async function createSalesReturn(params: {
         SYSTEM_ACCOUNT.GST_OUTPUT_CESS,
         SYSTEM_ACCOUNT.COST_OF_GOODS_SOLD,
         SYSTEM_ACCOUNT.INVENTORY,
+        SYSTEM_ACCOUNT.ROUND_OFF,
       ]);
 
       const refundAccount =
@@ -363,6 +366,24 @@ export async function createSalesReturn(params: {
             }
           : {}),
       });
+
+      // The credit note is issued at a whole rupee, exactly as the invoice was,
+      // and the fraction goes where the invoice's went. Leaving it out would
+      // credit the customer 50 paise less than the note says and leave the
+      // entry one-sided — which is how this was found.
+      if (!isZero(totals.roundOff)) {
+        lines.push(
+          totals.roundOff.greaterThan(0)
+            ? {
+                accountId: accountId(SYSTEM_ACCOUNT.ROUND_OFF),
+                debit: totals.roundOff,
+              }
+            : {
+                accountId: accountId(SYSTEM_ACCOUNT.ROUND_OFF),
+                credit: totals.roundOff.abs(),
+              },
+        );
+      }
 
       if (!isZero(costOfGoodsReturned)) {
         lines.push(
@@ -456,17 +477,7 @@ export async function createSalesReturn(params: {
 export async function returnableLines(params: {
   companyId: string;
   saleId: string;
-}): Promise<
-  Array<{
-    lineId: string;
-    productName: string;
-    sku: string;
-    sold: string;
-    alreadyReturned: string;
-    returnable: string;
-    rate: string;
-  }>
-> {
+}): Promise<ReturnableLine[]> {
   const sale = await prisma.sale.findFirst({
     where: { id: params.saleId, companyId: params.companyId },
     select: {
@@ -495,7 +506,7 @@ export async function returnableLines(params: {
       lineId: item.id,
       productName: item.product.name,
       sku: item.product.sku,
-      sold: toStorageString(item.quantity),
+      originalQuantity: toStorageString(item.quantity),
       alreadyReturned: toStorageString(used),
       returnable: toStorageString(subtract(item.quantity, used)),
       rate: toStorageString(item.rate),

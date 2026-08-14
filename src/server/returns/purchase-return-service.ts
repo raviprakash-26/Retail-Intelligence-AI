@@ -29,6 +29,7 @@ import { writeGstRows } from "@/server/documents/gst-register";
 import { recordOutward } from "@/server/inventory/stock-service";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { ReturnError } from "@/server/returns/errors";
+import type { ReturnableLine } from "@/server/returns/return-queries";
 
 /**
  * Purchase returns — a debit note against a supplier's bill.
@@ -235,6 +236,7 @@ export async function createPurchaseReturn(params: {
           sgstAmount: toStorageString(totals.sgstAmount),
           igstAmount: toStorageString(totals.igstAmount),
           cessAmount: toStorageString(totals.cessAmount),
+          roundOff: toStorageString(totals.roundOff),
           totalAmount: toStorageString(totals.totalAmount),
           createdById: params.userId,
           postedAt: new Date(),
@@ -292,6 +294,7 @@ export async function createPurchaseReturn(params: {
         SYSTEM_ACCOUNT.GST_INPUT_SGST,
         SYSTEM_ACCOUNT.GST_INPUT_IGST,
         SYSTEM_ACCOUNT.GST_INPUT_CESS,
+        SYSTEM_ACCOUNT.ROUND_OFF,
       ]);
 
       const refundAccount =
@@ -329,6 +332,23 @@ export async function createPurchaseReturn(params: {
           // given up. That is what a debit note does under GST.
           lines.push({ accountId: accountId(key), credit: amount });
         }
+      }
+
+      // Rounded to the rupee like the bill it reverses, with the fraction
+      // posted rather than absorbed. A debit note is raised for the whole
+      // rupee the supplier will credit.
+      if (!isZero(totals.roundOff)) {
+        lines.push(
+          totals.roundOff.greaterThan(0)
+            ? {
+                accountId: accountId(SYSTEM_ACCOUNT.ROUND_OFF),
+                credit: totals.roundOff,
+              }
+            : {
+                accountId: accountId(SYSTEM_ACCOUNT.ROUND_OFF),
+                debit: totals.roundOff.abs(),
+              },
+        );
       }
 
       if (!isZero(stockValueRemoved)) {
@@ -428,17 +448,7 @@ export async function createPurchaseReturn(params: {
 export async function returnableBillLines(params: {
   companyId: string;
   purchaseId: string;
-}): Promise<
-  Array<{
-    lineId: string;
-    productName: string;
-    sku: string;
-    bought: string;
-    alreadyReturned: string;
-    returnable: string;
-    rate: string;
-  }>
-> {
+}): Promise<ReturnableLine[]> {
   const purchase = await prisma.purchase.findFirst({
     where: { id: params.purchaseId, companyId: params.companyId },
     select: {
@@ -467,7 +477,7 @@ export async function returnableBillLines(params: {
       lineId: item.id,
       productName: item.product.name,
       sku: item.product.sku,
-      bought: toStorageString(item.quantity),
+      originalQuantity: toStorageString(item.quantity),
       alreadyReturned: toStorageString(used),
       returnable: toStorageString(subtract(item.quantity, used)),
       rate: toStorageString(item.rate),

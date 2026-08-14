@@ -35,6 +35,13 @@ its landed cost, holds recoverable GST as an asset and raises what you owe the
 supplier. Buy at two prices and sell, and the cost of sales is the blend — the
 margin on the dashboard is real.
 
+**And goods can come back.** A credit note against an invoice puts the stock
+back at what the sale issued it for, debits a contra-revenue account rather than
+shrinking Sales, and appends negative rows to the GST register. A debit note
+against a bill takes the stock off the shelf, gives up the input credit claimed
+on it, and names the gap between what the supplier refunds and what the books
+carried. Neither edits the document it reverses.
+
 **Every cost is now recorded too.** Rent, salaries, electricity and repairs
 each post to their own account, so the profit and loss account adds up without
 anyone sorting receipts at year end — and something the shop keeps and uses goes
@@ -150,10 +157,13 @@ tenants' own actions go to.
 image, a compose file for a single machine, separate liveness and readiness
 probes, and a pipeline that runs the same three gates a developer runs. What it
 is _not_ ready for is written down as plainly as what it does — payments,
-filing, returns, backups and scale are all named.
+filing, backups and scale are all named.
 
-Sales and purchase _returns_ are still to come. Every module that is not built
-says so on its own page rather than showing an empty screen, and no figure
+**Goods that come back are recorded as returns, not as edits.** A credit note
+against an invoice and a debit note against a bill each post their own balanced
+entry, move the stock the other way and append negative rows to the GST
+register. Neither touches the document it reverses. Every module that is not
+built says so on its own page rather than showing an empty screen, and no figure
 anywhere in the product is invented to fill a gap.
 
 ---
@@ -333,6 +343,7 @@ src/
     documents/             Line editor, product picker, void — shared by both
     sales/                 Invoice form and list
     purchases/             Bill form and list
+    returns/               Return dialog, note lists, notes against a document
     expenses/              Expense form, list and category breakdown
     settlements/           Receipt/payment form, allocation table, ageing panel
     inventory/             Stock list, stock card, count correction
@@ -381,6 +392,7 @@ src/
     documents/             Accounts, GST register, reversal — shared by modules
     sales/                 Invoice posting: tax, stock, journal, GST register
     purchases/             Bill posting: landed cost, input credit, payables
+    returns/               Credit and debit notes, read from the original document
     expenses/              Expense posting: categories, capital vs revenue
     settlements/           Receipts and payments: allocation, ageing, void
     inventory/             Positions, movements, reconciliation, adjustments
@@ -437,9 +449,9 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1155 tests: unit + integration
+npm run test          # 1182 tests: unit + integration
 npm run test:unit     # unit only, no database required
-npm run test:e2e      # 29 checks in a browser, against a production build
+npm run test:e2e      # 33 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
 ```
 
@@ -648,6 +660,87 @@ notice afterwards. Voiding a bill frees the reference again.
 **Voiding is refused once the stock has been sold.** Taking it back out would
 drive the position negative and fabricate a cost, so the refusal names the
 figures and points at a purchase return, which is what actually happened.
+
+---
+
+## What a return does
+
+A return is not a void, and it is not an edit. Voiding says the document should
+never have existed; a return says the trade happened and some of it came back.
+Both leave the original where it is, because a ledger that can be edited is not
+a ledger.
+
+**Everything is read from the document being reversed.** The form sends a
+document id, a date and a quantity per line. It does not send a price, a tax
+rate or a total — those come from the invoice or bill line being returned
+against. That is a trust boundary, and it is also the only way the accounting
+reverses cleanly: returning at today's price misstates revenue, returning at
+today's average cost invents a profit on goods that only travelled to the
+customer and back, and returning at today's tax rate files the wrong credit
+note.
+
+**You cannot return more than went out.** Each line draws down against what the
+original carried, minus what earlier returns already took. The check is keyed by
+invoice line rather than by product, so the same item at two prices on one
+invoice is tracked separately. The form shows what is left before anybody starts,
+and the server refuses it again on the way in.
+
+### A credit note, against an invoice
+
+```
+   4 returned of 10 sold at ₹100, 18% GST
+                       │
+   ┌───────────────────┼──────────────────────┐
+   ▼                   ▼                      ▼
+ Stock ledger     Journal entry          GST register
+ +4 PCS           Dr Sales Returns 400   SalesReturn rows
+ @ the cost the   Dr GST Output     72   at −400 taxable
+ sale issued it   Cr Receivables   472   and −72 tax
+                  Dr Inventory     240
+                  Cr Cost of Sales 240
+```
+
+**Sales Returns, not a smaller sale.** The return debits a contra-revenue
+account beside Sales rather than reducing it. Netting the two would hide the
+return rate, which for a retailer is one of the more diagnostic numbers there
+is — and the trading account still shows gross sales less returns, because that
+is what a contra account is for.
+
+### A debit note, against a bill
+
+The mirror, with one asymmetry that matters. Under perpetual inventory a
+purchase is never an expense — it debits stock — so a return **credits stock**
+rather than a contra-purchase income account. The goods are physically back with
+the supplier, and an asset that is not there must not sit on the balance sheet.
+
+The second asymmetry follows from the first. Stock leaves at what the valuation
+method says it is worth today, exactly as any other issue does, because that is
+what keeps the Inventory account and the stock ledger in agreement. But the
+supplier refunds the price on _their_ bill. Where freight was capitalised, or
+the weighted average has moved since, the two disagree — and the difference is
+real money. It is recognised as a direct cost rather than left inflating the
+value of goods that have gone.
+
+**Input credit is given up.** Tax claimed on goods that went back is reversed,
+which is what a debit note does under GST.
+
+The standard chart still carries a **Purchase Returns** account at 5002, and it
+stays at zero. It is the contra to Purchases at 5001, which under perpetual
+inventory is never posted to either — the pair is kept for businesses migrating
+from periodic books, not because anything here writes to it. A debit note is
+found under Returns and in the journal, not in that account.
+
+### What both do to the tax register
+
+Negative rows are **appended**; the original document's rows are never edited.
+A period somebody has already reviewed still reads the way it did when they
+reviewed it, and the return appears in the period it happened in rather than
+retrospectively changing an earlier one.
+
+Returns are rounded to the rupee like every other document here, and the
+fraction is posted to Round Off rather than absorbed. A credit note for ₹176.65
+is issued at ₹177 with 35 paise accounted for — the alternative is an entry that
+does not balance, which is how this was found.
 
 ---
 
@@ -1591,8 +1684,6 @@ avoids.
   apply immediately, and an upgrade is declined with the reason.
 - **Nothing is filed with any authority.** GST and income tax are prepared for a
   human to review and submit.
-- **Sales and purchase returns are not built.** A shop that takes goods back has
-  no way to record it, which for many retailers is disqualifying on its own.
 - **Backups are entirely the operator's problem.** The compose file keeps the
   database in a local volume and schedules nothing. For books somebody will need
   in a tax dispute three years from now, that is not sufficient — use managed
@@ -1706,6 +1797,7 @@ query text is the only thing the browser controls.
 | 25    | Security hardening — CSP, origin coverage, bundle scanning      | **Done** |
 | 26    | Testing — a browser suite in the repository, coverage gaps      | **Done** |
 | 27    | Deployment — image, compose, probes, pipeline, honest limits    | **Done** |
+| 28    | Returns — credit and debit notes, contra accounts, GST reversal | **Done** |
 
 ---
 

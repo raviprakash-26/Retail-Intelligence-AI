@@ -360,6 +360,55 @@ describe("a debit note posts its own accounting", () => {
     await assertTrialBalances(fixture.companyId);
   }, 120_000);
 
+  it("balances a return whose exact value ends in paise", async () => {
+    // ₹49.90 × 3 at 18% does not land on a rupee. The debit note is raised for
+    // the whole rupee the supplier will credit, so the fraction has to be
+    // posted. Every other fixture here uses round figures, which is precisely
+    // why this case needs its own test.
+    const fixture = await createCompany();
+    const bill = await buy(fixture, 3, 49.9);
+    const line = await firstLine(fixture, bill.id);
+
+    const posted = await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: today,
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: line.lineId, quantity: 3 }],
+      },
+    });
+
+    expect(Number(posted.totalAmount) % 1).toBeCloseTo(0, 6);
+
+    const record = await prisma.purchaseReturn.findUniqueOrThrow({
+      where: { id: posted.id },
+      select: {
+        taxableAmount: true,
+        cgstAmount: true,
+        sgstAmount: true,
+        igstAmount: true,
+        roundOff: true,
+        totalAmount: true,
+      },
+    });
+
+    expect(Number(record.roundOff)).not.toBe(0);
+    expect(
+      Number(record.taxableAmount) +
+        Number(record.cgstAmount) +
+        Number(record.sgstAmount) +
+        Number(record.igstAmount) +
+        Number(record.roundOff),
+    ).toBeCloseTo(Number(record.totalAmount), 4);
+
+    await assertTrialBalances(fixture.companyId);
+  }, 90_000);
+
   it("writes the debit note into the GST register as a negative inward supply", async () => {
     const fixture = await createCompany();
     const bill = await buy(fixture, 10);
