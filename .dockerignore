@@ -1,0 +1,38 @@
+# Everything the image does not need, and several things it must not have.
+#
+# .env is the important line. It sits beside the source, it holds the database
+# password and the signing secret, and a COPY . . without this file bakes it
+# into a layer that anybody who can pull the image can read.
+
+.env
+.env.*
+!.env.example
+
+node_modules
+.next
+out
+build
+coverage
+test-results
+playwright-report
+blob-report
+
+.git
+.github
+.gitignore
+
+README.md
+*.md
+!prisma/**/*.md
+
+.vscode
+.idea
+.DS_Store
+
+# The local Postgres data directory used by the dev script.
+.pgdata
+
+# Tests do not run inside the image; they run before it is built.
+tests
+playwright.config.ts
+vitest.config.mts

@@ -1,0 +1,61 @@
+# A single-machine deployment: the application, a database, and nothing else.
+#
+# This is the honest shape of a small self-hosted install — one shop's
+# accountant running it on one box, or somebody trying the whole thing before
+# deciding. It is not a production topology for many tenants: there is one
+# instance, no backup schedule, and the database volume lives on the same host.
+# The README says what that means and what to do instead.
+#
+#   cp .env.example .env      # then fill in AUTH_SECRET and the database URL
+#   docker compose up -d --build
+#   docker compose run --rm app npx prisma migrate deploy
+#   docker compose run --rm app npx tsx prisma/seed.ts   # platform data
+
+services:
+  postgres:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-riai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-riai}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # The application will not start usefully before this answers, and
+      # `depends_on` alone only waits for the container, not for the server.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-riai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Not published. The application reaches it over the compose network; a
+    # database on a public port is how a self-hosted install becomes somebody
+    # else's.
+    expose:
+      - "5432"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-riai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-riai}?schema=public
+      APP_URL: ${APP_URL:?set APP_URL in .env}
+      AUTH_SECRET: ${AUTH_SECRET:?generate one with: openssl rand -base64 48}
+      # One instance, so in-memory rate limiting is honest here. Two would
+      # need Redis, and the environment validator says so rather than letting
+      # the limits quietly halve.
+      RATE_LIMIT_ALLOW_IN_MEMORY: "true"
+      # Nothing is seeded into a production database by default: the demo
+      # tenant and the development administrator both refuse to run here.
+      SEED_DEMO_DATA: "false"
+    ports:
+      - "${APP_PORT:-3000}:3000"
+
+volumes:
+  postgres-data:

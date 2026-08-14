@@ -147,7 +147,12 @@ export const config = {
     /*
      * Everything except static assets and image optimisation, which never
      * need a session check and would only add latency.
+     *
+     * The health and readiness probes are excluded too. An orchestrator hits
+     * them every few seconds, they carry no session and render no HTML, and a
+     * probe that runs through the same pipeline it is meant to observe is a
+     * probe that cannot tell you that pipeline is broken.
      */
-    "/((?!_next/static|_next/image|favicon.ico|icon.svg|robots.txt|sitemap.xml|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|api/health|api/ready|favicon.ico|icon.svg|robots.txt|sitemap.xml|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico)$).*)",
   ],
 };

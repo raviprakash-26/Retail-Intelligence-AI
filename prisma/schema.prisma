@@ -28,6 +28,11 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
+  /// The query engine is a native binary, so the image it runs in has to be
+  /// named at generate time. "native" keeps local development working; the
+  /// Debian target is what the container uses. An image built without this
+  /// starts, serves one request, and fails on the first query.
+  binaryTargets   = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {

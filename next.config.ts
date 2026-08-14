@@ -29,6 +29,12 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
 
+  // Emits `.next/standalone` — a self-contained server with only the modules
+  // actually reached, rather than the whole of node_modules. It is what the
+  // container image copies, and it is the difference between an image of a few
+  // hundred megabytes and one of well over a gigabyte.
+  output: "standalone",
+
   // Compile-time checking of every `Link href` and `router.push`. A typo in a
   // route becomes a build failure instead of a 404 a user finds first.
   typedRoutes: true,

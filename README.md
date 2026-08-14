@@ -13,13 +13,14 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–26 of 27 complete** — project foundation, database schema, design
+**All 27 phases complete** — project foundation, database schema, design
 system, public website, authentication, company onboarding, the application
 shell, master data, the full transaction set, the accounting engine and its
 reports, inventory, GST and income tax preparation, analytics, forecasting, the
 AI accountant, the AI auditor, the AI advisor, subscriptions, platform
-administration, security hardening and the testing pass. See
-[Roadmap](#roadmap) for what is built and what is not.
+administration, security hardening, the testing pass and deployment. See
+[Roadmap](#roadmap) for what is built, and
+[what this is not ready for](#what-this-is-not-ready-for) for what is not.
 
 You can register a business, sign in and out, reset a password, confirm an email
 address, edit your business and accounting settings, manage branches, invite
@@ -145,8 +146,13 @@ and not one figure from its ledger. There is no way to sign in as a customer,
 and every administrative change is written to the same append-only log the
 tenants' own actions go to.
 
-**Deployment comes next.** Sales and purchase _returns_ are still to come as
-well. Every module that is not built
+**It builds into a container and knows when it is unwell.** A multi-stage
+image, a compose file for a single machine, separate liveness and readiness
+probes, and a pipeline that runs the same three gates a developer runs. What it
+is _not_ ready for is written down as plainly as what it does — payments,
+filing, returns, backups and scale are all named.
+
+Sales and purchase _returns_ are still to come. Every module that is not built
 says so on its own page rather than showing an empty screen, and no figure
 anywhere in the product is invented to fill a gap.
 
@@ -295,6 +301,7 @@ incident on a live system, not a convenience.
 | `npm run test:coverage` | Coverage report                                    |
 | `npm run db:migrate`    | Create and apply a migration                       |
 | `npm run db:seed`       | Seed platform data and the demo tenant             |
+| `docker compose up -d`  | Run the application and a database on one machine  |
 | `npm run db:studio`     | Prisma Studio                                      |
 | `npm run db:reset`      | Drop, re-migrate and re-seed                       |
 
@@ -432,7 +439,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ```bash
 npm run test          # 1155 tests: unit + integration
 npm run test:unit     # unit only, no database required
-npm run test:e2e      # 25 checks in a browser, against a production build
+npm run test:e2e      # 29 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
 ```
 
@@ -1510,6 +1517,98 @@ how the habit goes.
 
 ---
 
+## Deployment
+
+```bash
+docker compose up -d --build
+docker compose run --rm app npx prisma migrate deploy
+docker compose run --rm app npx tsx --conditions=react-server prisma/seed.ts
+```
+
+The image is multi-stage and ends up holding a Node runtime, the standalone
+server Next.js emits, the Prisma engine and the migrations — no build tools, no
+development dependencies, no source. It runs as an unprivileged user, because a
+process that posts other people's accounts should not also be able to rewrite
+the filesystem it runs on.
+
+Debian slim rather than Alpine, deliberately. Prisma's query engine is a native
+binary and its musl build has been a reliable source of "works locally,
+segfaults in the cluster"; thirty megabytes is not worth that class of bug in
+something that records financial transactions. The `binaryTargets` line in the
+schema is what makes the engine exist inside the image at all — without it the
+container starts, serves one page, and fails on the first query.
+
+`.dockerignore` excludes `.env`. That one line is the difference between a
+deployment and an incident: the file sits beside the source, holds the database
+password and the signing secret, and `COPY . .` would bake it into a layer
+anybody who can pull the image can read.
+
+### Two probes, answering different questions
+
+| Endpoint      | Asks                      | On a database outage |
+| ------------- | ------------------------- | -------------------- |
+| `/api/health` | Is this process running   | still 200            |
+| `/api/ready`  | Should it be sent traffic | 503                  |
+
+Conflating them is a common and expensive mistake: a liveness probe that touches
+the database restarts every container when Postgres blinks, turning a
+recoverable outage into a longer one of the application as well. Both were
+tested against a genuinely stopped database, not a mocked one.
+
+Neither says anything beyond the answer — no version, no hostname, no
+connection error. A health endpoint is reachable by anybody who can reach the
+service, and a connection error quoted back over HTTP names the host, the port,
+the database and often the user. The reason goes to the log instead.
+
+Both are excluded from the middleware matcher. A probe hit every few seconds
+that runs through the same request pipeline it exists to observe is a probe that
+cannot tell you that pipeline is broken.
+
+### What must be set before it will start
+
+The application refuses to boot on a configuration it cannot trust, and says
+which line to fix rather than failing on the first request that needs the
+missing value. In production it will not accept the placeholder `AUTH_SECRET`
+from `.env.example`, will not serve a non-localhost deployment over plain
+`http`, and will not use in-memory rate limiting unless the deployment either
+provides Redis or states that it runs a single instance — two replicas with
+in-memory counters hand an attacker twice the budget, quietly.
+
+Neither the demo tenant nor the development administrator will seed into a
+production environment. Both have published passwords; on a live system that is
+an incident rather than a convenience.
+
+### What this is not ready for
+
+The rest of this document describes what the product does. This section is the
+other half, and it is here because a deployment guide that implies more
+readiness than exists is the same kind of dishonesty the rest of the build
+avoids.
+
+- **No payment can be taken.** There is a seam for Razorpay and Stripe and no
+  integration behind it. Subscriptions work, plan changes that cost nothing
+  apply immediately, and an upgrade is declined with the reason.
+- **Nothing is filed with any authority.** GST and income tax are prepared for a
+  human to review and submit.
+- **Sales and purchase returns are not built.** A shop that takes goods back has
+  no way to record it, which for many retailers is disqualifying on its own.
+- **Backups are entirely the operator's problem.** The compose file keeps the
+  database in a local volume and schedules nothing. For books somebody will need
+  in a tax dispute three years from now, that is not sufficient — use managed
+  Postgres with point-in-time recovery, or set up and _test_ a restore.
+- **One instance, no horizontal scaling story.** Rate limiting is in-memory
+  unless Redis is configured, and nothing has been tested behind more than one
+  process.
+- **No observability integration.** Errors go to the log and stop there; there
+  is no tracing, no metrics endpoint, no alerting.
+- **The AI features need a provider that has not been paid for.** With none
+  configured they say so and answer nothing, which is the intended state rather
+  than a broken one.
+- **It has never been run at scale.** Every figure in this document comes from a
+  test suite and a seeded shop, not from production traffic.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -1605,7 +1704,7 @@ query text is the only thing the browser controls.
 | 24    | Admin panel — metadata only, no impersonation, logged           | **Done** |
 | 25    | Security hardening — CSP, origin coverage, bundle scanning      | **Done** |
 | 26    | Testing — a browser suite in the repository, coverage gaps      | **Done** |
-| 27    | Production deployment                                           | Next     |
+| 27    | Deployment — image, compose, probes, pipeline, honest limits    | **Done** |
 
 ---
 
