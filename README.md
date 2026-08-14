@@ -458,9 +458,9 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1283 tests: unit + integration
+npm run test          # 1291 tests: unit + integration
 npm run test:unit     # unit only, no database required
-npm run test:e2e      # 46 checks in a browser, against a production build
+npm run test:e2e      # 48 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
 ```
 

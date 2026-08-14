@@ -30,6 +30,55 @@ test.describe("running payroll", () => {
     expect(body).toMatch(/does not work it out/i);
   });
 
+  test("posts a run, and the entry shows where the money went", async ({
+    page,
+  }) => {
+    // The preview test below stops short of committing. This one goes through
+    // with it, because "can somebody actually run payroll" is the question the
+    // module exists to answer and a preview proves only half of it.
+    await page.goto("/app/payroll/new");
+    await page.waitForLoadState("networkidle");
+
+    if (/Nobody to pay/i.test(await page.locator("body").innerText())) return;
+
+    const post = page.getByRole("button", { name: /^Post payroll for/ });
+    if (await post.isDisabled()) return; // Already run for this period.
+
+    await post.click();
+    await page.waitForURL(/\/app\/payroll\/[0-9a-f-]{8}/, { timeout: 30_000 });
+    await page.waitForLoadState("networkidle");
+
+    const body = await page.locator("body").innerText();
+    expect(body).toMatch(/Payslips/i);
+    expect(body).toMatch(/Journal entry/i);
+    expect(body).toMatch(/Debits equal credits/i);
+    // Gross is a cost and net is owed to staff — two figures, not one.
+    expect(body).toMatch(/Salaries & Wages|Salary Payable/i);
+    expect(body).toMatch(/is a cost rather than a deduction/i);
+
+    // And the books still balance after it.
+    await page.goto("/app/accounting/trial-balance");
+    await page.waitForLoadState("networkidle");
+    expect(await page.locator("body").innerText()).not.toMatch(
+      /out of balance|does not balance/i,
+    );
+  });
+
+  test("refuses to pay the same period twice", async ({ page }) => {
+    // Paying twice is easy to do and expensive to undo. The run above has
+    // already taken this period, so the form must say so.
+    await page.goto("/app/payroll/new");
+    await page.waitForLoadState("networkidle");
+
+    const body = await page.locator("body").innerText();
+    if (/Nobody to pay/i.test(body)) return;
+
+    expect(body).toMatch(/has already been run/i);
+    await expect(
+      page.getByRole("button", { name: /^Post payroll for/ }),
+    ).toBeDisabled();
+  });
+
   test("previews a run in full before anything is posted", async ({ page }) => {
     await page.goto("/app/payroll/new");
     await page.waitForLoadState("networkidle");
