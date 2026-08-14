@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { seedPermissionsAndRoles } from "./seed/permissions";
 import { seedSubscriptionPlans } from "./seed/plans";
 import { DEMO, seedDemoCompany } from "./seed/demo-company";
+import { PLATFORM_ADMIN, seedPlatformAdmin } from "./seed/platform-admin";
 
 /**
  * Database seed.
@@ -55,6 +56,11 @@ async function main() {
   const plans = await seedSubscriptionPlans(prisma);
   console.log(`  ✓ ${plans.plans} subscription plans`);
 
+  const admin = await seedPlatformAdmin(prisma);
+  if (admin) {
+    console.log(`  ✓ platform administrator (${PLATFORM_ADMIN.email})`);
+  }
+
   if (!shouldSeedDemo()) {
     console.log(
       "→ Skipping demo data (set SEED_DEMO_DATA=true to include it).",
@@ -79,6 +85,12 @@ async function main() {
   console.log(`    Accountant  ${DEMO.accountantEmail}`);
   console.log(`    Cashier     ${DEMO.cashierEmail}`);
   console.log(`    Password    ${DEMO.password}`);
+  if (admin) {
+    console.log("");
+    console.log("  Platform administration (development only):");
+    console.log(`    Admin       ${PLATFORM_ADMIN.email}`);
+    console.log(`    Password    ${PLATFORM_ADMIN.password}`);
+  }
   console.log("");
   console.log(`✔ Seed complete in ${Date.now() - startedAt}ms`);
 }
