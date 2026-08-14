@@ -107,7 +107,11 @@ function accountInput(
   overrides: Partial<AccountInput> = {},
 ): AccountInput {
   return {
-    code: "6113",
+    // Well clear of the standard chart, which ends at 6401 and grows as the
+    // product does. A test that claims a code adjacent to the system accounts
+    // is a test that breaks the next time one is added — which is exactly what
+    // happened when payroll took 6113.
+    code: "6901",
     name: "Cold storage hire",
     groupId,
     type: "EXPENSE",
@@ -480,7 +484,7 @@ describe("shaping the chart of accounts", () => {
     const chart = await getChartOfAccounts({ companyId: fixture.companyId });
     const found = chart.accounts.find((account) => account.id === created.id);
 
-    expect(found?.code).toBe("6113");
+    expect(found?.code).toBe("6901");
     expect(found?.isSystem).toBe(false);
     expect(found?.nature).toBe("DEBIT");
     expect(found?.section).toBe("PROFIT_AND_LOSS");

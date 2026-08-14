@@ -158,6 +158,13 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         permission: "employees.view",
         status: "ready",
       },
+      {
+        label: "Payroll",
+        href: "/app/payroll",
+        icon: "HandCoins",
+        permission: "payroll.view",
+        status: "ready",
+      },
     ],
   },
   {

@@ -1,0 +1,404 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
+import { trialBalanceIsBalanced } from "@/lib/accounting/double-entry";
+import { subtract, toStorageString } from "@/lib/money";
+import type { RegisterInput } from "@/lib/validation/auth";
+import type { EmployeeInput } from "@/lib/validation/master-data";
+import { registerOwner } from "@/server/auth/registration";
+import { createEmployee } from "@/server/master-data/employee-service";
+import {
+  createPayrollRun,
+  previewPayroll,
+  listPayrollRuns,
+  getPayrollRun,
+  PayrollError,
+} from "@/server/payroll/payroll-service";
+import {
+  disconnectTestDb,
+  ensurePlatformData,
+  purgeTestCompany,
+  purgeTestUsers,
+  testDb,
+  uniqueSlug,
+} from "../helpers/test-db";
+
+/**
+ * Payroll.
+ *
+ * The arithmetic is unit-tested; what needs a database is the posting. Payroll
+ * is the one transaction where the obvious entry is wrong — gross is an
+ * expense and net is a liability, but the gap between them is four separate
+ * debts to four separate authorities, and an entry that lumps them balances
+ * perfectly while being useless.
+ */
+
+const prisma = testDb();
+const createdCompanies: string[] = [];
+const createdEmails: string[] = [];
+
+const today = new Date().toISOString().slice(0, 10);
+
+function registrationInput(email: string): RegisterInput {
+  return {
+    account: {
+      fullName: "Ravi Prakash",
+      email,
+      mobile: "9845012345",
+      password: "MountainRiver42!",
+      confirmPassword: "MountainRiver42!",
+      acceptTerms: true,
+    },
+    business: {
+      businessName: `Payroll ${uniqueSlug("Mart")}`,
+      businessType: "SOLE_PROPRIETORSHIP",
+      gstRegistration: "REGULAR",
+      gstin: "29AAAPR1234K1ZP",
+      pan: "AAAPR1234K",
+      addressLine1: "42 Avenue Road",
+      city: "Bengaluru",
+      stateCode: "29",
+      pincode: "560053",
+    },
+    accounting: {
+      fiscalYearStartMonth: 4,
+      currency: "INR",
+      openingCashBalance: 500_000,
+      openingBankBalance: 0,
+      inventoryMethod: "WEIGHTED_AVERAGE",
+      loadDemoData: false,
+    },
+  };
+}
+
+type Fixture = { companyId: string; userId: string; actorEmail: string };
+
+async function createCompany(policy?: {
+  providentFund?: boolean;
+  esi?: boolean;
+  professionalTax?: number | null;
+}): Promise<Fixture> {
+  const email = `pay-${uniqueSlug("x").replace(/-/g, "")}@example.com`;
+  createdEmails.push(email);
+  const result = await registerOwner(registrationInput(email));
+  createdCompanies.push(result.companyId);
+
+  if (policy) {
+    await prisma.company.update({
+      where: { id: result.companyId },
+      data: {
+        providentFundApplicable: policy.providentFund ?? false,
+        esiApplicable: policy.esi ?? false,
+        professionalTaxMonthly: policy.professionalTax ?? null,
+      },
+    });
+  }
+
+  return {
+    companyId: result.companyId,
+    userId: result.userId,
+    actorEmail: "owner@example.com",
+  };
+}
+
+async function hire(
+  fixture: Fixture,
+  name: string,
+  basicSalary: number,
+  allowances = 0,
+) {
+  return createEmployee({
+    companyId: fixture.companyId,
+    userId: fixture.userId,
+    actorEmail: fixture.actorEmail,
+    input: {
+      name,
+      email: "",
+      phone: "",
+      department: "",
+      designation: "Sales assistant",
+      joiningDate: "2025-04-01",
+      exitDate: "",
+      status: "ACTIVE",
+      basicSalary,
+      allowances,
+      panNumber: "",
+      bankAccountNo: "",
+      ifsc: "",
+    } satisfies EmployeeInput,
+  });
+}
+
+async function accountBalance(
+  companyId: string,
+  systemKey: string,
+): Promise<string> {
+  const account = await prisma.account.findFirstOrThrow({
+    where: { companyId, systemKey },
+    select: { id: true },
+  });
+  const totals = await prisma.journalLine.aggregate({
+    where: { companyId, accountId: account.id, status: "POSTED" },
+    _sum: { debit: true, credit: true },
+  });
+  return toStorageString(
+    subtract(totals._sum.debit ?? 0, totals._sum.credit ?? 0),
+  );
+}
+
+async function assertTrialBalances(companyId: string): Promise<void> {
+  const lines = await prisma.journalLine.groupBy({
+    by: ["accountId"],
+    where: { companyId, status: "POSTED" },
+    _sum: { debit: true, credit: true },
+  });
+  const trial = trialBalanceIsBalanced(
+    lines.map((line) => ({
+      debit: line._sum.debit ?? 0,
+      credit: line._sum.credit ?? 0,
+    })),
+  );
+  expect(trial.difference.toString()).toBe("0");
+}
+
+const run = (fixture: Fixture, month = 6, year = 2026) =>
+  createPayrollRun({
+    companyId: fixture.companyId,
+    userId: fixture.userId,
+    actorEmail: fixture.actorEmail,
+    branchId: null,
+    year,
+    month,
+    payDate: today,
+  });
+
+beforeAll(async () => {
+  await ensurePlatformData();
+}, 60_000);
+
+afterAll(async () => {
+  for (const companyId of createdCompanies) {
+    await purgeTestCompany(companyId).catch(() => undefined);
+  }
+  await purgeTestUsers(createdEmails);
+  await disconnectTestDb();
+}, 60_000);
+
+describe("what a payroll run posts", () => {
+  it("leaves the books balanced", async () => {
+    const fixture = await createCompany({
+      providentFund: true,
+      esi: true,
+      professionalTax: 200,
+    });
+    await hire(fixture, "Priya Nair", 12_000, 3_000);
+    await hire(fixture, "Arun Kumar", 30_000, 5_000);
+
+    await run(fixture);
+    await assertTrialBalances(fixture.companyId);
+  }, 90_000);
+
+  it("expenses the gross and owes the net, which are different figures", async () => {
+    const fixture = await createCompany({ providentFund: true });
+    await hire(fixture, "Priya Nair", 10_000, 0);
+
+    await run(fixture);
+
+    // Gross 10,000 is the cost; net 8,800 is what the employee is owed.
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.SALARY_EXPENSE),
+    ).toBe(toStorageString(10_000));
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.SALARY_PAYABLE),
+    ).toBe(toStorageString(-8_800));
+  }, 90_000);
+
+  it("owes each authority separately rather than lumping the deductions", async () => {
+    // The whole point of splitting them: "what do I owe the EPFO this month"
+    // has to be answerable, and it cannot be from a single deductions figure.
+    const fixture = await createCompany({
+      providentFund: true,
+      esi: true,
+      professionalTax: 200,
+    });
+    await hire(fixture, "Arun Kumar", 30_000, 0);
+
+    await run(fixture);
+
+    // PF: 12% of the 15,000 ceiling, employee and employer both = 1,800 each.
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.PF_PAYABLE),
+    ).toBe(toStorageString(-3_600));
+    // Gross 30,000 is above the ESI limit, so nobody is in the scheme.
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.ESI_PAYABLE),
+    ).toBe(toStorageString(0));
+    // Professional tax above the threshold.
+    expect(
+      await accountBalance(
+        fixture.companyId,
+        SYSTEM_ACCOUNT.PROFESSIONAL_TAX_PAYABLE,
+      ),
+    ).toBe(toStorageString(-200));
+  }, 90_000);
+
+  it("treats the employer's contribution as a cost, not a deduction", async () => {
+    const fixture = await createCompany({ providentFund: true });
+    await hire(fixture, "Priya Nair", 10_000, 0);
+
+    await run(fixture);
+
+    // The employer's 1,200 is its own expense line, not inside salaries.
+    expect(
+      await accountBalance(
+        fixture.companyId,
+        SYSTEM_ACCOUNT.EMPLOYER_CONTRIBUTIONS,
+      ),
+    ).toBe(toStorageString(1_200));
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.SALARY_EXPENSE),
+    ).toBe(toStorageString(10_000));
+  }, 90_000);
+
+  it("posts nothing statutory when the business is registered for nothing", async () => {
+    const fixture = await createCompany();
+    await hire(fixture, "Priya Nair", 10_000, 2_000);
+
+    await run(fixture);
+
+    // Gross equals net: the whole 12,000 is owed to the employee.
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.SALARY_PAYABLE),
+    ).toBe(toStorageString(-12_000));
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.PF_PAYABLE),
+    ).toBe(toStorageString(0));
+    await assertTrialBalances(fixture.companyId);
+  }, 90_000);
+
+  it("records a payslip per employee that reconciles to the run", async () => {
+    const fixture = await createCompany({ providentFund: true, esi: true });
+    await hire(fixture, "Priya Nair", 8_000, 1_000);
+    await hire(fixture, "Arun Kumar", 12_000, 2_000);
+
+    const posted = await run(fixture);
+    const { run: record } = await getPayrollRun({
+      companyId: fixture.companyId,
+      id: posted.id,
+    });
+
+    expect(record.items).toHaveLength(2);
+    const netSum = record.items.reduce(
+      (sum, item) => sum + Number(item.netSalary),
+      0,
+    );
+    expect(netSum).toBeCloseTo(Number(record.netAmount), 2);
+    expect(
+      Number(record.grossAmount) - Number(record.deductionAmount),
+    ).toBeCloseTo(Number(record.netAmount), 2);
+  }, 90_000);
+});
+
+describe("the preview", () => {
+  it("says what a run would come to without posting it", async () => {
+    const fixture = await createCompany({ providentFund: true });
+    await hire(fixture, "Priya Nair", 10_000, 0);
+
+    const preview = await previewPayroll({
+      companyId: fixture.companyId,
+      year: 2026,
+      month: 6,
+    });
+
+    expect(preview.payslips).toHaveLength(1);
+    expect(Number(preview.totals.net)).toBeCloseTo(8_800, 2);
+    expect(preview.alreadyRun).toBe(false);
+
+    // Nothing was written.
+    expect(await listPayrollRuns(fixture.companyId)).toHaveLength(0);
+  }, 90_000);
+
+  it("says plainly that it does not work out TDS", async () => {
+    const fixture = await createCompany();
+    await hire(fixture, "Priya Nair", 60_000, 0);
+
+    const preview = await previewPayroll({
+      companyId: fixture.companyId,
+      year: 2026,
+      month: 6,
+    });
+
+    expect(preview.notes.join(" ")).toMatch(/TDS is not calculated/i);
+    expect(Number(preview.totals.taxDeductedAtSource)).toBe(0);
+  }, 90_000);
+
+  it("carries an entered TDS figure through to the payslip", async () => {
+    const fixture = await createCompany();
+    const employee = await hire(fixture, "Priya Nair", 60_000, 0);
+
+    const preview = await previewPayroll({
+      companyId: fixture.companyId,
+      year: 2026,
+      month: 6,
+      taxDeducted: { [employee.id]: 5_000 },
+    });
+
+    expect(Number(preview.totals.taxDeductedAtSource)).toBe(5_000);
+    expect(Number(preview.totals.net)).toBeCloseTo(55_000, 2);
+  }, 90_000);
+
+  it("notices a period that has already been run", async () => {
+    const fixture = await createCompany();
+    await hire(fixture, "Priya Nair", 10_000, 0);
+    await run(fixture);
+
+    const preview = await previewPayroll({
+      companyId: fixture.companyId,
+      year: 2026,
+      month: 6,
+    });
+    expect(preview.alreadyRun).toBe(true);
+  }, 90_000);
+});
+
+describe("what payroll refuses to do", () => {
+  it("will not run the same period twice", async () => {
+    // Paying twice is easy to do and expensive to undo.
+    const fixture = await createCompany();
+    await hire(fixture, "Priya Nair", 10_000, 0);
+    await run(fixture);
+
+    await expect(run(fixture)).rejects.toThrow(/already been run/i);
+  }, 90_000);
+
+  it("will not run with nobody to pay", async () => {
+    const fixture = await createCompany();
+    await expect(run(fixture)).rejects.toThrow(PayrollError);
+  }, 90_000);
+
+  it("will not touch another company's run", async () => {
+    const [mine, theirs] = await Promise.all([
+      createCompany(),
+      createCompany(),
+    ]);
+    await hire(theirs, "Priya Nair", 10_000, 0);
+    const posted = await run(theirs);
+
+    await expect(
+      getPayrollRun({ companyId: mine.companyId, id: posted.id }),
+    ).rejects.toThrow(/could not be found/i);
+  }, 120_000);
+
+  it("keeps one company's payroll out of another's books", async () => {
+    const [mine, theirs] = await Promise.all([
+      createCompany({ providentFund: true }),
+      createCompany({ providentFund: true }),
+    ]);
+    await hire(theirs, "Arun Kumar", 30_000, 0);
+    await run(theirs);
+
+    expect(
+      await accountBalance(mine.companyId, SYSTEM_ACCOUNT.SALARY_EXPENSE),
+    ).toBe(toStorageString(0));
+    expect(await listPayrollRuns(mine.companyId)).toHaveLength(0);
+  }, 120_000);
+});

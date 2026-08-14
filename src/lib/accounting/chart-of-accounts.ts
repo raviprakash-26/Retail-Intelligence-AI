@@ -526,6 +526,29 @@ export const DEFAULT_ACCOUNTS: readonly AccountSeed[] = [
     AccountSubType.CURRENT_LIABILITY,
     SYSTEM_ACCOUNT.ACCRUED_EXPENSES,
   ),
+  // Withheld from pay or owed on top of it, and remitted to three different
+  // authorities on three different due dates — so three accounts, not one.
+  liability(
+    "2133",
+    "PF Payable",
+    "2130",
+    AccountSubType.CURRENT_LIABILITY,
+    SYSTEM_ACCOUNT.PF_PAYABLE,
+  ),
+  liability(
+    "2134",
+    "ESI Payable",
+    "2130",
+    AccountSubType.CURRENT_LIABILITY,
+    SYSTEM_ACCOUNT.ESI_PAYABLE,
+  ),
+  liability(
+    "2135",
+    "Professional Tax Payable",
+    "2130",
+    AccountSubType.CURRENT_LIABILITY,
+    SYSTEM_ACCOUNT.PROFESSIONAL_TAX_PAYABLE,
+  ),
   liability(
     "2201",
     "Loans Payable",
@@ -751,6 +774,17 @@ export const DEFAULT_ACCOUNTS: readonly AccountSeed[] = [
     AccountSubType.INDIRECT_EXPENSE,
     StatementSection.PROFIT_AND_LOSS,
     SYSTEM_ACCOUNT.MISCELLANEOUS_EXPENSE,
+  ),
+  // The employer's share of PF and ESI. A cost of employing somebody rather
+  // than something withheld from them, so it sits beside salaries as its own
+  // line instead of being buried inside the gross.
+  expense(
+    "6113",
+    "Employer Contributions",
+    "6100",
+    AccountSubType.INDIRECT_EXPENSE,
+    StatementSection.PROFIT_AND_LOSS,
+    SYSTEM_ACCOUNT.EMPLOYER_CONTRIBUTIONS,
   ),
   expense(
     "6201",

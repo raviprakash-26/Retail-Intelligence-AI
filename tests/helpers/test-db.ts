@@ -45,6 +45,9 @@ export async function purgeTestCompany(companyId: string): Promise<void> {
   const prisma = testDb();
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET LOCAL app.allow_financial_purge = 'on'");
+    // Mirrors purgeCompany: payslips restrict their employee, and nothing
+    // orders the two cascades from company against each other.
+    await tx.payroll.deleteMany({ where: { companyId } });
     await tx.company.delete({ where: { id: companyId } });
   });
 }

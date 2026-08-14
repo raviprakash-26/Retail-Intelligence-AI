@@ -35,6 +35,11 @@ its landed cost, holds recoverable GST as an asset and raises what you owe the
 supplier. Buy at two prices and sell, and the cost of sales is the blend — the
 margin on the dashboard is real.
 
+**Staff can be paid.** A monthly run reads the salaries on the employee
+records, works out provident fund, insurance and professional tax, and posts one
+entry that owes each authority separately. It does not compute TDS, and says so
+where somebody would otherwise assume it had.
+
 **And every figure can be taken away.** Eleven reports, each running the
 service that owns its numbers rather than recomputing them, exportable as a CSV
 that carries the same figures and the same caveats, and laid out to print.
@@ -453,9 +458,9 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1227 tests: unit + integration
+npm run test          # 1255 tests: unit + integration
 npm run test:unit     # unit only, no database required
-npm run test:e2e      # 41 checks in a browser, against a production build
+npm run test:e2e      # 44 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
 ```
 
@@ -745,6 +750,58 @@ Returns are rounded to the rupee like every other document here, and the
 fraction is posted to Round Off rather than absorbed. A credit note for ₹176.65
 is issued at ₹177 with 35 paise accounted for — the alternative is an entry that
 does not balance, which is how this was found.
+
+---
+
+## Payroll
+
+Salaries for a month, posted as one balanced entry — and the entry is the
+reason this module is worth reading about, because payroll is the transaction
+where the obvious posting is wrong.
+
+Gross pay is a cost and net pay is owed to staff, but the gap between them is
+not one thing. It is four separate debts to four separate authorities, each
+with its own due date: provident fund to the EPFO, insurance to the ESIC,
+professional tax to the state, TDS to the income tax department. Crediting them
+to a single "deductions" account produces an entry that balances perfectly and
+cannot answer _what do I owe the EPFO this month_, which is the only question
+the deduction exists to raise.
+
+```
+   Two staff, ₹40,000 of gross pay, EPF and professional tax applicable
+                                │
+   Dr Salaries & Wages   40,000     Cr Salary Payable          35,800
+   Dr Employer Contrib.   3,600     Cr PF Payable               7,200
+                                    Cr Professional Tax Payable   200
+```
+
+**The employer's share is a cost, not a deduction.** Its own expense line, so
+what an employee is paid and what they cost are two visible figures rather than
+one blurred into the other. Both halves credit the same liability, because both
+are remitted in a single payment.
+
+**Three schemes are computed; one is not.** EPF at 12% of basic to the ₹15,000
+ceiling, ESI at 0.75% and 3.25% of gross with the ₹21,000 limit — where an
+employee above it leaves the scheme entirely rather than contributing on a
+capped wage, which is the rule people get wrong — and professional tax as a flat
+monthly figure above a threshold.
+
+**TDS on salary is not computed, and the product says so on the page.** It
+depends on the employee's projected annual income, the regime they elected, what
+they declared by way of investments and rent, and what a previous employer
+already withheld. A figure produced without those inputs would look like a tax
+computation and be a guess, and a wrong one lands on the employee rather than on
+the business. It is entered by whoever runs the payroll, or left at nil.
+
+Whether an establishment is covered by EPF or ESI at all is a fact about the
+business — headcount, registration, when it crossed the threshold — so both
+default to off and are switched on deliberately. Professional tax is null rather
+than inferred from the address: every state sets its own, and a plausible wrong
+default is worse than an obviously absent one.
+
+A period can be paid once. Salaries are read from the employee records on the
+server, so the form can say when staff are paid and how much tax was withheld,
+and cannot say what anybody earns.
 
 ---
 
@@ -1830,37 +1887,38 @@ query text is the only thing the browser controls.
 
 ## Roadmap
 
-| Phase | Scope                                                           | Status   |
-| ----- | --------------------------------------------------------------- | -------- |
-| 1     | Foundation, schema, design system, public site, auth UI         | **Done** |
-| 2     | Authentication — sessions, verification, rate limiting, audit   | **Done** |
-| 3     | Company onboarding — settings, branches, team, invitations      | **Done** |
-| 4     | Application shell — navigation, search, dashboard               | **Done** |
-| 5     | Master data — products, parties, staff, opening balances        | **Done** |
-| 6     | Sales — invoicing, GST split, stock issue, void                 | **Done** |
-| 7     | Purchases — bills, input tax credit, landed cost, void          | **Done** |
-| 8     | Expenses — categories, GST, capital vs revenue, void            | **Done** |
-| 9     | Receipts & payments — allocation, ageing, void                  | **Done** |
-| 10    | Accounting engine — chart of accounts, balances, the equation   | **Done** |
-| 11    | Journal — register, manual entries, reversal                    | **Done** |
-| 12    | Ledger — running balance, party statements                      | **Done** |
-| 13    | Trial balance — two columns, and what balancing proves          | **Done** |
-| 14    | Financial statements — trading, P&L, balance sheet              | **Done** |
-| 15    | Inventory — positions, stock cards, reconciliation, counts      | **Done** |
-| 16    | GST preparation — GSTR-1 working paper, set-off, reconciled     | **Done** |
-| 17    | Income tax — computation, depreciation, 44AD, advance tax       | **Done** |
-| 18    | Analytics — trend, products, customers, ratios, health          | **Done** |
-| 19    | Forecasting — revenue band, cash commitments, refusals          | **Done** |
-| 20    | AI Accountant — read-only tools, traceable answers              | **Done** |
-| 21    | AI Auditor — deterministic checks, observations not allegations | **Done** |
-| 22    | AI Business Advisor — detectors, bands, and when to ignore them | **Done** |
-| 23    | Subscriptions — entitlements, allowances, server-side gates     | **Done** |
-| 24    | Admin panel — metadata only, no impersonation, logged           | **Done** |
-| 25    | Security hardening — CSP, origin coverage, bundle scanning      | **Done** |
-| 26    | Testing — a browser suite in the repository, coverage gaps      | **Done** |
-| 27    | Deployment — image, compose, probes, pipeline, honest limits    | **Done** |
-| 28    | Returns — credit and debit notes, contra accounts, GST reversal | **Done** |
-| 29    | Reports — one catalogue over existing services, CSV and print   | **Done** |
+| Phase | Scope                                                             | Status   |
+| ----- | ----------------------------------------------------------------- | -------- |
+| 1     | Foundation, schema, design system, public site, auth UI           | **Done** |
+| 2     | Authentication — sessions, verification, rate limiting, audit     | **Done** |
+| 3     | Company onboarding — settings, branches, team, invitations        | **Done** |
+| 4     | Application shell — navigation, search, dashboard                 | **Done** |
+| 5     | Master data — products, parties, staff, opening balances          | **Done** |
+| 6     | Sales — invoicing, GST split, stock issue, void                   | **Done** |
+| 7     | Purchases — bills, input tax credit, landed cost, void            | **Done** |
+| 8     | Expenses — categories, GST, capital vs revenue, void              | **Done** |
+| 9     | Receipts & payments — allocation, ageing, void                    | **Done** |
+| 10    | Accounting engine — chart of accounts, balances, the equation     | **Done** |
+| 11    | Journal — register, manual entries, reversal                      | **Done** |
+| 12    | Ledger — running balance, party statements                        | **Done** |
+| 13    | Trial balance — two columns, and what balancing proves            | **Done** |
+| 14    | Financial statements — trading, P&L, balance sheet                | **Done** |
+| 15    | Inventory — positions, stock cards, reconciliation, counts        | **Done** |
+| 16    | GST preparation — GSTR-1 working paper, set-off, reconciled       | **Done** |
+| 17    | Income tax — computation, depreciation, 44AD, advance tax         | **Done** |
+| 18    | Analytics — trend, products, customers, ratios, health            | **Done** |
+| 19    | Forecasting — revenue band, cash commitments, refusals            | **Done** |
+| 20    | AI Accountant — read-only tools, traceable answers                | **Done** |
+| 21    | AI Auditor — deterministic checks, observations not allegations   | **Done** |
+| 22    | AI Business Advisor — detectors, bands, and when to ignore them   | **Done** |
+| 23    | Subscriptions — entitlements, allowances, server-side gates       | **Done** |
+| 24    | Admin panel — metadata only, no impersonation, logged             | **Done** |
+| 25    | Security hardening — CSP, origin coverage, bundle scanning        | **Done** |
+| 26    | Testing — a browser suite in the repository, coverage gaps        | **Done** |
+| 27    | Deployment — image, compose, probes, pipeline, honest limits      | **Done** |
+| 28    | Returns — credit and debit notes, contra accounts, GST reversal   | **Done** |
+| 29    | Reports — one catalogue over existing services, CSV and print     | **Done** |
+| 30    | Payroll — statutory deductions, four liabilities, no invented TDS | **Done** |
 
 ---
 
