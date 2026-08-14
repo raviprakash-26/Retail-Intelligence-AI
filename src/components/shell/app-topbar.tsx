@@ -1,5 +1,8 @@
 import Link from "next/link";
-import { CompanySwitcher, type CompanyOption } from "@/components/company/company-switcher";
+import {
+  CompanySwitcher,
+  type CompanyOption,
+} from "@/components/company/company-switcher";
 import { Logo } from "@/components/brand/logo";
 import {
   FiscalYearSelector,
@@ -53,7 +56,7 @@ export function AppTopbar({
   canViewSettings: boolean;
 }) {
   return (
-    <header className="bg-background/95 sticky top-0 z-30 border-b backdrop-blur">
+    <header className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur">
       {/* One dialog, two buttons. The provider owns the dialog and the ⌘K
           listener; each trigger is only a button, so the responsive layout can
           place as many as it needs. */}

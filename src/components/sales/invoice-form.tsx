@@ -293,7 +293,7 @@ export function InvoiceForm({
         {/* Warns before submitting rather than failing at the server: the
             invoice will be refused, and finding that out now is cheaper. */}
         {shortages.length > 0 && (
-          <div className="border-destructive/40 bg-destructive-muted text-destructive flex items-start gap-2 rounded-lg border px-4 py-3 text-sm">
+          <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive-muted px-4 py-3 text-sm text-destructive">
             <TriangleAlert className="mt-0.5 size-4 shrink-0" />
             <div>
               <p className="font-medium">Not enough stock to sell this</p>
@@ -314,7 +314,7 @@ export function InvoiceForm({
               <FormItem>
                 <FormLabel>
                   Notes
-                  <span className="text-muted-foreground font-normal">
+                  <span className="font-normal text-muted-foreground">
                     (optional)
                   </span>
                 </FormLabel>
@@ -331,7 +331,7 @@ export function InvoiceForm({
           />
 
           <DocumentTotals totals={totals}>
-            <p className="text-muted-foreground flex items-start gap-1.5 pt-1 text-xs leading-relaxed">
+            <p className="flex items-start gap-1.5 pt-1 text-xs leading-relaxed text-muted-foreground">
               <Info className="mt-0.5 size-3.5 shrink-0" />
               Recalculated on the server when you save. Posting also moves the
               stock and writes the journal entry.

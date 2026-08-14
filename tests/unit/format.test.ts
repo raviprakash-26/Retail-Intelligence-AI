@@ -102,9 +102,9 @@ describe("dates", () => {
 
   it("counts backwards in words for a feed", () => {
     const now = new Date("2026-08-09T12:00:00.000Z");
-    expect(
-      formatRelativeTime("2026-08-06T12:00:00.000Z", { now }),
-    ).toBe("3 days ago");
+    expect(formatRelativeTime("2026-08-06T12:00:00.000Z", { now })).toBe(
+      "3 days ago",
+    );
     expect(formatRelativeTime("2026-08-10T12:00:00.000Z", { now })).toBe(
       "tomorrow",
     );

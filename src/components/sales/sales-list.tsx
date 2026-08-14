@@ -18,7 +18,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { PAYMENT_MODE_LABELS, type PaymentModeInput } from "@/lib/validation/sales";
+import {
+  PAYMENT_MODE_LABELS,
+  type PaymentModeInput,
+} from "@/lib/validation/sales";
 import type { SaleListResult } from "@/server/sales/sale-service";
 
 /**
@@ -62,9 +65,9 @@ export function SalesList({
       {result.rows.length === 0 ? (
         <div className="rounded-xl border border-dashed px-6 py-14 text-center">
           <h2 className="text-base font-semibold">No invoices yet</h2>
-          <p className="text-muted-foreground mx-auto mt-1.5 max-w-md text-sm">
-            Record your first sale. The journal entry, the stock movement and the
-            GST register all follow from it automatically.
+          <p className="mx-auto mt-1.5 max-w-md text-sm text-muted-foreground">
+            Record your first sale. The journal entry, the stock movement and
+            the GST register all follow from it automatically.
           </p>
           {canCreate && (
             <Button asChild className="mt-5">
@@ -101,7 +104,7 @@ export function SalesList({
                         {sale.invoiceNumber}
                       </span>
                     </Link>
-                    <p className="text-muted-foreground text-xs">
+                    <p className="text-xs text-muted-foreground">
                       {formatDate(sale.invoiceDate, { style: "short" })}
                       {voided && " · voided"}
                     </p>
@@ -109,15 +112,16 @@ export function SalesList({
                   <TableCell className="text-sm">
                     {sale.customerName}
                     {sale.isCredit && sale.dueDate && !voided && (
-                      <span className="text-muted-foreground block text-xs">
+                      <span className="block text-xs text-muted-foreground">
                         due {formatDate(sale.dueDate, { style: "short" })}
                       </span>
                     )}
                   </TableCell>
                   <TableCell>
                     <Badge variant={sale.isCredit ? "warning" : "muted"}>
-                      {PAYMENT_MODE_LABELS[sale.paymentMode as PaymentModeInput] ??
-                        sale.paymentMode}
+                      {PAYMENT_MODE_LABELS[
+                        sale.paymentMode as PaymentModeInput
+                      ] ?? sale.paymentMode}
                     </Badge>
                   </TableCell>
                   <TableCell className="tabular-figures text-right">
@@ -129,11 +133,15 @@ export function SalesList({
                     {Number(sale.taxAmount) === 0 ? (
                       <span className="text-muted-foreground">—</span>
                     ) : (
-                      formatCurrency(sale.taxAmount, { compactZeroDecimals: true })
+                      formatCurrency(sale.taxAmount, {
+                        compactZeroDecimals: true,
+                      })
                     )}
                   </TableCell>
                   <TableCell className="tabular-figures text-right font-medium">
-                    <span className={voided ? "line-through opacity-60" : undefined}>
+                    <span
+                      className={voided ? "line-through opacity-60" : undefined}
+                    >
                       {formatCurrency(sale.totalAmount, {
                         compactZeroDecimals: true,
                       })}

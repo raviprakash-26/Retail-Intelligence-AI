@@ -37,7 +37,7 @@ export default function AppError({
     <div className="mx-auto w-full max-w-lg px-4 py-16 sm:px-6">
       <Card>
         <CardHeader>
-          <div className="bg-destructive-muted text-destructive flex size-11 items-center justify-center rounded-xl">
+          <div className="flex size-11 items-center justify-center rounded-xl bg-destructive-muted text-destructive">
             <TriangleAlert className="size-5" aria-hidden="true" />
           </div>
           <CardTitle className="mt-3.5">Something went wrong</CardTitle>
@@ -49,7 +49,7 @@ export default function AppError({
 
         <CardContent className="space-y-4">
           {error.digest && (
-            <p className="text-muted-foreground font-mono text-xs">
+            <p className="font-mono text-xs text-muted-foreground">
               Reference: {error.digest}
             </p>
           )}

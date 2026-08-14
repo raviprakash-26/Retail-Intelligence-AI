@@ -33,18 +33,10 @@ import {
  */
 
 export type SupplyType =
-  | "INTRA_STATE"
-  | "INTER_STATE"
-  | "EXPORT"
-  | "EXEMPT"
-  | "NIL_RATED"
-  | "NON_GST";
+  "INTRA_STATE" | "INTER_STATE" | "EXPORT" | "EXEMPT" | "NIL_RATED" | "NON_GST";
 
 export type GstRegistration =
-  | "UNREGISTERED"
-  | "REGULAR"
-  | "COMPOSITION"
-  | "SEZ";
+  "UNREGISTERED" | "REGULAR" | "COMPOSITION" | "SEZ";
 
 /** True when the seller may show GST on the face of the invoice. */
 export function chargesTax(supplyType: SupplyType): boolean {

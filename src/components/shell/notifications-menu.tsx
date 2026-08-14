@@ -57,7 +57,7 @@ export function NotificationsMenu({
         <Button
           variant="ghost"
           size="icon"
-          className="text-muted-foreground hover:text-foreground relative"
+          className="relative text-muted-foreground hover:text-foreground"
           aria-label={
             unreadCount > 0
               ? `Notifications, ${unreadCount} unread`
@@ -66,7 +66,7 @@ export function NotificationsMenu({
         >
           <Bell className="size-4" />
           {unreadCount > 0 && (
-            <span className="bg-destructive text-destructive-foreground tabular-figures absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full text-[0.5625rem] font-semibold">
+            <span className="tabular-figures absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-destructive text-[0.5625rem] font-semibold text-destructive-foreground">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}
@@ -92,9 +92,12 @@ export function NotificationsMenu({
 
         {notifications.length === 0 ? (
           <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-            <BellOff className="text-muted-foreground size-5" aria-hidden="true" />
+            <BellOff
+              className="size-5 text-muted-foreground"
+              aria-hidden="true"
+            />
             <p className="text-sm font-medium">Nothing to report</p>
-            <p className="text-muted-foreground text-xs leading-relaxed">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               Low stock, GST deadlines, overdue payments and audit findings will
               appear here as those modules come online.
             </p>
@@ -121,10 +124,10 @@ export function NotificationsMenu({
                     >
                       {notification.title}
                     </span>
-                    <span className="text-muted-foreground mt-0.5 block text-xs leading-relaxed">
+                    <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
                       {notification.body}
                     </span>
-                    <span className="text-muted-foreground mt-1 block text-[0.6875rem]">
+                    <span className="mt-1 block text-[0.6875rem] text-muted-foreground">
                       {formatRelativeTime(notification.createdAt)}
                     </span>
                   </span>
@@ -136,7 +139,7 @@ export function NotificationsMenu({
                   {notification.actionUrl ? (
                     <a
                       href={notification.actionUrl as Route}
-                      className="hover:bg-secondary flex gap-2.5 px-3 py-3 transition-colors"
+                      className="flex gap-2.5 px-3 py-3 transition-colors hover:bg-secondary"
                     >
                       {content}
                     </a>

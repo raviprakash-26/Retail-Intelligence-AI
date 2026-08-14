@@ -55,7 +55,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { INDIAN_STATES, findStateByCode, gstinStateCode } from "@/lib/constants/india";
+import {
+  INDIAN_STATES,
+  findStateByCode,
+  gstinStateCode,
+} from "@/lib/constants/india";
 import { formatCurrency } from "@/lib/format";
 import {
   partyFormSchema,
@@ -150,7 +154,10 @@ export function PartyManager({
     { mode: "create" } | { mode: "edit"; party: PartyRow } | null
   >(null);
 
-  async function run(id: string, operation: () => Promise<ActionResult<unknown>>) {
+  async function run(
+    id: string,
+    operation: () => Promise<ActionResult<unknown>>,
+  ) {
     setError(null);
     setPending(id);
     try {
@@ -189,7 +196,10 @@ export function PartyManager({
             {copy.emptyBody}
           </p>
           {canManage && (
-            <Button className="mt-5" onClick={() => setDialog({ mode: "create" })}>
+            <Button
+              className="mt-5"
+              onClick={() => setDialog({ mode: "create" })}
+            >
               <Plus className="size-4" />
               Add {copy.singular}
             </Button>
@@ -216,7 +226,9 @@ export function PartyManager({
                 <TableCell>
                   <p className="flex flex-wrap items-center gap-1.5 font-medium">
                     {party.name}
-                    {party.isArchived && <Badge variant="muted">Archived</Badge>}
+                    {party.isArchived && (
+                      <Badge variant="muted">Archived</Badge>
+                    )}
                   </p>
                   <p className="font-mono text-xs text-muted-foreground">
                     {party.code}
@@ -235,7 +247,7 @@ export function PartyManager({
                     </span>
                   )}
                 </TableCell>
-                <TableCell className="text-right tabular-figures">
+                <TableCell className="tabular-figures text-right">
                   {Number(party.openingBalance) === 0 ? (
                     <span className="text-muted-foreground">—</span>
                   ) : (
@@ -247,7 +259,7 @@ export function PartyManager({
                     </>
                   )}
                 </TableCell>
-                <TableCell className="text-right text-sm tabular-figures">
+                <TableCell className="tabular-figures text-right text-sm">
                   {party.creditLimit && Number(party.creditLimit) > 0
                     ? formatCurrency(party.creditLimit, {
                         compactZeroDecimals: true,

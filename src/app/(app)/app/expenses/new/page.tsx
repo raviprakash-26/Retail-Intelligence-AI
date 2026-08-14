@@ -29,17 +29,19 @@ export default async function NewExpensePage() {
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
       <Link
         href="/app/expenses"
-        className="text-muted-foreground hover:text-foreground mb-5 inline-flex items-center gap-1.5 text-sm underline-offset-4 hover:underline"
+        className="mb-5 inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >
         <ArrowLeft className="size-3.5" />
         All expenses
       </Link>
 
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Record expense</h1>
-        <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
-          What was spent, and what it was for. The category decides which account
-          it posts to; the rest follows.
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Record expense
+        </h1>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          What was spent, and what it was for. The category decides which
+          account it posts to; the rest follows.
         </p>
       </header>
 

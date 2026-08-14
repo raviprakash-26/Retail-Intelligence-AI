@@ -164,10 +164,13 @@ export function BillForm({
     totals.igstAmount,
     totals.cessAmount,
   );
-  const stockCost = claiming ? totals.taxableAmount : add(totals.taxableAmount, tax);
+  const stockCost = claiming
+    ? totals.taxableAmount
+    : add(totals.taxableAmount, tax);
 
   async function onSubmit(values: PurchaseInput) {
-    const result: ActionResult<{ id: string }> = await createPurchaseAction(values);
+    const result: ActionResult<{ id: string }> =
+      await createPurchaseAction(values);
     if (!applyResult(result)) return;
     router.push(`/app/purchases/${result.data.id}`);
   }
@@ -333,8 +336,8 @@ export function BillForm({
                           <>
                             Not available: input credit can only be claimed by a
                             business registered under the regular GST scheme, on
-                            a bill that carries GST. The tax on this bill is part
-                            of what the goods cost.
+                            a bill that carries GST. The tax on this bill is
+                            part of what the goods cost.
                           </>
                         )}
                       </FormDescription>
@@ -351,7 +354,7 @@ export function BillForm({
                 <FormItem>
                   <FormLabel>
                     Notes
-                    <span className="text-muted-foreground font-normal">
+                    <span className="font-normal text-muted-foreground">
                       (optional)
                     </span>
                   </FormLabel>
@@ -368,7 +371,7 @@ export function BillForm({
             totals={totals}
             extra={
               !tax.isZero() ? (
-                <p className="text-muted-foreground border-t pt-3 text-xs leading-relaxed">
+                <p className="border-t pt-3 text-xs leading-relaxed text-muted-foreground">
                   {claiming ? (
                     <>
                       {formatCurrency(stockCost.toFixed(4))} goes into stock;{" "}
@@ -385,7 +388,7 @@ export function BillForm({
               ) : undefined
             }
           >
-            <p className="text-muted-foreground flex items-start gap-1.5 pt-1 text-xs leading-relaxed">
+            <p className="flex items-start gap-1.5 pt-1 text-xs leading-relaxed text-muted-foreground">
               <Info className="mt-0.5 size-3.5 shrink-0" />
               Recalculated on the server when you save. Posting also brings the
               stock in and writes the journal entry.

@@ -319,7 +319,10 @@ function UnitSection({ units }: { units: ProductTaxonomy["units"] }) {
           >
             <span>
               {unit.name}
-              <Badge variant="outline" className="ml-2 font-mono text-[0.6875rem]">
+              <Badge
+                variant="outline"
+                className="ml-2 font-mono text-[0.6875rem]"
+              >
                 {unit.code}
               </Badge>
             </span>

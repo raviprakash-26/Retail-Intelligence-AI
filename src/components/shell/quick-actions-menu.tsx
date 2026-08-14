@@ -44,7 +44,9 @@ export function QuickActionsMenu({ actions }: { actions: QuickAction[] }) {
             <DropdownMenuItem key={action.href} asChild>
               <Link href={action.href as Route} className="gap-2">
                 <NavIcon name={action.icon} className="size-4" />
-                <span className={notBuilt ? "text-muted-foreground" : undefined}>
+                <span
+                  className={notBuilt ? "text-muted-foreground" : undefined}
+                >
                   {action.label}
                 </span>
                 {notBuilt && (

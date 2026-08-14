@@ -41,7 +41,7 @@ export default async function NewPurchasePage() {
     <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
       <Link
         href="/app/purchases"
-        className="text-muted-foreground hover:text-foreground mb-5 inline-flex items-center gap-1.5 text-sm underline-offset-4 hover:underline"
+        className="mb-5 inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >
         <ArrowLeft className="size-3.5" />
         All bills
@@ -49,7 +49,7 @@ export default async function NewPurchasePage() {
 
       <header className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">New bill</h1>
-        <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
           Record what a supplier billed you. The stock, the input tax credit and
           what you owe them all follow from it.
         </p>
@@ -58,7 +58,9 @@ export default async function NewPurchasePage() {
       {blocked ? (
         <Alert>
           <AlertTitle>
-            {suppliers.length === 0 ? "Add a supplier first" : "Add a product first"}
+            {suppliers.length === 0
+              ? "Add a supplier first"
+              : "Add a product first"}
           </AlertTitle>
           <AlertDescription className="space-y-3">
             <p>
@@ -67,7 +69,11 @@ export default async function NewPurchasePage() {
                 : "A bill line has to name something you buy. Add at least one product — its GST rate and HSN code come with it."}
             </p>
             <Button asChild variant="outline" size="sm">
-              <Link href={suppliers.length === 0 ? "/app/suppliers" : "/app/products"}>
+              <Link
+                href={
+                  suppliers.length === 0 ? "/app/suppliers" : "/app/products"
+                }
+              >
                 {suppliers.length === 0 ? "Go to suppliers" : "Go to products"}
               </Link>
             </Button>

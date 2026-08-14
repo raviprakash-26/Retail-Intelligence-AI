@@ -112,7 +112,12 @@ export function ProductManager({
   taxonomy,
   canManage,
 }: {
-  result: { rows: ProductRow[]; total: number; page: number; pageCount: number };
+  result: {
+    rows: ProductRow[];
+    total: number;
+    page: number;
+    pageCount: number;
+  };
   taxonomy: ProductTaxonomy;
   canManage: boolean;
 }) {
@@ -124,7 +129,10 @@ export function ProductManager({
     { mode: "create" } | { mode: "edit"; product: ProductRow } | null
   >(null);
 
-  async function run(id: string, operation: () => Promise<ActionResult<unknown>>) {
+  async function run(
+    id: string,
+    operation: () => Promise<ActionResult<unknown>>,
+  ) {
     setError(null);
     setPending(id);
     try {
@@ -181,7 +189,10 @@ export function ProductManager({
             code, so an invoice works out its own tax rather than asking you to.
           </p>
           {canManage && (
-            <Button className="mt-5" onClick={() => setDialog({ mode: "create" })}>
+            <Button
+              className="mt-5"
+              onClick={() => setDialog({ mode: "create" })}
+            >
               <Plus className="size-4" />
               Add product
             </Button>
@@ -209,7 +220,9 @@ export function ProductManager({
                 <TableCell>
                   <p className="flex flex-wrap items-center gap-1.5 font-medium">
                     {product.name}
-                    {product.isArchived && <Badge variant="muted">Archived</Badge>}
+                    {product.isArchived && (
+                      <Badge variant="muted">Archived</Badge>
+                    )}
                     {!product.isStockTracked && (
                       <Badge variant="outline">Service</Badge>
                     )}
@@ -233,17 +246,17 @@ export function ProductManager({
                     </span>
                   )}
                 </TableCell>
-                <TableCell className="text-right tabular-figures">
+                <TableCell className="tabular-figures text-right">
                   {formatCurrency(product.purchasePrice, {
                     compactZeroDecimals: true,
                   })}
                 </TableCell>
-                <TableCell className="text-right tabular-figures">
+                <TableCell className="tabular-figures text-right">
                   {formatCurrency(product.sellingPrice, {
                     compactZeroDecimals: true,
                   })}
                 </TableCell>
-                <TableCell className="text-right tabular-figures">
+                <TableCell className="tabular-figures text-right">
                   {product.stockOnHand === null ? (
                     <span className="text-muted-foreground">n/a</span>
                   ) : (
@@ -413,7 +426,9 @@ function ProductDialog({
     <Dialog open={Boolean(state)} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit product" : "Add a product"}</DialogTitle>
+          <DialogTitle>
+            {editing ? "Edit product" : "Add a product"}
+          </DialogTitle>
           <DialogDescription>
             {editing
               ? "Prices and details apply to documents raised from now on. Anything already invoiced keeps the figures it was raised with."
@@ -484,7 +499,9 @@ function ProductDialog({
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value={NO_SELECTION}>Uncategorised</SelectItem>
+                          <SelectItem value={NO_SELECTION}>
+                            Uncategorised
+                          </SelectItem>
                           {taxonomy.categories.map((category) => (
                             <SelectItem key={category.id} value={category.id}>
                               {category.name}
@@ -503,7 +520,10 @@ function ProductDialog({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Sold in</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Choose" />

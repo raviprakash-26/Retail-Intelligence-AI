@@ -35,7 +35,7 @@ export function KpiCard({
     <Card className={cn("gap-0", className)}>
       <CardContent className="px-4 py-4">
         <div className="flex items-center gap-1.5">
-          <p className="text-muted-foreground text-xs font-medium">{label}</p>
+          <p className="text-xs font-medium text-muted-foreground">{label}</p>
           {hint && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -55,7 +55,7 @@ export function KpiCard({
         {pending ? (
           <>
             <Skeleton className="mt-2 h-6 w-24" />
-            <p className="text-muted-foreground/70 mt-2 text-[0.6875rem] leading-relaxed">
+            <p className="mt-2 text-[0.6875rem] leading-relaxed text-muted-foreground/70">
               {pendingNote ?? "Available once this module is built."}
             </p>
           </>

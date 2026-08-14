@@ -138,7 +138,7 @@ export function ProductPicker({
           />
           <CommandList>
             {loading && (
-              <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
+              <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 Searching…
               </div>
@@ -170,10 +170,10 @@ export function ProductPicker({
                       <p className="flex items-center gap-1.5 truncate text-sm font-medium">
                         {product.name}
                         {value?.id === product.id && (
-                          <Check className="text-primary size-3.5" />
+                          <Check className="size-3.5 text-primary" />
                         )}
                       </p>
-                      <p className="text-muted-foreground truncate font-mono text-xs">
+                      <p className="truncate font-mono text-xs text-muted-foreground">
                         {product.sku}
                       </p>
                     </div>
@@ -192,7 +192,10 @@ export function ProductPicker({
                           {product.unitCode}
                         </Badge>
                       ) : (
-                        <Badge variant="outline" className="mt-0.5 text-[0.625rem]">
+                        <Badge
+                          variant="outline"
+                          className="mt-0.5 text-[0.625rem]"
+                        >
                           Service
                         </Badge>
                       )}

@@ -105,9 +105,8 @@ export function consumeFifo(params: {
       continue;
     }
 
-    const taken = compare(layer.quantity, outstanding) <= 0
-      ? layer.quantity
-      : outstanding;
+    const taken =
+      compare(layer.quantity, outstanding) <= 0 ? layer.quantity : outstanding;
 
     cost = add(cost, multiply(taken, layer.unitCost));
     outstanding = subtract(outstanding, taken);

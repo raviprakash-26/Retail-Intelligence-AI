@@ -62,7 +62,7 @@ export default async function PurchaseDetailPage({
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
       <Link
         href="/app/purchases"
-        className="text-muted-foreground hover:text-foreground mb-5 inline-flex items-center gap-1.5 text-sm underline-offset-4 hover:underline"
+        className="mb-5 inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >
         <ArrowLeft className="size-3.5" />
         All bills
@@ -83,7 +83,7 @@ export default async function PurchaseDetailPage({
               <Badge variant="success">Posted</Badge>
             )}
           </h1>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <p className="mt-1 text-sm text-muted-foreground">
             {formatDate(purchase.billDate, { style: "long" })} ·{" "}
             {purchase.supplier?.name ?? "Supplier"}
             {purchase.supplierBillNo
@@ -132,7 +132,9 @@ export default async function PurchaseDetailPage({
                     <TableHead className="text-right">Rate</TableHead>
                     <TableHead className="text-right">Taxable</TableHead>
                     <TableHead className="text-right">GST</TableHead>
-                    <TableHead className="pr-6 text-right">Landed cost</TableHead>
+                    <TableHead className="pr-6 text-right">
+                      Landed cost
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -142,21 +144,23 @@ export default async function PurchaseDetailPage({
                         <p className="font-medium">
                           {item.description ?? item.product.name}
                         </p>
-                        <p className="text-muted-foreground font-mono text-xs">
+                        <p className="font-mono text-xs text-muted-foreground">
                           {item.product.sku}
                           {item.hsnCode ? ` · HSN ${item.hsnCode}` : ""}
                         </p>
                       </TableCell>
                       <TableCell className="tabular-figures text-right">
                         {formatNumber(item.quantity)}
-                        <span className="text-muted-foreground ml-1 text-xs">
+                        <span className="ml-1 text-xs text-muted-foreground">
                           {item.product.unit.code}
                         </span>
                       </TableCell>
                       <TableCell className="tabular-figures text-right">
-                        {formatCurrency(item.rate, { compactZeroDecimals: true })}
+                        {formatCurrency(item.rate, {
+                          compactZeroDecimals: true,
+                        })}
                         {Number(item.discountPercent) > 0 && (
-                          <span className="text-muted-foreground block text-xs">
+                          <span className="block text-xs text-muted-foreground">
                             −{Number(item.discountPercent)}%
                           </span>
                         )}
@@ -174,7 +178,7 @@ export default async function PurchaseDetailPage({
                                 Number(item.sgstAmount) +
                                 Number(item.igstAmount),
                             )}
-                            <span className="text-muted-foreground block text-xs">
+                            <span className="block text-xs text-muted-foreground">
                               {Number(item.taxPercent)}%
                             </span>
                           </>
@@ -182,7 +186,7 @@ export default async function PurchaseDetailPage({
                       </TableCell>
                       <TableCell className="tabular-figures pr-6 text-right font-medium">
                         {formatCurrency(item.unitCost)}
-                        <span className="text-muted-foreground block text-xs">
+                        <span className="block text-xs text-muted-foreground">
                           per {item.product.unit.code}
                         </span>
                       </TableCell>
@@ -217,7 +221,7 @@ export default async function PurchaseDetailPage({
                       <TableRow key={line.lineNumber}>
                         <TableCell className="pl-6">
                           <p className="text-sm">{line.account.name}</p>
-                          <p className="text-muted-foreground font-mono text-xs">
+                          <p className="font-mono text-xs text-muted-foreground">
                             {line.account.code}
                           </p>
                         </TableCell>
@@ -239,7 +243,7 @@ export default async function PurchaseDetailPage({
                     ))}
                   </TableBody>
                 </Table>
-                <p className="text-muted-foreground border-t px-6 py-3 text-xs leading-relaxed">
+                <p className="border-t px-6 py-3 text-xs leading-relaxed text-muted-foreground">
                   Debits equal credits at {formatCurrency(entry.totalDebit)}.
                   {totalTax > 0 && (
                     <>
@@ -285,7 +289,10 @@ export default async function PurchaseDetailPage({
 
           <Card>
             <CardContent className="space-y-3 py-5 text-sm">
-              <Detail label="Payment" value={purchase.paymentMode.toLowerCase()} />
+              <Detail
+                label="Payment"
+                value={purchase.paymentMode.toLowerCase()}
+              />
               <Detail
                 label="Tax treatment"
                 value={
@@ -351,7 +358,9 @@ function Row({
 }) {
   return (
     <div className="flex items-baseline justify-between">
-      <span className={muted ? "text-muted-foreground" : undefined}>{label}</span>
+      <span className={muted ? "text-muted-foreground" : undefined}>
+        {label}
+      </span>
       <span className="tabular-figures">
         {formatCurrency(String(value as string))}
       </span>

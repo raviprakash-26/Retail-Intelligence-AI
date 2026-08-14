@@ -36,7 +36,7 @@ export function ModulePlaceholder({
     <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
       <Link
         href="/app"
-        className="text-muted-foreground hover:text-foreground mb-6 inline-flex items-center gap-1.5 text-sm underline-offset-4 hover:underline"
+        className="mb-6 inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >
         <ArrowLeft className="size-3.5" />
         Back to dashboard
@@ -45,7 +45,7 @@ export function ModulePlaceholder({
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
-            <div className="bg-secondary text-secondary-foreground flex size-11 items-center justify-center rounded-xl">
+            <div className="flex size-11 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
               <NavIcon name={icon} className="size-5" aria-hidden="true" />
             </div>
             <Badge variant="muted" className="gap-1">
@@ -63,17 +63,17 @@ export function ModulePlaceholder({
         <CardContent className="space-y-5">
           <div>
             <h2 className="text-sm font-semibold">What this will include</h2>
-            <ul className="text-muted-foreground mt-2 space-y-1.5 text-sm">
+            <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
               {willInclude.map((item) => (
                 <li key={item} className="flex gap-2">
-                  <span className="bg-muted-foreground/40 mt-2 size-1 shrink-0 rounded-full" />
+                  <span className="mt-2 size-1 shrink-0 rounded-full bg-muted-foreground/40" />
                   {item}
                 </li>
               ))}
             </ul>
           </div>
 
-          <div className="bg-muted/50 rounded-lg border p-4">
+          <div className="rounded-lg border bg-muted/50 p-4">
             <p className="text-sm leading-relaxed">
               This module is not built yet. Nothing here is a mock-up or a
               placeholder figure — when it ships, every number on it will come

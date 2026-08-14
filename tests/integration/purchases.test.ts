@@ -31,10 +31,7 @@ const createdEmails: string[] = [];
 
 type Registration = "REGULAR" | "COMPOSITION" | "UNREGISTERED";
 
-function registrationInput(
-  email: string,
-  scheme: Registration,
-): RegisterInput {
+function registrationInput(email: string, scheme: Registration): RegisterInput {
   return {
     account: {
       fullName: "Ravi Prakash",
@@ -74,7 +71,9 @@ type Fixture = {
   taxRate18Id: string;
 };
 
-async function createCompany(scheme: Registration = "REGULAR"): Promise<Fixture> {
+async function createCompany(
+  scheme: Registration = "REGULAR",
+): Promise<Fixture> {
   const email = `purch-${uniqueSlug("x").replace(/-/g, "")}@example.com`;
   createdEmails.push(email);
   const result = await registerOwner(registrationInput(email, scheme));
@@ -151,7 +150,13 @@ function billInput(
     claimInputCredit: true,
     notes: "",
     lines: [
-      { productId, description: "", quantity: 10, rate: 100, discountPercent: 0 },
+      {
+        productId,
+        description: "",
+        quantity: 10,
+        rate: 100,
+        discountPercent: 0,
+      },
     ],
     ...overrides,
   };
@@ -406,7 +411,11 @@ describe("who is selling", () => {
         kind: "SUPPLIER",
         userId: fixture.userId,
         actorEmail: fixture.actorEmail,
-        input: supplierInput({ name: "Local Vendor", gstin: "", stateCode: "29" }),
+        input: supplierInput({
+          name: "Local Vendor",
+          gstin: "",
+          stateCode: "29",
+        }),
       }),
       createProduct({
         companyId: fixture.companyId,
@@ -769,7 +778,10 @@ describe("buying then selling", () => {
 
     // Five units at the blended ₹120.
     expect(
-      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.COST_OF_GOODS_SOLD),
+      await accountBalance(
+        fixture.companyId,
+        SYSTEM_ACCOUNT.COST_OF_GOODS_SOLD,
+      ),
     ).toBe(toStorageString(600));
     expect(
       await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.INVENTORY),

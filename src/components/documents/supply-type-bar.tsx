@@ -46,7 +46,7 @@ export function SupplyTypeBar<TValues extends FieldValues>({
     : "—";
 
   return (
-    <div className="bg-muted/30 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border px-4 py-3 text-sm">
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border bg-muted/30 px-4 py-3 text-sm">
       <span className="flex items-center gap-2">
         <Badge variant={supplyType === "INTER_STATE" ? "info" : "muted"}>
           {supplyType === "INTRA_STATE"

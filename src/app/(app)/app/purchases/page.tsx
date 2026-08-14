@@ -39,7 +39,7 @@ export default async function PurchasesPage({
           Number(result.postedTotal) > 0 ? (
             <div className="flex gap-6 rounded-lg border px-4 py-2.5">
               <div>
-                <p className="text-muted-foreground text-xs">Purchased</p>
+                <p className="text-xs text-muted-foreground">Purchased</p>
                 <p className="tabular-figures text-lg font-semibold">
                   {formatCurrency(result.postedTotal, {
                     compactZeroDecimals: true,
@@ -48,7 +48,7 @@ export default async function PurchasesPage({
               </div>
               {Number(result.inputCredit) > 0 && (
                 <div>
-                  <p className="text-muted-foreground text-xs">Input credit</p>
+                  <p className="text-xs text-muted-foreground">Input credit</p>
                   <p className="tabular-figures text-lg font-semibold">
                     {formatCurrency(result.inputCredit, {
                       compactZeroDecimals: true,
@@ -58,7 +58,7 @@ export default async function PurchasesPage({
               )}
               {Number(result.payablesOutstanding) > 0 && (
                 <div>
-                  <p className="text-muted-foreground text-xs">Owed</p>
+                  <p className="text-xs text-muted-foreground">Owed</p>
                   <p className="tabular-figures text-lg font-semibold">
                     {formatCurrency(result.payablesOutstanding, {
                       compactZeroDecimals: true,

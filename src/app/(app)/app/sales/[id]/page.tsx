@@ -16,7 +16,11 @@ import {
 } from "@/components/ui/table";
 import { findStateByCode } from "@/lib/constants/india";
 import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
-import { describeSupplyType, type GstRegistration, type SupplyType } from "@/lib/tax/gst";
+import {
+  describeSupplyType,
+  type GstRegistration,
+  type SupplyType,
+} from "@/lib/tax/gst";
 import { requirePermission } from "@/server/auth/context";
 import { getSale } from "@/server/sales/sale-service";
 import { voidSaleAction } from "@/server/sales/actions";
@@ -43,12 +47,13 @@ export default async function SaleDetailPage({
   const context = await requirePermission("sales.view");
   const { id } = await params;
 
-  const detail = await getSale({ companyId: context.company.id, saleId: id }).catch(
-    (error: unknown) => {
-      if (error instanceof MasterDataError) notFound();
-      throw error;
-    },
-  );
+  const detail = await getSale({
+    companyId: context.company.id,
+    saleId: id,
+  }).catch((error: unknown) => {
+    if (error instanceof MasterDataError) notFound();
+    throw error;
+  });
 
   const { sale, entry } = detail;
   const voided = sale.status === "VOIDED";
@@ -61,7 +66,7 @@ export default async function SaleDetailPage({
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
       <Link
         href="/app/sales"
-        className="text-muted-foreground hover:text-foreground mb-5 inline-flex items-center gap-1.5 text-sm underline-offset-4 hover:underline"
+        className="mb-5 inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >
         <ArrowLeft className="size-3.5" />
         All invoices
@@ -82,7 +87,7 @@ export default async function SaleDetailPage({
               <Badge variant="success">Posted</Badge>
             )}
           </h1>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <p className="mt-1 text-sm text-muted-foreground">
             {formatDate(sale.invoiceDate, { style: "long" })} ·{" "}
             {sale.customer?.name ?? "Counter sale"}
             {sale.branch ? ` · ${sale.branch.name}` : ""}
@@ -138,21 +143,23 @@ export default async function SaleDetailPage({
                         <p className="font-medium">
                           {item.description ?? item.product.name}
                         </p>
-                        <p className="text-muted-foreground font-mono text-xs">
+                        <p className="font-mono text-xs text-muted-foreground">
                           {item.product.sku}
                           {item.hsnCode ? ` · HSN ${item.hsnCode}` : ""}
                         </p>
                       </TableCell>
                       <TableCell className="tabular-figures text-right">
                         {formatNumber(item.quantity)}
-                        <span className="text-muted-foreground ml-1 text-xs">
+                        <span className="ml-1 text-xs text-muted-foreground">
                           {item.product.unit.code}
                         </span>
                       </TableCell>
                       <TableCell className="tabular-figures text-right">
-                        {formatCurrency(item.rate, { compactZeroDecimals: true })}
+                        {formatCurrency(item.rate, {
+                          compactZeroDecimals: true,
+                        })}
                         {Number(item.discountPercent) > 0 && (
-                          <span className="text-muted-foreground block text-xs">
+                          <span className="block text-xs text-muted-foreground">
                             −{Number(item.discountPercent)}%
                           </span>
                         )}
@@ -170,7 +177,7 @@ export default async function SaleDetailPage({
                                 Number(item.sgstAmount) +
                                 Number(item.igstAmount),
                             )}
-                            <span className="text-muted-foreground block text-xs">
+                            <span className="block text-xs text-muted-foreground">
                               {Number(item.taxPercent)}%
                             </span>
                           </>
@@ -210,7 +217,7 @@ export default async function SaleDetailPage({
                       <TableRow key={line.lineNumber}>
                         <TableCell className="pl-6">
                           <p className="text-sm">{line.account.name}</p>
-                          <p className="text-muted-foreground font-mono text-xs">
+                          <p className="font-mono text-xs text-muted-foreground">
                             {line.account.code}
                           </p>
                         </TableCell>
@@ -232,12 +239,14 @@ export default async function SaleDetailPage({
                     ))}
                   </TableBody>
                 </Table>
-                <p className="text-muted-foreground border-t px-6 py-3 text-xs leading-relaxed">
+                <p className="border-t px-6 py-3 text-xs leading-relaxed text-muted-foreground">
                   Debits equal credits at {formatCurrency(entry.totalDebit)}.
                   {Number(sale.costOfGoodsSold) > 0 && (
                     <>
                       {" "}
-                      That is more than the {formatCurrency(sale.totalAmount)}{" "}
+                      That is more than the {formatCurrency(
+                        sale.totalAmount,
+                      )}{" "}
                       invoiced because the entry also moves{" "}
                       {formatCurrency(sale.costOfGoodsSold)} of stock into cost
                       of sales — the sale and what it cost you belong together.
@@ -303,7 +312,11 @@ export default async function SaleDetailPage({
                 }
               />
               {sale.customer?.gstin && (
-                <Detail label="Customer GSTIN" value={sale.customer.gstin} mono />
+                <Detail
+                  label="Customer GSTIN"
+                  value={sale.customer.gstin}
+                  mono
+                />
               )}
               {sale.dueDate && (
                 <Detail
@@ -318,7 +331,7 @@ export default async function SaleDetailPage({
                 />
               )}
               {taxNotice && (
-                <p className="text-muted-foreground border-t pt-3 text-xs leading-relaxed">
+                <p className="border-t pt-3 text-xs leading-relaxed text-muted-foreground">
                   {taxNotice}
                 </p>
               )}
@@ -349,7 +362,9 @@ function Row({
 }) {
   return (
     <div className="flex items-baseline justify-between">
-      <span className={muted ? "text-muted-foreground" : undefined}>{label}</span>
+      <span className={muted ? "text-muted-foreground" : undefined}>
+        {label}
+      </span>
       <span className="tabular-figures">
         {formatCurrency(String(value as string))}
       </span>

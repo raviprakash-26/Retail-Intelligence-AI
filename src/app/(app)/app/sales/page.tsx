@@ -39,7 +39,7 @@ export default async function SalesPage({
           Number(result.postedTotal) > 0 ? (
             <div className="flex gap-6 rounded-lg border px-4 py-2.5">
               <div>
-                <p className="text-muted-foreground text-xs">Invoiced</p>
+                <p className="text-xs text-muted-foreground">Invoiced</p>
                 <p className="tabular-figures text-lg font-semibold">
                   {formatCurrency(result.postedTotal, {
                     compactZeroDecimals: true,
@@ -48,7 +48,7 @@ export default async function SalesPage({
               </div>
               {Number(result.creditOutstanding) > 0 && (
                 <div>
-                  <p className="text-muted-foreground text-xs">On credit</p>
+                  <p className="text-xs text-muted-foreground">On credit</p>
                   <p className="tabular-figures text-lg font-semibold">
                     {formatCurrency(result.creditOutstanding, {
                       compactZeroDecimals: true,

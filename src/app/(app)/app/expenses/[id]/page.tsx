@@ -52,7 +52,7 @@ export default async function ExpenseDetailPage({
     <div className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
       <Link
         href="/app/expenses"
-        className="text-muted-foreground hover:text-foreground mb-5 inline-flex items-center gap-1.5 text-sm underline-offset-4 hover:underline"
+        className="mb-5 inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >
         <ArrowLeft className="size-3.5" />
         All expenses
@@ -72,9 +72,11 @@ export default async function ExpenseDetailPage({
             ) : (
               <Badge variant="success">Posted</Badge>
             )}
-            {expense.isCapitalExpenditure && <Badge variant="info">Asset</Badge>}
+            {expense.isCapitalExpenditure && (
+              <Badge variant="info">Asset</Badge>
+            )}
           </h1>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <p className="mt-1 text-sm text-muted-foreground">
             {formatDate(expense.expenseDate, { style: "long" })} ·{" "}
             {expense.category.name}
             {expense.payeeName ? ` · ${expense.payeeName}` : ""}
@@ -144,7 +146,7 @@ export default async function ExpenseDetailPage({
                       <TableRow key={line.lineNumber}>
                         <TableCell className="pl-6">
                           <p className="text-sm">{line.account.name}</p>
-                          <p className="text-muted-foreground font-mono text-xs">
+                          <p className="font-mono text-xs text-muted-foreground">
                             {line.account.code}
                           </p>
                         </TableCell>
@@ -166,7 +168,7 @@ export default async function ExpenseDetailPage({
                     ))}
                   </TableBody>
                 </Table>
-                <p className="text-muted-foreground border-t px-6 py-3 text-xs leading-relaxed">
+                <p className="border-t px-6 py-3 text-xs leading-relaxed text-muted-foreground">
                   Debits equal credits at {formatCurrency(entry.totalDebit)}.
                   {totalTax > 0 && (
                     <>
@@ -214,7 +216,10 @@ export default async function ExpenseDetailPage({
 
           <Card>
             <CardContent className="space-y-3 py-5 text-sm">
-              <Detail label="Payment" value={expense.paymentMode.toLowerCase()} />
+              <Detail
+                label="Payment"
+                value={expense.paymentMode.toLowerCase()}
+              />
               <Detail label="Category" value={expense.category.name} />
               {totalTax > 0 && (
                 <Detail
@@ -247,7 +252,9 @@ function Row({
 }) {
   return (
     <div className="flex items-baseline justify-between">
-      <span className={muted ? "text-muted-foreground" : undefined}>{label}</span>
+      <span className={muted ? "text-muted-foreground" : undefined}>
+        {label}
+      </span>
       <span className="tabular-figures">
         {formatCurrency(String(value as string))}
       </span>

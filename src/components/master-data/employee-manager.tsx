@@ -54,7 +54,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { employeeSchema, type EmployeeInput } from "@/lib/validation/master-data";
+import {
+  employeeSchema,
+  type EmployeeInput,
+} from "@/lib/validation/master-data";
 import type { ActionResult } from "@/server/auth/action-result";
 import type {
   EmployeeListResult,
@@ -81,13 +84,15 @@ const STATUS_LABEL: Record<EmployeeRow["status"], string> = {
   TERMINATED: "Terminated",
 };
 
-const STATUS_VARIANT: Record<EmployeeRow["status"], "success" | "warning" | "muted"> =
-  {
-    ACTIVE: "success",
-    ON_LEAVE: "warning",
-    RESIGNED: "muted",
-    TERMINATED: "muted",
-  };
+const STATUS_VARIANT: Record<
+  EmployeeRow["status"],
+  "success" | "warning" | "muted"
+> = {
+  ACTIVE: "success",
+  ON_LEAVE: "warning",
+  RESIGNED: "muted",
+  TERMINATED: "muted",
+};
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -147,7 +152,10 @@ export function EmployeeManager({
             anything in the books.
           </p>
           {canManage && (
-            <Button className="mt-5" onClick={() => setDialog({ mode: "create" })}>
+            <Button
+              className="mt-5"
+              onClick={() => setDialog({ mode: "create" })}
+            >
               <Plus className="size-4" />
               Add employee
             </Button>
@@ -188,7 +196,7 @@ export function EmployeeManager({
                 <TableCell className="text-sm whitespace-nowrap">
                   {formatDate(employee.joiningDate, { style: "short" })}
                 </TableCell>
-                <TableCell className="text-right tabular-figures">
+                <TableCell className="tabular-figures text-right">
                   {formatCurrency(employee.grossSalary, {
                     compactZeroDecimals: true,
                   })}

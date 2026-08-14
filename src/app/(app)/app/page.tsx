@@ -15,7 +15,10 @@ import {
 } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
-import { signedBalance, trialBalanceIsBalanced } from "@/lib/accounting/double-entry";
+import {
+  signedBalance,
+  trialBalanceIsBalanced,
+} from "@/lib/accounting/double-entry";
 import { prisma } from "@/lib/db";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { requireCompanyContext } from "@/server/auth/context";
@@ -57,7 +60,9 @@ export default async function DashboardPage() {
         companyId: company.id,
         status: "POSTED",
         ...(fiscalYear
-          ? { entryDate: { gte: fiscalYear.startDate, lte: fiscalYear.endDate } }
+          ? {
+              entryDate: { gte: fiscalYear.startDate, lte: fiscalYear.endDate },
+            }
           : {}),
       },
       _sum: { debit: true, credit: true },
@@ -85,7 +90,11 @@ export default async function DashboardPage() {
     if (!account) return null;
     const row = balances.find((balance) => balance.accountId === account.id);
     if (!row) return null;
-    return signedBalance(account.nature, row._sum.debit ?? 0, row._sum.credit ?? 0);
+    return signedBalance(
+      account.nature,
+      row._sum.debit ?? 0,
+      row._sum.credit ?? 0,
+    );
   };
 
   const cash = balanceFor(SYSTEM_ACCOUNT.CASH);
@@ -110,9 +119,11 @@ export default async function DashboardPage() {
             <h1 className="text-2xl font-semibold tracking-tight">
               Good to see you, {user.fullName.split(" ")[0]}
             </h1>
-            <p className="text-muted-foreground mt-1 flex flex-wrap items-center gap-2 text-sm">
+            <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               {company.name}
-              {fiscalYear && <Badge variant="muted">FY {fiscalYear.label}</Badge>}
+              {fiscalYear && (
+                <Badge variant="muted">FY {fiscalYear.label}</Badge>
+              )}
               {company.isDemo && <Badge variant="warning">Demo data</Badge>}
             </p>
           </div>
@@ -176,20 +187,52 @@ export default async function DashboardPage() {
             <h2 id="trading-heading" className="text-sm font-semibold">
               Trading
             </h2>
-            <p className="text-muted-foreground text-xs">
+            <p className="text-xs text-muted-foreground">
               Populated as each module is built
             </p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <KpiCard label="Sales this month" pending pendingNote="Arrives with the Sales module." />
-            <KpiCard label="Purchases" pending pendingNote="Arrives with the Purchases module." />
-            <KpiCard label="Expenses" pending pendingNote="Arrives with the Expenses module." />
-            <KpiCard label="Gross profit" pending pendingNote="Needs sales and stock valuation." />
-            <KpiCard label="Receivables" pending pendingNote="Arrives with Sales and Receipts." />
-            <KpiCard label="Payables" pending pendingNote="Arrives with Purchases and Payments." />
-            <KpiCard label="Inventory value" pending pendingNote="Arrives with the Inventory module." />
-            <KpiCard label="GST payable" pending pendingNote="Arrives with the GST module." />
+            <KpiCard
+              label="Sales this month"
+              pending
+              pendingNote="Arrives with the Sales module."
+            />
+            <KpiCard
+              label="Purchases"
+              pending
+              pendingNote="Arrives with the Purchases module."
+            />
+            <KpiCard
+              label="Expenses"
+              pending
+              pendingNote="Arrives with the Expenses module."
+            />
+            <KpiCard
+              label="Gross profit"
+              pending
+              pendingNote="Needs sales and stock valuation."
+            />
+            <KpiCard
+              label="Receivables"
+              pending
+              pendingNote="Arrives with Sales and Receipts."
+            />
+            <KpiCard
+              label="Payables"
+              pending
+              pendingNote="Arrives with Purchases and Payments."
+            />
+            <KpiCard
+              label="Inventory value"
+              pending
+              pendingNote="Arrives with the Inventory module."
+            />
+            <KpiCard
+              label="GST payable"
+              pending
+              pendingNote="Arrives with the GST module."
+            />
           </div>
         </section>
 
@@ -228,12 +271,13 @@ export default async function DashboardPage() {
                   <dd className="flex items-center gap-1.5 font-medium">
                     {trialBalance.balanced ? (
                       <>
-                        <ShieldCheck className="text-success size-4" />
+                        <ShieldCheck className="size-4 text-success" />
                         Balanced
                       </>
                     ) : (
                       <span className="text-destructive">
-                        Off by {formatCurrency(trialBalance.difference, { currency })}
+                        Off by{" "}
+                        {formatCurrency(trialBalance.difference, { currency })}
                       </span>
                     )}
                   </dd>
@@ -261,18 +305,34 @@ export default async function DashboardPage() {
             <CardContent>
               <ol className="space-y-3 text-sm">
                 {[
-                  { phase: 5, label: "Master data", detail: "Products, customers, suppliers" },
-                  { phase: 6, label: "Sales", detail: "Invoicing, payment modes, outstanding" },
-                  { phase: 10, label: "Accounting engine", detail: "Automatic posting for every document" },
-                  { phase: 14, label: "Financial statements", detail: "Trading, P&L, balance sheet, cash flow" },
+                  {
+                    phase: 5,
+                    label: "Master data",
+                    detail: "Products, customers, suppliers",
+                  },
+                  {
+                    phase: 6,
+                    label: "Sales",
+                    detail: "Invoicing, payment modes, outstanding",
+                  },
+                  {
+                    phase: 10,
+                    label: "Accounting engine",
+                    detail: "Automatic posting for every document",
+                  },
+                  {
+                    phase: 14,
+                    label: "Financial statements",
+                    detail: "Trading, P&L, balance sheet, cash flow",
+                  },
                 ].map((step) => (
                   <li key={step.phase} className="flex gap-3">
-                    <span className="bg-secondary text-secondary-foreground tabular-figures flex size-6 shrink-0 items-center justify-center rounded-md text-[0.6875rem] font-semibold">
+                    <span className="tabular-figures flex size-6 shrink-0 items-center justify-center rounded-md bg-secondary text-[0.6875rem] font-semibold text-secondary-foreground">
                       {step.phase}
                     </span>
                     <span>
                       <span className="font-medium">{step.label}</span>
-                      <span className="text-muted-foreground block text-xs">
+                      <span className="block text-xs text-muted-foreground">
                         {step.detail}
                       </span>
                     </span>

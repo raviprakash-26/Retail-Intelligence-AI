@@ -66,7 +66,7 @@ export function ExpensesList({
       {result.rows.length === 0 ? (
         <div className="rounded-xl border border-dashed px-6 py-14 text-center">
           <h2 className="text-base font-semibold">No expenses yet</h2>
-          <p className="text-muted-foreground mx-auto mt-1.5 max-w-md text-sm">
+          <p className="mx-auto mt-1.5 max-w-md text-sm text-muted-foreground">
             Rent, electricity, salaries, repairs. Each one posts to its own
             expense account, so the profit and loss account adds up without
             anyone sorting receipts at the end of the year.
@@ -106,7 +106,7 @@ export function ExpensesList({
                         {expense.voucherNumber}
                       </span>
                     </Link>
-                    <p className="text-muted-foreground text-xs">
+                    <p className="text-xs text-muted-foreground">
                       {formatDate(expense.expenseDate, { style: "short" })}
                       {voided && " · voided"}
                     </p>
@@ -143,14 +143,16 @@ export function ExpensesList({
                         {formatCurrency(expense.taxAmount, {
                           compactZeroDecimals: true,
                         })}
-                        <span className="text-muted-foreground block text-xs">
+                        <span className="block text-xs text-muted-foreground">
                           {expense.itcEligible ? "claimable" : "in cost"}
                         </span>
                       </>
                     )}
                   </TableCell>
                   <TableCell className="tabular-figures text-right font-medium">
-                    <span className={voided ? "line-through opacity-60" : undefined}>
+                    <span
+                      className={voided ? "line-through opacity-60" : undefined}
+                    >
                       {formatCurrency(expense.totalAmount, {
                         compactZeroDecimals: true,
                       })}
@@ -183,7 +185,7 @@ export function ExpenseBreakdown({ result }: { result: ExpenseListResult }) {
   return (
     <div className="mb-6 rounded-xl border px-5 py-4">
       <h2 className="text-sm font-semibold">Where it went</h2>
-      <p className="text-muted-foreground mt-0.5 text-xs">
+      <p className="mt-0.5 text-xs text-muted-foreground">
         Posted expenses by category. Assets are excluded — they are not a cost.
       </p>
       <ul className="mt-3 space-y-2">
@@ -193,13 +195,13 @@ export function ExpenseBreakdown({ result }: { result: ExpenseListResult }) {
               {category.name}
             </span>
             <span
-              className="bg-primary/70 h-2 rounded-full"
+              className="h-2 rounded-full bg-primary/70"
               style={{
                 width: `${Math.max(2, (Number(category.total) / largest) * 100)}%`,
               }}
               aria-hidden="true"
             />
-            <span className="tabular-figures text-muted-foreground ml-auto text-sm">
+            <span className="tabular-figures ml-auto text-sm text-muted-foreground">
               {formatCurrency(category.total, { compactZeroDecimals: true })}
             </span>
           </li>

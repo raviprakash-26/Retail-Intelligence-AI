@@ -125,16 +125,22 @@ export function ExpenseForm({
     supplyType,
   );
 
-  const tax = add(computed.cgstAmount, computed.sgstAmount, computed.igstAmount);
+  const tax = add(
+    computed.cgstAmount,
+    computed.sgstAmount,
+    computed.igstAmount,
+  );
   const eligibleForCredit =
     company.gstRegistration === "REGULAR" && chargesTax(supplyType);
-  const claiming = eligibleForCredit && watched.claimInputCredit && !tax.isZero();
+  const claiming =
+    eligibleForCredit && watched.claimInputCredit && !tax.isZero();
   const carriedCost = claiming
     ? computed.taxableAmount
     : add(computed.taxableAmount, tax);
 
   async function onSubmit(values: ExpenseInput) {
-    const result: ActionResult<{ id: string }> = await createExpenseAction(values);
+    const result: ActionResult<{ id: string }> =
+      await createExpenseAction(values);
     if (!applyResult(result)) return;
     router.push(`/app/expenses/${result.data.id}`);
   }
@@ -154,7 +160,10 @@ export function ExpenseForm({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>What was it for</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Choose a category" />
@@ -231,7 +240,7 @@ export function ExpenseForm({
                       <FormItem>
                         <FormLabel>
                           Payee
-                          <span className="text-muted-foreground font-normal">
+                          <span className="font-normal text-muted-foreground">
                             (optional)
                           </span>
                         </FormLabel>
@@ -250,7 +259,10 @@ export function ExpenseForm({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Paid by</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue />
@@ -276,7 +288,7 @@ export function ExpenseForm({
                     <FormItem>
                       <FormLabel>
                         Bill or receipt number
-                        <span className="text-muted-foreground font-normal">
+                        <span className="font-normal text-muted-foreground">
                           (optional)
                         </span>
                       </FormLabel>
@@ -323,7 +335,9 @@ export function ExpenseForm({
                       <FormItem>
                         <FormLabel>GST on the receipt</FormLabel>
                         <Select
-                          onValueChange={(value) => field.onChange(Number(value))}
+                          onValueChange={(value) =>
+                            field.onChange(Number(value))
+                          }
                           value={String(field.value)}
                         >
                           <FormControl>
@@ -473,7 +487,7 @@ export function ExpenseForm({
                     <FormItem>
                       <FormLabel>
                         Notes
-                        <span className="text-muted-foreground font-normal">
+                        <span className="font-normal text-muted-foreground">
                           (optional)
                         </span>
                       </FormLabel>
@@ -491,7 +505,7 @@ export function ExpenseForm({
           <Card className="h-fit">
             <CardContent className="space-y-2 py-5 text-sm">
               {supplier?.gstin && (
-                <p className="text-muted-foreground flex items-center gap-1.5 pb-2 text-xs">
+                <p className="flex items-center gap-1.5 pb-2 text-xs text-muted-foreground">
                   <Building2 className="size-3.5" />
                   {supplier.name} · {supplier.gstin}
                 </p>
@@ -526,7 +540,9 @@ export function ExpenseForm({
                   which is not always the figure on the receipt. */}
               <div className="flex items-baseline justify-between border-t pt-3">
                 <span className="text-muted-foreground">
-                  {watched.isCapitalExpenditure ? "Added to assets" : "Cost this month"}
+                  {watched.isCapitalExpenditure
+                    ? "Added to assets"
+                    : "Cost this month"}
                 </span>
                 <span className="tabular-figures font-medium">
                   {watched.isCapitalExpenditure
@@ -541,7 +557,7 @@ export function ExpenseForm({
                 </Badge>
               )}
 
-              <p className="text-muted-foreground flex items-start gap-1.5 pt-2 text-xs leading-relaxed">
+              <p className="flex items-start gap-1.5 pt-2 text-xs leading-relaxed text-muted-foreground">
                 <Info className="mt-0.5 size-3.5 shrink-0" />
                 Recalculated on the server when you save, and posted as a
                 balanced journal entry.

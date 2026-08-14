@@ -48,7 +48,7 @@ export default async function ExpensesPage({
           Number(result.postedExpense) > 0 || Number(result.capitalised) > 0 ? (
             <div className="flex gap-6 rounded-lg border px-4 py-2.5">
               <div>
-                <p className="text-muted-foreground text-xs">Cost so far</p>
+                <p className="text-xs text-muted-foreground">Cost so far</p>
                 <p className="tabular-figures text-lg font-semibold">
                   {formatCurrency(result.postedExpense, {
                     compactZeroDecimals: true,
@@ -57,7 +57,7 @@ export default async function ExpensesPage({
               </div>
               {Number(result.capitalised) > 0 && (
                 <div>
-                  <p className="text-muted-foreground text-xs">Capitalised</p>
+                  <p className="text-xs text-muted-foreground">Capitalised</p>
                   <p className="tabular-figures text-lg font-semibold">
                     {formatCurrency(result.capitalised, {
                       compactZeroDecimals: true,
@@ -67,7 +67,7 @@ export default async function ExpensesPage({
               )}
               {Number(result.inputCredit) > 0 && (
                 <div>
-                  <p className="text-muted-foreground text-xs">Input credit</p>
+                  <p className="text-xs text-muted-foreground">Input credit</p>
                   <p className="tabular-figures text-lg font-semibold">
                     {formatCurrency(result.inputCredit, {
                       compactZeroDecimals: true,

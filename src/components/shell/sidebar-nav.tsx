@@ -52,7 +52,9 @@ export function SidebarNav({
             <ul className="space-y-0.5">
               {section.items.map((item) => {
                 const isActive = current === item.href;
-                const planGated = Boolean(item.feature && !included.has(item.feature));
+                const planGated = Boolean(
+                  item.feature && !included.has(item.feature),
+                );
                 const notBuilt = item.status === "planned";
 
                 const link = (
@@ -68,10 +70,16 @@ export function SidebarNav({
                         : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
                       // A muted item reads as "not yet" rather than "broken",
                       // which is what a normal-looking dead link would suggest.
-                      (notBuilt || planGated) && !isActive && "text-sidebar-foreground/45",
+                      (notBuilt || planGated) &&
+                        !isActive &&
+                        "text-sidebar-foreground/45",
                     )}
                   >
-                    <NavIcon name={item.icon} className="size-4 shrink-0" aria-hidden="true" />
+                    <NavIcon
+                      name={item.icon}
+                      className="size-4 shrink-0"
+                      aria-hidden="true"
+                    />
                     {!collapsed && (
                       <>
                         <span className="truncate">{item.label}</span>
@@ -101,9 +109,14 @@ export function SidebarNav({
                     {collapsed ? (
                       <Tooltip>
                         <TooltipTrigger asChild>{link}</TooltipTrigger>
-                        <TooltipContent side="right" className="flex items-center gap-1.5">
+                        <TooltipContent
+                          side="right"
+                          className="flex items-center gap-1.5"
+                        >
                           {item.label}
-                          {notBuilt && <span className="opacity-70">· soon</span>}
+                          {notBuilt && (
+                            <span className="opacity-70">· soon</span>
+                          )}
                           {planGated && <Lock className="size-3" />}
                         </TooltipContent>
                       </Tooltip>

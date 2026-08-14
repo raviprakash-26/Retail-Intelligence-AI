@@ -118,7 +118,12 @@ function customerInput(overrides: Partial<CustomerInput> = {}): CustomerInput {
 
 function supplierInput(overrides: Partial<SupplierInput> = {}): SupplierInput {
   const { creditLimit: _ignored, ...base } = customerInput();
-  return { ...base, name: "ABC Traders", openingNature: "CREDIT", ...overrides };
+  return {
+    ...base,
+    name: "ABC Traders",
+    openingNature: "CREDIT",
+    ...overrides,
+  };
 }
 
 function productInput(
@@ -284,7 +289,9 @@ describe("customer opening balances", () => {
 
     expect(created.openingEntry).toBeNull();
     expect(
-      await prisma.journalEntry.count({ where: { companyId: company.companyId } }),
+      await prisma.journalEntry.count({
+        where: { companyId: company.companyId },
+      }),
     ).toBe(entriesBefore);
   });
 
@@ -370,7 +377,9 @@ describe("customer opening balances", () => {
 
     expect(result.openingEntry).toBeNull();
     expect(
-      await prisma.journalEntry.count({ where: { companyId: company.companyId } }),
+      await prisma.journalEntry.count({
+        where: { companyId: company.companyId },
+      }),
     ).toBe(before);
   });
 
@@ -817,7 +826,8 @@ describe("units and categories", () => {
 
     const taxonomy = await getProductTaxonomy(company.companyId);
     expect(
-      taxonomy.categories.find((entry) => entry.id === category.id)?.productCount,
+      taxonomy.categories.find((entry) => entry.id === category.id)
+        ?.productCount,
     ).toBe(1);
   });
 });
@@ -832,7 +842,9 @@ describe("employees", () => {
     await createEmployee({ ...actor(company), input: employeeInput() });
 
     expect(
-      await prisma.journalEntry.count({ where: { companyId: company.companyId } }),
+      await prisma.journalEntry.count({
+        where: { companyId: company.companyId },
+      }),
     ).toBe(before);
   });
 
@@ -841,7 +853,11 @@ describe("employees", () => {
     await createEmployee({ ...actor(company), input: employeeInput() });
     const leaver = await createEmployee({
       ...actor(company),
-      input: employeeInput({ name: "Priya Nair", basicSalary: 18000, allowances: 2500 }),
+      input: employeeInput({
+        name: "Priya Nair",
+        basicSalary: 18000,
+        allowances: 2500,
+      }),
     });
 
     const before = await listEmployees({ companyId: company.companyId });
@@ -864,8 +880,12 @@ describe("employees", () => {
     // A former employee drops out of the default list but is still on file.
     expect(after.total).toBe(1);
     expect(
-      (await listEmployees({ companyId: company.companyId, includeFormer: true }))
-        .total,
+      (
+        await listEmployees({
+          companyId: company.companyId,
+          includeFormer: true,
+        })
+      ).total,
     ).toBe(2);
   });
 });

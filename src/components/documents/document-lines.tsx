@@ -96,7 +96,7 @@ export function DocumentLines<TValues extends FieldValues>({
                       />
                     </FormControl>
                     {product && (
-                      <p className="text-muted-foreground text-xs">
+                      <p className="text-xs text-muted-foreground">
                         {product.sku}
                         {product.hsnCode ? ` · HSN ${product.hsnCode}` : ""}
                         {` · ${Number(product.taxPercent)}% GST`}
@@ -135,14 +135,14 @@ export function DocumentLines<TValues extends FieldValues>({
 
               <div className="flex items-end justify-between gap-3 lg:flex-col lg:items-end">
                 <div className="text-right">
-                  <p className="text-muted-foreground text-xs lg:hidden">
+                  <p className="text-xs text-muted-foreground lg:hidden">
                     Line total
                   </p>
                   <p className="tabular-figures font-medium">
                     {formatCurrency(line?.lineTotal.toFixed(4) ?? 0)}
                   </p>
                   {showTax && line && !line.taxableAmount.isZero() && (
-                    <p className="text-muted-foreground tabular-figures text-xs">
+                    <p className="tabular-figures text-xs text-muted-foreground">
                       {formatCurrency(line.taxableAmount.toFixed(4))} + tax
                     </p>
                   )}
@@ -280,8 +280,12 @@ function TotalRow({
 }) {
   return (
     <div className="flex items-baseline justify-between">
-      <span className={muted ? "text-muted-foreground" : undefined}>{label}</span>
-      <span className="tabular-figures">{formatCurrency(value.toFixed(4))}</span>
+      <span className={muted ? "text-muted-foreground" : undefined}>
+        {label}
+      </span>
+      <span className="tabular-figures">
+        {formatCurrency(value.toFixed(4))}
+      </span>
     </div>
   );
 }

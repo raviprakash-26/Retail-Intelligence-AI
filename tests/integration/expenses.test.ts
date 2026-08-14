@@ -69,7 +69,9 @@ type Fixture = {
   salaryCategoryId: string;
 };
 
-async function createCompany(scheme: Registration = "REGULAR"): Promise<Fixture> {
+async function createCompany(
+  scheme: Registration = "REGULAR",
+): Promise<Fixture> {
   const email = `exp-${uniqueSlug("x").replace(/-/g, "")}@example.com`;
   createdEmails.push(email);
   const result = await registerOwner(registrationInput(email, scheme));

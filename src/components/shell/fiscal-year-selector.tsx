@@ -47,7 +47,7 @@ export function FiscalYearSelector({
   // One year is not a choice; showing a dropdown implies otherwise.
   if (years.length === 1) {
     return (
-      <span className="text-muted-foreground hidden items-center gap-1.5 text-sm sm:flex">
+      <span className="hidden items-center gap-1.5 text-sm text-muted-foreground sm:flex">
         <CalendarRange className="size-4" aria-hidden="true" />
         FY {selected.label}
       </span>
@@ -88,16 +88,19 @@ export function FiscalYearSelector({
               <p className="flex items-center gap-1.5 text-sm font-medium">
                 {year.label}
                 {year.isClosed && (
-                  <Lock className="size-3 text-muted-foreground" aria-label="Closed" />
+                  <Lock
+                    className="size-3 text-muted-foreground"
+                    aria-label="Closed"
+                  />
                 )}
               </p>
-              <p className="text-muted-foreground text-xs">
+              <p className="text-xs text-muted-foreground">
                 {formatDate(year.startDate, { style: "short" })} –{" "}
                 {formatDate(year.endDate, { style: "short" })}
               </p>
             </div>
             {year.id === selected.id && (
-              <Check className="text-primary size-4 shrink-0" />
+              <Check className="size-4 shrink-0 text-primary" />
             )}
           </DropdownMenuItem>
         ))}

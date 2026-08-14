@@ -17,7 +17,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { activeHref, type NavSection, type QuickAction } from "@/lib/navigation";
+import {
+  activeHref,
+  type NavSection,
+  type QuickAction,
+} from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 /**
@@ -63,11 +67,15 @@ export function MobileNav({
           on iOS, where a flush bar is impossible to tap accurately. */}
       <nav
         aria-label="Primary"
-        className="bg-background/95 fixed inset-x-0 bottom-0 z-40 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
       >
         <ul className="grid grid-cols-5 items-center">
           {primary.slice(0, 2).map((item) => (
-            <MobileTab key={item.href} item={item} active={current === item.href} />
+            <MobileTab
+              key={item.href}
+              item={item}
+              active={current === item.href}
+            />
           ))}
 
           <li className="flex justify-center">
@@ -82,7 +90,11 @@ export function MobileNav({
           </li>
 
           {primary.slice(2, 4).map((item) => (
-            <MobileTab key={item.href} item={item} active={current === item.href} />
+            <MobileTab
+              key={item.href}
+              item={item}
+              active={current === item.href}
+            />
           ))}
 
           {primary.length < 4 && (
@@ -129,7 +141,8 @@ export function MobileNav({
           <DialogHeader>
             <DialogTitle>Record something</DialogTitle>
             <DialogDescription>
-              Everything else follows from the entry — accounting, stock and tax.
+              Everything else follows from the entry — accounting, stock and
+              tax.
             </DialogDescription>
           </DialogHeader>
 
@@ -146,10 +159,17 @@ export function MobileNav({
                       notBuilt && "opacity-60",
                     )}
                   >
-                    <NavIcon name={action.icon} className="size-4 text-muted-foreground" aria-hidden="true" />
+                    <NavIcon
+                      name={action.icon}
+                      className="size-4 text-muted-foreground"
+                      aria-hidden="true"
+                    />
                     <span className="text-xs font-medium">{action.label}</span>
                     {notBuilt && (
-                      <Badge variant="muted" className="w-fit px-1 py-0 text-[0.5625rem]">
+                      <Badge
+                        variant="muted"
+                        className="w-fit px-1 py-0 text-[0.5625rem]"
+                      >
                         Soon
                       </Badge>
                     )}

@@ -43,7 +43,7 @@ export function UserMenu({
           className="rounded-full"
           aria-label={`Account menu for ${fullName}`}
         >
-          <span className="bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-full text-xs font-semibold">
+          <span className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
             {initialsOf(fullName)}
           </span>
         </Button>
@@ -52,7 +52,7 @@ export function UserMenu({
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel className="font-normal">
           <p className="text-sm font-medium">{fullName}</p>
-          <p className="text-muted-foreground truncate text-xs">{email}</p>
+          <p className="truncate text-xs text-muted-foreground">{email}</p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <Badge variant="muted">{roleName}</Badge>
             {emailVerified ? (
@@ -94,9 +94,9 @@ export function UserMenu({
         <form action={signOutAction}>
           <button
             type="submit"
-            className="focus:bg-secondary text-destructive relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none"
+            className="relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm text-destructive outline-none focus:bg-secondary"
           >
-            <LogOut className="text-destructive size-4" />
+            <LogOut className="size-4 text-destructive" />
             Sign out
           </button>
         </form>

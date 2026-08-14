@@ -41,7 +41,7 @@ export default async function EmployeesPage({
               <p className="text-xs text-muted-foreground">
                 Monthly payroll commitment
               </p>
-              <p className="text-lg font-semibold tabular-figures">
+              <p className="tabular-figures text-lg font-semibold">
                 {formatCurrency(result.activeMonthlyCost, {
                   compactZeroDecimals: true,
                 })}

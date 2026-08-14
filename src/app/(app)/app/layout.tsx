@@ -6,7 +6,10 @@ import { FISCAL_YEAR_COOKIE, SIDEBAR_COOKIE } from "@/lib/constants/cookies";
 import { prisma } from "@/lib/db";
 import { visibleQuickActions, visibleSections } from "@/lib/navigation";
 import { getUserCompanies, requireCompanyContext } from "@/server/auth/context";
-import { listFiscalYears, resolveFiscalYear } from "@/server/fiscal/fiscal-service";
+import {
+  listFiscalYears,
+  resolveFiscalYear,
+} from "@/server/fiscal/fiscal-service";
 import {
   countUnread,
   listNotifications,
@@ -26,25 +29,31 @@ export default async function AppShellLayout({
   const context = await requireCompanyContext();
   const cookieStore = await cookies();
 
-  const [companies, fiscalYears, selectedYear, notifications, unreadCount, subscription] =
-    await Promise.all([
-      getUserCompanies(),
-      listFiscalYears(context.company.id),
-      resolveFiscalYear(
-        context.company.id,
-        cookieStore.get(FISCAL_YEAR_COOKIE)?.value,
-      ),
-      listNotifications({
-        companyId: context.company.id,
-        userId: context.user.id,
-        limit: 15,
-      }),
-      countUnread({ companyId: context.company.id, userId: context.user.id }),
-      prisma.subscription.findUnique({
-        where: { companyId: context.company.id },
-        select: { plan: { select: { features: true } } },
-      }),
-    ]);
+  const [
+    companies,
+    fiscalYears,
+    selectedYear,
+    notifications,
+    unreadCount,
+    subscription,
+  ] = await Promise.all([
+    getUserCompanies(),
+    listFiscalYears(context.company.id),
+    resolveFiscalYear(
+      context.company.id,
+      cookieStore.get(FISCAL_YEAR_COOKIE)?.value,
+    ),
+    listNotifications({
+      companyId: context.company.id,
+      userId: context.user.id,
+      limit: 15,
+    }),
+    countUnread({ companyId: context.company.id, userId: context.user.id }),
+    prisma.subscription.findUnique({
+      where: { companyId: context.company.id },
+      select: { plan: { select: { features: true } } },
+    }),
+  ]);
 
   const includedFeatures = Array.isArray(subscription?.plan.features)
     ? (subscription.plan.features as string[])
@@ -71,7 +80,7 @@ export default async function AppShellLayout({
           page to reach the content. */}
       <a
         href="#main-content"
-        className="sr-only-focusable bg-primary text-primary-foreground fixed top-4 left-4 z-[100] rounded-lg px-4 py-2 text-sm font-medium"
+        className="sr-only-focusable fixed top-4 left-4 z-[100] rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
       >
         Skip to content
       </a>
@@ -115,7 +124,7 @@ export default async function AppShellLayout({
           canViewSettings={context.permissions.has("settings.view")}
         />
 
-        <main id="main-content" className="bg-muted/30 flex-1">
+        <main id="main-content" className="flex-1 bg-muted/30">
           {children}
         </main>
 

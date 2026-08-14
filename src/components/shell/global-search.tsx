@@ -21,10 +21,16 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { globalSearchAction } from "@/server/search/actions";
-import type { SearchResult, SearchResultKind } from "@/server/search/global-search";
+import type {
+  SearchResult,
+  SearchResultKind,
+} from "@/server/search/global-search";
 import { cn } from "@/lib/utils";
 
-const KIND_META: Record<SearchResultKind, { label: string; icon: typeof Users }> = {
+const KIND_META: Record<
+  SearchResultKind,
+  { label: string; icon: typeof Users }
+> = {
   customer: { label: "Customers", icon: Users },
   supplier: { label: "Suppliers", icon: Truck },
   product: { label: "Products", icon: Package },
@@ -32,7 +38,12 @@ const KIND_META: Record<SearchResultKind, { label: string; icon: typeof Users }>
   page: { label: "Pages", icon: Search },
 };
 
-const ORDER: SearchResultKind[] = ["customer", "supplier", "product", "account"];
+const ORDER: SearchResultKind[] = [
+  "customer",
+  "supplier",
+  "product",
+  "account",
+];
 
 /**
  * Search is one dialog with any number of triggers.
@@ -44,7 +55,11 @@ const ORDER: SearchResultKind[] = ["customer", "supplier", "product", "account"]
  */
 const SearchContext = React.createContext<{ open: () => void } | null>(null);
 
-export function GlobalSearchProvider({ children }: { children: React.ReactNode }) {
+export function GlobalSearchProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -121,7 +136,8 @@ export function GlobalSearchProvider({ children }: { children: React.ReactNode }
   })).filter((group) => group.items.length > 0);
 
   const showEmptyPrompt = !loading && query.trim().length < 2;
-  const showNoMatches = !loading && query.trim().length >= 2 && grouped.length === 0;
+  const showNoMatches =
+    !loading && query.trim().length >= 2 && grouped.length === 0;
 
   return (
     <SearchContext.Provider value={value}>
@@ -146,20 +162,22 @@ export function GlobalSearchProvider({ children }: { children: React.ReactNode }
         />
         <CommandList>
           {loading && (
-            <div className="text-muted-foreground flex items-center justify-center gap-2 py-8 text-sm">
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
               Searching…
             </div>
           )}
 
           {showEmptyPrompt && (
-            <div className="text-muted-foreground px-3 py-8 text-center text-sm">
+            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
               Type at least two characters to search.
             </div>
           )}
 
           {showNoMatches && (
-            <CommandEmpty>Nothing matched &ldquo;{query.trim()}&rdquo;.</CommandEmpty>
+            <CommandEmpty>
+              Nothing matched &ldquo;{query.trim()}&rdquo;.
+            </CommandEmpty>
           )}
 
           {!loading &&
@@ -174,10 +192,10 @@ export function GlobalSearchProvider({ children }: { children: React.ReactNode }
                       onSelect={() => go(result.href)}
                       className="gap-2.5"
                     >
-                      <meta.icon className="text-muted-foreground size-4" />
+                      <meta.icon className="size-4 text-muted-foreground" />
                       <span className="truncate">{result.title}</span>
                       {result.subtitle && (
-                        <span className="text-muted-foreground ml-auto truncate text-xs">
+                        <span className="ml-auto truncate text-xs text-muted-foreground">
                           {result.subtitle}
                         </span>
                       )}
@@ -190,7 +208,7 @@ export function GlobalSearchProvider({ children }: { children: React.ReactNode }
           {/* Says plainly what is not searchable yet, rather than letting
               someone conclude their invoices have gone missing. */}
           {!loading && query.trim().length >= 2 && (
-            <p className="text-muted-foreground border-t px-3 py-2.5 text-xs">
+            <p className="border-t px-3 py-2.5 text-xs text-muted-foreground">
               Invoices, bills and journal entries become searchable as those
               modules are built.
             </p>
@@ -206,7 +224,9 @@ export function GlobalSearchTrigger({ className }: { className?: string }) {
   // Loud rather than quiet: a trigger outside the provider would render a
   // button that looks fine and does nothing at all.
   if (!context) {
-    throw new Error("GlobalSearchTrigger must be rendered inside GlobalSearchProvider");
+    throw new Error(
+      "GlobalSearchTrigger must be rendered inside GlobalSearchProvider",
+    );
   }
 
   return (
@@ -214,13 +234,13 @@ export function GlobalSearchTrigger({ className }: { className?: string }) {
       variant="outline"
       onClick={context.open}
       className={cn(
-        "text-muted-foreground h-9 w-full justify-start gap-2 px-3 font-normal",
+        "h-9 w-full justify-start gap-2 px-3 font-normal text-muted-foreground",
         className,
       )}
     >
       <Search className="size-4" />
       <span className="truncate">Search…</span>
-      <kbd className="bg-muted ml-auto hidden rounded border px-1.5 py-0.5 font-mono text-[0.625rem] sm:inline-block">
+      <kbd className="ml-auto hidden rounded border bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] sm:inline-block">
         ⌘K
       </kbd>
     </Button>

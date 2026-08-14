@@ -63,10 +63,10 @@ export function PurchasesList({
       {result.rows.length === 0 ? (
         <div className="rounded-xl border border-dashed px-6 py-14 text-center">
           <h2 className="text-base font-semibold">No bills yet</h2>
-          <p className="text-muted-foreground mx-auto mt-1.5 max-w-md text-sm">
-            Record what you buy. Stock comes in at what it cost, the GST you paid
-            is held as credit against the GST you collect, and what you owe the
-            supplier is tracked from the same entry.
+          <p className="mx-auto mt-1.5 max-w-md text-sm text-muted-foreground">
+            Record what you buy. Stock comes in at what it cost, the GST you
+            paid is held as credit against the GST you collect, and what you owe
+            the supplier is tracked from the same entry.
           </p>
           {canCreate && (
             <Button asChild className="mt-5">
@@ -103,7 +103,7 @@ export function PurchasesList({
                         {purchase.billNumber}
                       </span>
                     </Link>
-                    <p className="text-muted-foreground text-xs">
+                    <p className="text-xs text-muted-foreground">
                       {purchase.supplierBillNo
                         ? `their ref ${purchase.supplierBillNo} · `
                         : ""}
@@ -114,7 +114,7 @@ export function PurchasesList({
                   <TableCell className="text-sm">
                     {purchase.supplierName}
                     {purchase.isCredit && purchase.dueDate && !voided && (
-                      <span className="text-muted-foreground block text-xs">
+                      <span className="block text-xs text-muted-foreground">
                         due {formatDate(purchase.dueDate, { style: "short" })}
                       </span>
                     )}
@@ -141,14 +141,16 @@ export function PurchasesList({
                         })}
                         {/* Whether the tax is recoverable changes what the
                             goods cost, so it belongs on the row. */}
-                        <span className="text-muted-foreground block text-xs">
+                        <span className="block text-xs text-muted-foreground">
                           {purchase.itcEligible ? "claimable" : "in cost"}
                         </span>
                       </>
                     )}
                   </TableCell>
                   <TableCell className="tabular-figures text-right font-medium">
-                    <span className={voided ? "line-through opacity-60" : undefined}>
+                    <span
+                      className={voided ? "line-through opacity-60" : undefined}
+                    >
                       {formatCurrency(purchase.totalAmount, {
                         compactZeroDecimals: true,
                       })}

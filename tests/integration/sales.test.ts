@@ -142,7 +142,13 @@ function saleInput(
     priceIncludesTax: false,
     notes: "",
     lines: [
-      { productId, description: "", quantity: 10, rate: 100, discountPercent: 0 },
+      {
+        productId,
+        description: "",
+        quantity: 10,
+        rate: 100,
+        discountPercent: 0,
+      },
     ],
     ...overrides,
   };
@@ -234,7 +240,10 @@ describe("posting a cash sale", () => {
 
     // Ten units left at ₹60 each.
     expect(
-      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.COST_OF_GOODS_SOLD),
+      await accountBalance(
+        fixture.companyId,
+        SYSTEM_ACCOUNT.COST_OF_GOODS_SOLD,
+      ),
     ).toBe(toStorageString(600));
 
     await assertTrialBalances(fixture.companyId);
@@ -481,7 +490,13 @@ describe("stock protection", () => {
         branchId: null,
         input: saleInput(product.id, {
           lines: [
-            { productId: product.id, description: "", quantity: 8, rate: 100, discountPercent: 0 },
+            {
+              productId: product.id,
+              description: "",
+              quantity: 8,
+              rate: 100,
+              discountPercent: 0,
+            },
           ],
         }),
       }),
@@ -509,7 +524,13 @@ describe("stock protection", () => {
         branchId: null,
         input: saleInput(product.id, {
           lines: [
-            { productId: product.id, description: "", quantity: 8, rate: 100, discountPercent: 0 },
+            {
+              productId: product.id,
+              description: "",
+              quantity: 8,
+              rate: 100,
+              discountPercent: 0,
+            },
           ],
         }),
       }),
@@ -521,7 +542,9 @@ describe("stock protection", () => {
       await prisma.sale.count({ where: { companyId: fixture.companyId } }),
     ).toBe(0);
     expect(
-      await prisma.journalEntry.count({ where: { companyId: fixture.companyId } }),
+      await prisma.journalEntry.count({
+        where: { companyId: fixture.companyId },
+      }),
     ).toBe(entriesBefore);
     const balance = await prisma.inventoryBalance.findFirstOrThrow({
       where: { companyId: fixture.companyId, productId: product.id },
@@ -552,7 +575,13 @@ describe("stock protection", () => {
       branchId: null,
       input: saleInput(service.id, {
         lines: [
-          { productId: service.id, description: "", quantity: 1, rate: 100, discountPercent: 0 },
+          {
+            productId: service.id,
+            description: "",
+            quantity: 1,
+            rate: 100,
+            discountPercent: 0,
+          },
         ],
       }),
     });
@@ -564,7 +593,10 @@ describe("stock protection", () => {
     ).toBe(0);
     // No stock means no cost of sales — the whole ₹100 is margin.
     expect(
-      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.COST_OF_GOODS_SOLD),
+      await accountBalance(
+        fixture.companyId,
+        SYSTEM_ACCOUNT.COST_OF_GOODS_SOLD,
+      ),
     ).toBe(toStorageString(0));
     await assertTrialBalances(fixture.companyId);
   });
@@ -655,7 +687,12 @@ describe("voiding", () => {
 
     const record = await prisma.sale.findUniqueOrThrow({
       where: { id: sale.id },
-      select: { status: true, voidReason: true, totalAmount: true, paidAmount: true },
+      select: {
+        status: true,
+        voidReason: true,
+        totalAmount: true,
+        paidAmount: true,
+      },
     });
     expect(record.status).toBe("VOIDED");
     expect(record.voidReason).toBe("Customer changed their mind");
@@ -707,7 +744,10 @@ describe("voiding", () => {
 
 describe("tenant isolation", () => {
   it("cannot invoice another company's product", async () => {
-    const [mine, theirs] = await Promise.all([createCompany(), createCompany()]);
+    const [mine, theirs] = await Promise.all([
+      createCompany(),
+      createCompany(),
+    ]);
     const theirProduct = await createProduct({
       companyId: theirs.companyId,
       userId: theirs.userId,
@@ -727,7 +767,10 @@ describe("tenant isolation", () => {
   });
 
   it("cannot void another company's invoice", async () => {
-    const [mine, theirs] = await Promise.all([createCompany(), createCompany()]);
+    const [mine, theirs] = await Promise.all([
+      createCompany(),
+      createCompany(),
+    ]);
     const theirProduct = await createProduct({
       companyId: theirs.companyId,
       userId: theirs.userId,
@@ -779,7 +822,13 @@ describe("numbering", () => {
         branchId: null,
         input: saleInput(product.id, {
           lines: [
-            { productId: product.id, description: "", quantity: 1, rate: 100, discountPercent: 0 },
+            {
+              productId: product.id,
+              description: "",
+              quantity: 1,
+              rate: 100,
+              discountPercent: 0,
+            },
           ],
         }),
       });
@@ -806,7 +855,13 @@ describe("numbering", () => {
         branchId: null,
         input: saleInput(product.id, {
           lines: [
-            { productId: product.id, description: "", quantity: 5, rate: 100, discountPercent: 0 },
+            {
+              productId: product.id,
+              description: "",
+              quantity: 5,
+              rate: 100,
+              discountPercent: 0,
+            },
           ],
         }),
       }),
@@ -819,7 +874,13 @@ describe("numbering", () => {
       branchId: null,
       input: saleInput(product.id, {
         lines: [
-          { productId: product.id, description: "", quantity: 1, rate: 100, discountPercent: 0 },
+          {
+            productId: product.id,
+            description: "",
+            quantity: 1,
+            rate: 100,
+            discountPercent: 0,
+          },
         ],
       }),
     });
