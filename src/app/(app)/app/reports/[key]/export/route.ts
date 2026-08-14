@@ -3,6 +3,8 @@ import { csvFilename, toCsv } from "@/lib/reports/csv";
 import { recordAuditLog } from "@/server/audit/audit-log";
 import { getCompanyContext } from "@/server/auth/context";
 import { authorizeReport } from "@/server/reports/access";
+import { logger } from "@/lib/observability/logger";
+import { recordReportExport } from "@/lib/observability/metrics";
 import { runReport, ReportError } from "@/server/reports/report-service";
 
 /**
@@ -88,6 +90,8 @@ export async function GET(
     // it ₹ arrives as mojibake on a Windows machine, which is most of them.
     // It is added here rather than in `toCsv` so the serialiser stays a pure
     // function of the report and its tests read the text they expect.
+    recordReportExport(access.definition.key);
+
     return new NextResponse(`﻿${toCsv(report)}`, {
       headers: {
         "content-type": "text/csv; charset=utf-8",
@@ -99,7 +103,11 @@ export async function GET(
     if (error instanceof ReportError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    console.error("Report export failed", error);
+    logger.error("Report export failed", {
+      module: "Reports",
+      report: access.definition.key,
+      error,
+    });
     return NextResponse.json(
       { error: "That report could not be built." },
       { status: 500 },

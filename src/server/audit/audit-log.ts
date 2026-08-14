@@ -1,6 +1,7 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma, type DbClient } from "@/lib/db";
+import { redactValue } from "@/lib/redaction";
 
 /**
  * Audit logging.
@@ -50,40 +51,16 @@ export type AuditEntry = {
  * against the whole key. Metadata is assembled by callers, and a caller
  * spreading a whole form object is a mistake waiting to happen.
  */
-const REDACTED_KEYS =
-  /^(password|newPassword|confirmPassword|passwordHash|token|tokenHash|secret|apiKey|authorization|cookie|sessionToken)$/i;
-
-/** Recursively strips sensitive values before anything is persisted. */
-export function redactMetadata(
-  value: unknown,
-  depth = 0,
-): Prisma.InputJsonValue {
-  if (depth > 6) return "[truncated]";
-  if (value === null || value === undefined)
-    return null as unknown as Prisma.InputJsonValue;
-
-  if (Array.isArray(value)) {
-    return value.slice(0, 50).map((item) => redactMetadata(item, depth + 1));
-  }
-
-  if (typeof value === "object") {
-    const result: Record<string, Prisma.InputJsonValue> = {};
-    for (const [key, item] of Object.entries(
-      value as Record<string, unknown>,
-    )) {
-      result[key] = REDACTED_KEYS.test(key)
-        ? "[redacted]"
-        : redactMetadata(item, depth + 1);
-    }
-    return result;
-  }
-
-  if (typeof value === "string") {
-    return value.length > 2000 ? `${value.slice(0, 2000)}…` : value;
-  }
-
-  if (typeof value === "number" || typeof value === "boolean") return value;
-  return String(value);
+/**
+ * Recursively strips sensitive values before anything is persisted.
+ *
+ * The rule itself lives in `@/lib/redaction`, because the structured logger
+ * applies the same one — a secret written to a log aggregator is as leaked as
+ * a secret written to this table, and two lists of sensitive key names would
+ * drift the moment somebody added to only one.
+ */
+export function redactMetadata(value: unknown): Prisma.InputJsonValue {
+  return redactValue(value) as Prisma.InputJsonValue;
 }
 
 /**

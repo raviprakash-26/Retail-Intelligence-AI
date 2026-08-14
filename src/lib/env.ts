@@ -88,6 +88,16 @@ const serverSchema = z
     RATE_LIMIT_ALLOW_IN_MEMORY: booleanish.default(false),
 
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+    /**
+     * Bearer token the metrics endpoint requires. Absent means the endpoint
+     * does not exist — off by default, because process counts and database
+     * reachability are reconnaissance in a way that "ok" is not, and an
+     * operator opting in is a decision somebody made.
+     */
+    METRICS_TOKEN: z
+      .string()
+      .min(16, "METRICS_TOKEN needs at least 16 characters to be worth having")
+      .optional(),
     SEED_DEMO_DATA: booleanish.default(false),
   })
   // Each pluggable driver states its own required configuration, so a
