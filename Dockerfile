@@ -42,10 +42,27 @@ COPY . .
 RUN npx prisma generate
 
 # NEXT_TELEMETRY_DISABLED: a build should not phone home.
-# The build runs with NODE_ENV=production and imports server modules, so the
-# environment validator runs — see the note in lib/env.ts about why the
-# production-only hardening checks stand down during the build phase.
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# Placeholders, needed only so the build can run.
+#
+# Collecting page configuration imports the server modules, which constructs
+# the Prisma client, which reads the validated environment — so the build fails
+# without these even though it never opens a connection. On a developer's
+# machine .env supplied them invisibly; the first container build is where that
+# showed up.
+#
+# None of these reach the running image: the runtime stage below is a separate
+# FROM and inherits no ENV from here. Real values are supplied at run time, and
+# `instrumentation.ts` asserts them at boot, so a container started without
+# them fails immediately and loudly rather than serving traffic.
+#
+# The production-only hardening checks (placeholder secret, https, rate-limit
+# driver) stand down during the build phase — see the note in lib/env.ts.
+ENV DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build?schema=public"
+ENV AUTH_SECRET="build-time-placeholder-never-used-at-runtime-0000"
+ENV APP_URL="http://localhost:3000"
+
 RUN npm run build
 
 # -----------------------------------------------------------------------------
