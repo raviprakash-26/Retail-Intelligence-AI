@@ -1,5 +1,6 @@
 import { createClient, type RedisClientType } from "redis";
 import { afterAll, describe, expect, it } from "vitest";
+import { redisStoreForTests } from "@/server/security/rate-limit";
 
 /**
  * The Redis-backed rate limiter, against a real Redis.
@@ -34,7 +35,13 @@ const HIT_SCRIPT = `
  */
 const probe: RedisClientType | undefined = await (async () => {
   try {
-    const client: RedisClientType = createClient({ url: REDIS_URL });
+    // Fail fast rather than retrying: node-redis reconnects indefinitely by
+    // default, so without this the probe never settles and the whole file
+    // hangs instead of skipping.
+    const client: RedisClientType = createClient({
+      url: REDIS_URL,
+      socket: { connectTimeout: 1_000, reconnectStrategy: false },
+    });
     client.on("error", () => {});
     await client.connect();
     await client.ping();
@@ -156,5 +163,26 @@ describe.skipIf(!available)("the shared counter", () => {
 
     const after = await hit(client, key, 60_000);
     expect(after.count).toBe(1);
+  }, 30_000);
+});
+
+describe("when Redis cannot be reached", () => {
+  it("allows the request rather than hanging, and does so quickly", async () => {
+    // The behaviour the README documents, against an address nothing is
+    // listening on. It was unreachable when first written: node-redis retries
+    // forever, so the fallback never ran and a sign-in would have waited
+    // indefinitely — worse than either failing open or failing closed.
+    const store = redisStoreForTests("redis://127.0.0.1:6399");
+
+    const started = Date.now();
+    const result = await store.hit("test:unreachable", {
+      limit: 5,
+      windowSeconds: 60,
+    });
+    const elapsed = Date.now() - started;
+
+    expect(result.allowed).toBe(true);
+    // Bounded, and comfortably inside anything a person would wait for.
+    expect(elapsed).toBeLessThan(5_000);
   }, 30_000);
 });

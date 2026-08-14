@@ -145,26 +145,72 @@ const HIT_SCRIPT = `
   return {current, redis.call('PTTL', KEYS[1])}
 `;
 
+/**
+ * How long a rate-limit check may take before it is treated as unavailable.
+ *
+ * This sits on the sign-in path. A check that takes longer than this has
+ * already cost more than it is worth, and — the failure that made this
+ * necessary — node-redis retries a dead server indefinitely by default, so
+ * `connect()` never rejects and a request would wait forever rather than
+ * falling back. The fallback below is only reachable because of this bound.
+ */
+const CHECK_TIMEOUT_MS = 1_000;
+
+/** Rejects if `work` has not settled in time, so no caller waits unbounded. */
+async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`timed out after ${ms}ms`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 class RedisRateLimitStore implements RateLimitStore {
   private client: RedisClientType | undefined;
   private connecting: Promise<RedisClientType> | undefined;
+
+  /** Defaults to the configured server; a test may point it somewhere else. */
+  constructor(private readonly url: string | undefined = env.REDIS_URL) {}
 
   private async connection(): Promise<RedisClientType> {
     if (this.client?.isReady) return this.client;
 
     // One connection attempt in flight at a time: a burst of sign-ins during a
-    // reconnect must not open a socket each.
-    this.connecting ??= (async () => {
-      const client: RedisClientType = createClient({ url: env.REDIS_URL });
-      // node-redis emits `error` on every failed reconnect; without a listener
-      // that becomes an unhandled exception and takes the process with it.
-      client.on("error", (error: unknown) => {
-        logger.warn("Redis connection error", { module: "RateLimit", error });
-      });
-      await client.connect();
-      this.client = client;
-      return client;
-    })().finally(() => {
+    // reconnect must not open a socket each. The attempt is itself bounded, and
+    // clearing `connecting` when it settles is what lets the next request try
+    // again rather than inheriting a promise that will never resolve.
+    this.connecting ??= withTimeout(
+      (async () => {
+        const client: RedisClientType = createClient({
+          url: this.url,
+          socket: {
+            connectTimeout: CHECK_TIMEOUT_MS,
+            // Keep reconnecting so the limiter recovers on its own, but with a
+            // capped delay rather than an ever-growing one.
+            reconnectStrategy: (attempts) => Math.min(attempts * 200, 5_000),
+          },
+        });
+        // node-redis emits `error` on every failed reconnect; without a
+        // listener that becomes an unhandled exception and takes the process
+        // down — turning a Redis outage into an application outage.
+        client.on("error", (error: unknown) => {
+          logger.warn("Redis connection error", { module: "RateLimit", error });
+        });
+        await client.connect();
+        this.client = client;
+        return client;
+      })(),
+      CHECK_TIMEOUT_MS,
+    ).finally(() => {
       this.connecting = undefined;
     });
 
@@ -175,11 +221,16 @@ class RedisRateLimitStore implements RateLimitStore {
     const windowMs = rule.windowSeconds * 1000;
 
     try {
-      const client = await this.connection();
-      const [count, ttl] = (await client.eval(HIT_SCRIPT, {
-        keys: [`ratelimit:${key}`],
-        arguments: [String(windowMs)],
-      })) as [number, number];
+      const [count, ttl] = await withTimeout(
+        (async () => {
+          const client = await this.connection();
+          return (await client.eval(HIT_SCRIPT, {
+            keys: [`ratelimit:${key}`],
+            arguments: [String(windowMs)],
+          })) as [number, number];
+        })(),
+        CHECK_TIMEOUT_MS,
+      );
 
       const remainingMs = ttl > 0 ? ttl : windowMs;
       return {
@@ -229,7 +280,7 @@ class RedisRateLimitStore implements RateLimitStore {
   async reset(key: string): Promise<void> {
     try {
       const client = await this.connection();
-      await client.del(`ratelimit:${key}`);
+      await withTimeout(client.del(`ratelimit:${key}`), CHECK_TIMEOUT_MS);
     } catch (error) {
       // Clearing a counter is a courtesy after a successful sign-in, never a
       // correctness requirement — the window expires on its own.
@@ -239,6 +290,18 @@ class RedisRateLimitStore implements RateLimitStore {
       });
     }
   }
+}
+
+/**
+ * Test-only: a store pointed at a server of the test's choosing.
+ *
+ * Exists so the fail-open path can be exercised against an address nothing is
+ * listening on. That path was broken when it was written — node-redis retries
+ * indefinitely, so the fallback was unreachable and a request would have hung
+ * — and a documented behaviour nobody can test is how it stayed broken.
+ */
+export function redisStoreForTests(url: string): RateLimitStore {
+  return new RedisRateLimitStore(url);
 }
 
 const globalForRateLimit = globalThis as unknown as {

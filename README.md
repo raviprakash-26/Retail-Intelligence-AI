@@ -458,7 +458,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1282 tests: unit + integration
+npm run test          # 1283 tests: unit + integration
 npm run test:unit     # unit only, no database required
 npm run test:e2e      # 46 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
@@ -1795,6 +1795,13 @@ commands there is a window where the process dies after `INCR` and before
 `EXPIRE`, and a counter with no expiry never resets — that identifier is locked
 out permanently. One `EVAL`, one round trip, no window. A test hammers the same
 key twenty-five times concurrently and asserts the TTL is never `-1`.
+
+**Every check is bounded at one second.** node-redis retries a dead server
+indefinitely by default, so `connect()` never rejects — which means the
+fallback below was unreachable when it was first written and a sign-in would
+have waited forever, which is worse than either failing open or failing closed.
+The bound is what makes the fallback reachable at all, and there is a test that
+points the limiter at a dead port and asserts it answers quickly.
 
 **If Redis is unreachable the request is allowed, and the failure is made
 loud.** That is a deliberate trade. Failing closed would mean a Redis blip locks
