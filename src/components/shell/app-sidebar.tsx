@@ -35,14 +35,18 @@ export function AppSidebar({
     setCollapsed(next);
     // A year, path-scoped to the whole app. Not sensitive, so no HttpOnly —
     // and it has to be writable from here without a round trip.
-    document.cookie = `${SIDEBAR_COOKIE}=${next ? "1" : "0"}; path=/; max-age=31536000; samesite=lax`;
+    // A presentation preference, so it is deliberately readable by script —
+    // but it still gets Secure on an https page rather than travelling in the
+    // clear because nobody thought about it.
+    const secure = window.location.protocol === "https:" ? "; secure" : "";
+    document.cookie = `${SIDEBAR_COOKIE}=${next ? "1" : "0"}; path=/; max-age=31536000; samesite=lax${secure}`;
   }
 
   return (
     <aside
       data-collapsed={collapsed}
       className={cn(
-        "bg-sidebar hidden shrink-0 border-r transition-[width] duration-200 lg:flex lg:flex-col",
+        "hidden shrink-0 border-r bg-sidebar transition-[width] duration-200 lg:flex lg:flex-col",
         collapsed ? "w-16" : "w-60",
       )}
     >

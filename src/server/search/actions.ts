@@ -2,6 +2,7 @@
 
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { env } from "@/lib/env";
 import { getCompanyContext } from "@/server/auth/context";
 import { assertSameOrigin } from "@/server/security/request-context";
 import {
@@ -69,6 +70,11 @@ export async function setFiscalYearAction(
   const cookieStore = await cookies();
   cookieStore.set(FISCAL_YEAR_COOKIE, fiscalYearId, {
     httpOnly: true,
+    // Secure wherever the deployment is served over HTTPS. Without it this
+    // cookie travels in the clear on any accidental http:// request, which is
+    // a small leak of which year a business is looking at — and, more to the
+    // point, one cookie on the application quietly weaker than the rest.
+    secure: env.APP_URL.startsWith("https://"),
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 365,

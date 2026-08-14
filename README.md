@@ -13,12 +13,13 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–24 of 27 complete** — project foundation, database schema, design
+**Phases 1–25 of 27 complete** — project foundation, database schema, design
 system, public website, authentication, company onboarding, the application
 shell, master data, the full transaction set, the accounting engine and its
 reports, inventory, GST and income tax preparation, analytics, forecasting, the
-AI accountant, the AI auditor, the AI advisor, subscriptions and platform
-administration. See [Roadmap](#roadmap) for what is built and what is not.
+AI accountant, the AI auditor, the AI advisor, subscriptions, platform
+administration and security hardening. See [Roadmap](#roadmap) for what is built
+and what is not.
 
 You can register a business, sign in and out, reset a password, confirm an email
 address, edit your business and accounting settings, manage branches, invite
@@ -144,8 +145,8 @@ and not one figure from its ledger. There is no way to sign in as a customer,
 and every administrative change is written to the same append-only log the
 tenants' own actions go to.
 
-**Security hardening, a testing pass and deployment come next.** Sales and
-purchase _returns_ are still to come as well. Every module that is not built
+**A testing pass and deployment come next.** Sales and purchase _returns_ are
+still to come as well. Every module that is not built
 says so on its own page rather than showing an empty screen, and no figure
 anywhere in the product is invented to fill a gap.
 
@@ -428,7 +429,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1111 tests: unit + integration
+npm run test          # 1123 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -441,8 +442,9 @@ engine and its refusals, the forecasting band and when it declines to draw one,
 the assistant's tenant binding and its read-only guarantee, the vocabulary of
 the auditor and of the advisor — each checked against its own catalogue and
 against the sentences a real run produces — entitlements and what a lapsed
-subscription may not touch, what platform administration may never see, ageing
-and allocation, account balances and the accounting equation, permission
+subscription may not touch, what platform administration may never see, that every
+state-changing action checks its origin and no secret reaches the browser
+bundle, ageing and allocation, account balances and the accounting equation, permission
 boundaries (an auditor cannot write; a cashier
 cannot void), tenant isolation, document numbering under rollback, and every
 database constraint listed above.
@@ -1402,6 +1404,75 @@ confusion that ends with somebody acting on the wrong account.
 
 ---
 
+## Security hardening
+
+**One origin check, in one spelling.** It existed in three — a `guardOrigin`
+here, a local `guard` there, an inline `isSameOrigin` block elsewhere — which is
+how one of them quietly stops being called. There is now `requireSameOrigin()`
+for actions that return a result and `assertSameOrigin()` for the handful that
+redirect.
+
+Standardising made a coverage test possible, and the coverage test found seven
+state-changing actions with no check at all: signing out, signing out
+everywhere, verifying an email, resending a verification, switching business,
+setting the financial year, and marking notifications read. Switching business
+is the one that mattered — it changes which tenant the session points at.
+Read-only actions are now listed by name with a reason rather than inferred from
+the absence of a call, and a second test fails if one of them starts writing.
+
+**Three tests that read the build rather than the intention.**
+
+- _The client bundle._ Scans everything the browser downloads for the values of
+  every secret environment variable, and for connection strings and key
+  material. It found no secret — but it did find the entire server environment
+  schema, because `publicEnv` lived in the same module and one client component
+  importing it dragged the file in. No value was leaking; a map of every
+  credential the deployment expects was. `publicEnv` now has its own module and
+  `env.ts` finally imports `server-only`, which its own docstring had claimed
+  for months.
+- _Raw SQL._ No `$queryRawUnsafe`, no string concatenation inside a tagged
+  template, and any query touching a tenant-owned table must name `companyId`.
+  All pass today; they exist for the query written next year.
+- _The origin coverage above._
+
+**A content security policy, in two halves, because one was not possible.** A
+nonce is the right way to allow the framework's own inline bootstrap without
+allowing every injected script — but a statically prerendered page has its
+inline scripts written at build time, and nothing can stamp a per-request nonce
+onto them. A nonce policy there does not harden the page, it breaks it, which
+the end-to-end run demonstrated by rendering a sign-in page with no working
+form.
+
+So the strict policy goes where the data is: `/app`, `/admin` and `/onboarding`
+are rendered per request and get `script-src 'self' 'nonce-…'`, fresh every
+request. The public pages are static and get `'unsafe-inline'`, which is worth
+less and covers no session and no tenant data. `strict-dynamic` is deliberately
+absent — it makes the browser ignore `'self'`, and with it nothing loads at all.
+Everything else is strict on both: `default-src 'self'`, `connect-src 'self'`
+(every outbound call the product makes is made by the server), `object-src
+'none'`, `frame-ancestors 'none'`, `form-action 'self'`, `base-uri 'self'`.
+
+One thing is knowingly blocked, and the end-to-end run asserts it is the _only_
+thing: the pre-paint script `next-themes` injects. It lives in the root layout,
+shared with the static pages, so giving it a nonce would mean making every page
+in the product dynamic — a real cost to avoid a flash of the light theme for
+dark-mode users. If the layout tree is ever split so the application area has
+its own provider, it gets the nonce and the exception goes away.
+
+**Rate limits where money is at stake.** Questions to the assistant are capped
+per user per minute: the plan's monthly allowance is a commercial limit, and a
+loop spends real money at the provider long before a monthly count notices.
+Invitations are capped per company per hour, because they send email to
+addresses nobody gave us.
+
+**Cookies.** The session is `__Host-` prefixed, HttpOnly, SameSite=Lax and
+Secure wherever the deployment is HTTPS — the browser refuses the prefix
+otherwise. The financial-year and sidebar cookies were not marked Secure; they
+are now. Neither is sensitive, but one cookie quietly weaker than the rest is
+how the habit goes.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -1495,7 +1566,8 @@ query text is the only thing the browser controls.
 | 22    | AI Business Advisor — detectors, bands, and when to ignore them | **Done** |
 | 23    | Subscriptions — entitlements, allowances, server-side gates     | **Done** |
 | 24    | Admin panel — metadata only, no impersonation, logged           | **Done** |
-| 25–27 | Security hardening, testing, deployment                         | Next     |
+| 25    | Security hardening — CSP, origin coverage, bundle scanning      | **Done** |
+| 26–27 | Testing pass and deployment                                     | Next     |
 
 ---
 
