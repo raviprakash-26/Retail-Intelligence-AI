@@ -147,6 +147,7 @@ export async function signInAction(
       failedLoginCount: true,
       lockedUntil: true,
       defaultCompanyId: true,
+      platformRole: true,
     },
   });
 
@@ -300,12 +301,19 @@ export async function signInAction(
     userAgent: context.userAgent,
   });
 
-  return ok({
-    redirectTo: safeRedirectPath(
-      input.next,
-      companyId ? "/app" : "/onboarding",
-    ),
-  });
+  // Where somebody lands depends on what they have. A member goes to their
+  // business; somebody with none goes to onboarding — unless they run the
+  // platform, in which case asking them to create a shop before they can
+  // administer one is nonsense.
+  const runsThePlatform =
+    user.platformRole === "ADMIN" || user.platformRole === "SUPER_ADMIN";
+  const fallback = companyId
+    ? "/app"
+    : runsThePlatform
+      ? "/admin"
+      : "/onboarding";
+
+  return ok({ redirectTo: safeRedirectPath(input.next, fallback) });
 }
 
 // ---------------------------------------------------------------------------

@@ -190,14 +190,21 @@ export async function requireAuth(next?: string): Promise<ActiveSession> {
  * Full tenant context, or a redirect.
  *
  * A signed-in user with no company is sent to onboarding rather than to
- * sign-in — they are authenticated, they just have nowhere to go yet.
+ * sign-in — they are authenticated, they just have nowhere to go yet. A
+ * platform administrator with no company is sent to administration instead:
+ * they have somewhere to go, and it is not a form asking them to open a shop.
  */
 export async function requireCompanyContext(): Promise<CompanyContext> {
   const session = await getAuthSession();
   if (!session) redirect("/login");
 
   const context = await getCompanyContext();
-  if (!context) redirect("/onboarding");
+  if (!context) {
+    const runsThePlatform =
+      session.user.platformRole === "ADMIN" ||
+      session.user.platformRole === "SUPER_ADMIN";
+    redirect(runsThePlatform ? "/admin" : "/onboarding");
+  }
 
   return context;
 }
