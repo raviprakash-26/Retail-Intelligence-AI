@@ -799,16 +799,24 @@ export async function listPurchases(params: {
   companyId: string;
   query?: string;
   status?: string;
+  /** Inclusive bill-date window, as `listSales` already accepted. */
+  from?: string;
+  to?: string;
   page?: number;
 }): Promise<PurchaseListResult> {
   const page = Math.max(1, params.page ?? 1);
   const query = params.query?.trim() ?? "";
+
+  const dateFilter: Prisma.DateTimeFilter = {};
+  if (params.from) dateFilter.gte = new Date(`${params.from}T00:00:00.000Z`);
+  if (params.to) dateFilter.lte = new Date(`${params.to}T00:00:00.000Z`);
 
   const where: Prisma.PurchaseWhereInput = {
     companyId: params.companyId,
     ...(params.status && params.status !== "ALL"
       ? { status: params.status as DocumentStatus }
       : {}),
+    ...(Object.keys(dateFilter).length > 0 ? { billDate: dateFilter } : {}),
     ...(query.length >= 1
       ? {
           OR: [

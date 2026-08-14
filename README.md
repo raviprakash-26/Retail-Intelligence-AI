@@ -35,6 +35,10 @@ its landed cost, holds recoverable GST as an asset and raises what you owe the
 supplier. Buy at two prices and sell, and the cost of sales is the blend — the
 margin on the dashboard is real.
 
+**And every figure can be taken away.** Eleven reports, each running the
+service that owns its numbers rather than recomputing them, exportable as a CSV
+that carries the same figures and the same caveats, and laid out to print.
+
 **And goods can come back.** A credit note against an invoice puts the stock
 back at what the sale issued it for, debits a contra-revenue account rather than
 shrinking Sales, and appends negative rows to the GST register. A debit note
@@ -449,9 +453,9 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1182 tests: unit + integration
+npm run test          # 1227 tests: unit + integration
 npm run test:unit     # unit only, no database required
-npm run test:e2e      # 33 checks in a browser, against a production build
+npm run test:e2e      # 41 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
 ```
 
@@ -741,6 +745,64 @@ Returns are rounded to the rupee like every other document here, and the
 fraction is posted to Round Off rather than absorbed. A credit note for ₹176.65
 is issued at ₹177 with 35 paise accounted for — the alternative is an entry that
 does not balance, which is how this was found.
+
+---
+
+## Reports
+
+Eleven of them, and not one adds up a column of its own.
+
+A report here is a _view of figures something else already computed_. The trial
+balance report runs the trial balance service. The profit and loss report runs
+the statements service. The ageing reports run the ageing service. Every card on
+the hub names the module its figures come from, so a reader who wants to argue
+with a number knows where to go and do it.
+
+That is a constraint rather than a convenience. A reports module that computes
+is one that will eventually disagree with the page it claims to summarise, and
+when the trial balance says one thing and the trial balance _report_ says
+another, neither is usable by anybody. The integration tests run the report and
+the source and compare them, which is the only assertion about this module worth
+making.
+
+|                |                                                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Accounting** | Trial balance · Profit and loss · Balance sheet · Day book                                                       |
+| **Business**   | Sales register · Purchase register · Expenses by category · Stock on hand · Receivables ageing · Payables ageing |
+| **Compliance** | GST summary                                                                                                      |
+
+**Two gates, not one.** `reports.view` opens the cabinet; each report still asks
+for its own drawer. Somebody who may read reports but not purchases does not get
+the purchase register by asking for it as a report — and the download route asks
+the same questions the page asked, because an export endpoint that checks less
+than the screen is simply the way around a permission.
+
+**Exports are CSV, and print is print.** The file is built on the server from
+the same call the page made, so it cannot disagree with what was on screen, and
+money is written in its exact stored form rather than as `₹1,04,522.00` — a
+figure no spreadsheet will add up. A report's caveats travel into the file with
+it, because a note that only appears on screen is lost the moment somebody
+emails the export, and the export is the copy that travels.
+
+There is no PDF renderer and no `.xlsx` writer. Print is the browser's own
+dialogue, which is also how a PDF gets made, against a stylesheet that drops the
+shell and repeats table headers across pages. CSV opens in Excel. Shipping two
+document-generation libraries to produce second, differently-laid-out copies of
+a page that already exists was not worth it, and claiming a "PDF export" for a
+print button would have been the kind of overstatement the rest of this document
+avoids.
+
+**A spreadsheet is an interpreter, not a viewer.** A cell whose text begins `=`,
+`+`, `@` or a control character is evaluated as a formula when the file opens,
+and that text came from whatever somebody typed into a product name. Quoting is
+not a defence — a quoted field is evaluated just the same — so a leading formula
+character is defused with an apostrophe. A figure that is merely negative is
+left alone: `-472.0000` is not a formula, and mangling every negative number in
+the ledger to guard against one nobody wrote would be its own kind of wrong.
+
+**Every export is written to the audit log.** A report is the form in which a
+tenant's figures actually leave, and "who took a copy of the ledger, and when"
+is a question worth being able to answer.
 
 ---
 
@@ -1798,6 +1860,7 @@ query text is the only thing the browser controls.
 | 26    | Testing — a browser suite in the repository, coverage gaps      | **Done** |
 | 27    | Deployment — image, compose, probes, pipeline, honest limits    | **Done** |
 | 28    | Returns — credit and debit notes, contra accounts, GST reversal | **Done** |
+| 29    | Reports — one catalogue over existing services, CSV and print   | **Done** |
 
 ---
 

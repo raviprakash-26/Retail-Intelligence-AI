@@ -605,14 +605,22 @@ export async function listExpenses(params: {
   companyId: string;
   query?: string;
   categoryId?: string;
+  /** Inclusive expense-date window, as `listSales` already accepted. */
+  from?: string;
+  to?: string;
   page?: number;
 }): Promise<ExpenseListResult> {
   const page = Math.max(1, params.page ?? 1);
   const query = params.query?.trim() ?? "";
 
+  const dateFilter: Prisma.DateTimeFilter = {};
+  if (params.from) dateFilter.gte = new Date(`${params.from}T00:00:00.000Z`);
+  if (params.to) dateFilter.lte = new Date(`${params.to}T00:00:00.000Z`);
+
   const where: Prisma.ExpenseWhereInput = {
     companyId: params.companyId,
     ...(params.categoryId ? { categoryId: params.categoryId } : {}),
+    ...(Object.keys(dateFilter).length > 0 ? { expenseDate: dateFilter } : {}),
     ...(query.length >= 1
       ? {
           OR: [
