@@ -57,5 +57,34 @@ services:
     ports:
       - "${APP_PORT:-3000}:3000"
 
+  # A nightly dump into a local volume, and nothing more than that.
+  #
+  # This is the floor, not the ceiling. The dump lives on the same machine as
+  # the database it came from, so it survives a dropped table and not a dead
+  # disk. For books somebody will need in a tax dispute three years from now,
+  # use managed Postgres with point-in-time recovery — and either way, restore
+  # one somewhere harmless before you need to.
+  backup:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-riai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-riai}"
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: "${BACKUP_RETENTION_DAYS:-14}"
+    volumes:
+      - ./scripts:/scripts:ro
+      - backups:/backups
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        while true; do
+          /scripts/backup.sh || echo "backup: run failed" >&2
+          sleep 86400
+        done
+
 volumes:
   postgres-data:
+  backups:

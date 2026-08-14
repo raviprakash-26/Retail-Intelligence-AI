@@ -458,7 +458,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1272 tests: unit + integration
+npm run test          # 1276 tests: unit + integration
 npm run test:unit     # unit only, no database required
 npm run test:e2e      # 46 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
@@ -1777,6 +1777,38 @@ Both are excluded from the middleware matcher. A probe hit every few seconds
 that runs through the same request pipeline it exists to observe is a probe that
 cannot tell you that pipeline is broken.
 
+### Backups, and the restore nobody rehearsed
+
+```bash
+DATABASE_URL=… BACKUP_DIR=./backups ./scripts/backup.sh
+./scripts/restore.sh ./backups/riai-20260814T020000Z.dump "$RESTORE_DATABASE_URL"
+```
+
+`docker compose up` runs the first of those nightly into a volume, keeping
+fourteen days.
+
+**A `pg_dump` that exits 0 is not a backup.** It is a file. What makes it a
+backup is somebody having restored it and found the ledger intact — which is why
+the dump is written under a temporary name, read back with `pg_restore --list`,
+and only then renamed. `pg_dump` creates its output file _before_ it can fail,
+so writing straight to the final name leaves a partial file that looks exactly
+like a backup, and a file that looks like a backup is worse than no file at all.
+
+**The restore script refuses a target that does not look like one.**
+`pg_restore --clean` drops and recreates every object it touches, and the wrong
+URL is one shell-history entry away from the right one. A database whose name
+ends in `_test`, `_restore`, `_staging` or `_scratch` is accepted; anything else
+needs `RESTORE_I_MEAN_IT=yes`.
+
+**Both scripts strip `?schema=` from the URL.** That parameter is Prisma's, not
+libpq's, and `pg_dump` rejects it outright — every `DATABASE_URL` in this
+project carries it, so this is the difference between the scripts working for
+everybody and working for nobody. It was found by the round-trip test on its
+first run, which is rather the point of having one.
+
+The round trip is exercised in CI: back the test database up, restore it into a
+scratch one, and count the companies, accounts and journal lines that arrived.
+
 ### Metrics, off until somebody turns them on
 
 A third endpoint beside the two probes, answering a third question: not _is it
@@ -1840,10 +1872,12 @@ avoids.
   apply immediately, and an upgrade is declined with the reason.
 - **Nothing is filed with any authority.** GST and income tax are prepared for a
   human to review and submit.
-- **Backups are entirely the operator's problem.** The compose file keeps the
-  database in a local volume and schedules nothing. For books somebody will need
-  in a tax dispute three years from now, that is not sufficient — use managed
-  Postgres with point-in-time recovery, or set up and _test_ a restore.
+- **Backups run, but only to the same machine.** There is a nightly dump, a
+  restore script and a test that proves the round trip — and the dump lands in a
+  volume beside the database it came from, so it survives a dropped table and
+  not a dead disk. For books somebody will need in a tax dispute three years
+  from now, use managed Postgres with point-in-time recovery and copy the dumps
+  somewhere else.
 - **One instance, no horizontal scaling story.** Rate limiting is in-memory
   unless Redis is configured, and nothing has been tested behind more than one
   process.

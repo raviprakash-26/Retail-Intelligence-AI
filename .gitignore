@@ -56,3 +56,4 @@ prisma/*.db-journal
 /test-results
 /playwright-report
 /blob-report
+backups/
