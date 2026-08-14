@@ -465,3 +465,65 @@
     border-color: color-mix(in oklch, var(--primary) 28%, var(--border));
   }
 }
+
+/**
+ * Printing a report.
+ *
+ * The browser's print dialogue is also how a PDF gets made, so this is the
+ * whole of the product's PDF story and it is worth doing properly rather than
+ * shipping a rendering library to produce a second, differently-laid-out copy
+ * of a page that already exists.
+ *
+ * Three things matter on paper. The shell — sidebar, top bar, the controls
+ * that choose the period — is furniture for choosing a report, not part of it.
+ * Backgrounds must survive, or the group and total rows that carry the
+ * structure of a trial balance print as undifferentiated text. And a table
+ * split across pages has to repeat its header, because a column of figures on
+ * page two with nothing saying which column it is has stopped being a report.
+ */
+@media print {
+  :root {
+    color-scheme: light;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  /* The application shell exists to navigate to this page, not to be part of it. */
+  aside,
+  header[data-slot="app-topbar"],
+  nav[aria-label="Main navigation"],
+  nav[aria-label="Primary"],
+  [data-print="hide"] {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  /* Keep the shading that distinguishes a group row from a total row. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    break-inside: avoid;
+  }
+
+  a[href]::after {
+    content: "";
+  }
+}

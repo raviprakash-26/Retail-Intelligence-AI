@@ -56,7 +56,10 @@ export function AppTopbar({
   canViewSettings: boolean;
 }) {
   return (
-    <header className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur">
+    <header
+      data-slot="app-topbar"
+      className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur"
+    >
       {/* One dialog, two buttons. The provider owns the dialog and the ⌘K
           listener; each trigger is only a button, so the responsive layout can
           place as many as it needs. */}
