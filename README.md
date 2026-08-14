@@ -458,9 +458,9 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1255 tests: unit + integration
+npm run test          # 1272 tests: unit + integration
 npm run test:unit     # unit only, no database required
-npm run test:e2e      # 44 checks in a browser, against a production build
+npm run test:e2e      # 46 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
 ```
 
@@ -1777,6 +1777,43 @@ Both are excluded from the middleware matcher. A probe hit every few seconds
 that runs through the same request pipeline it exists to observe is a probe that
 cannot tell you that pipeline is broken.
 
+### Metrics, off until somebody turns them on
+
+A third endpoint beside the two probes, answering a third question: not _is it
+alive_ or _should it get traffic_ but _what has it been doing_.
+
+```bash
+export METRICS_TOKEN=…              # 16 characters or more
+curl -H "Authorization: Bearer $METRICS_TOKEN" localhost:3000/api/metrics
+```
+
+Unlike the probes it is **off by default**. Health says `ok` and nothing else
+precisely so that anybody who can reach the service learns nothing from it;
+process counts and database reachability do not meet that bar. Without
+`METRICS_TOKEN` the route 404s, and a wrong token gets the same 404 — not a
+401, because a 401 confirms there is something behind the door worth guessing
+at.
+
+**The counters are per-process.** They live in the memory of one Node process,
+reset when it restarts, and two replicas each report their own. That is the same
+limitation this document already records for in-memory rate limiting, and the
+payload says so in a comment on the first line rather than leaving a scraper to
+find out.
+
+**Nothing about a tenant's business appears.** Failures are counted by module
+and code, exports by report, documents by kind — never by company, never with a
+value. Running the platform does not require reading anybody's books, and a
+scrape endpoint is the last place to make an exception to that.
+
+Logs are one JSON object per line: level, message, timestamp and whatever
+context the caller attached, on stdout for information and stderr for warnings
+and errors — the split every container runtime already routes differently.
+Context runs through the same redaction the audit log uses, because a password
+reaching a log aggregator is as leaked as one reaching the database, and an
+`Error` is unwrapped into name, message and stack rather than stringified, since
+`JSON.stringify(new Error("x"))` is `{}` — which is how exceptions quietly
+become empty objects in logs.
+
 ### What must be set before it will start
 
 The application refuses to boot on a configuration it cannot trust, and says
@@ -1810,8 +1847,10 @@ avoids.
 - **One instance, no horizontal scaling story.** Rate limiting is in-memory
   unless Redis is configured, and nothing has been tested behind more than one
   process.
-- **No observability integration.** Errors go to the log and stop there; there
-  is no tracing, no metrics endpoint, no alerting.
+- **Observability stops at logs and a scrape.** Errors are structured JSON and
+  there is a token-gated Prometheus endpoint, but there is no tracing, no
+  alerting, and the counters are per-process — two replicas each report their
+  own, and a restart resets them.
 - **The AI features need a provider that has not been paid for.** With none
   configured they say so and answer nothing, which is the intended state rather
   than a broken one.
@@ -1919,6 +1958,7 @@ query text is the only thing the browser controls.
 | 28    | Returns — credit and debit notes, contra accounts, GST reversal   | **Done** |
 | 29    | Reports — one catalogue over existing services, CSV and print     | **Done** |
 | 30    | Payroll — statutory deductions, four liabilities, no invented TDS | **Done** |
+| 31    | Observability — structured logs, a gated scrape, honest scope     | **Done** |
 
 ---
 

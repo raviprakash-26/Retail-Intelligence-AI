@@ -10,6 +10,8 @@ import {
   type SaleInput,
   type VoidSaleInput,
 } from "@/lib/validation/sales";
+import { logger } from "@/lib/observability/logger";
+import { recordActionFailure } from "@/lib/observability/metrics";
 import {
   ACTION_ERROR,
   fail,
@@ -64,7 +66,8 @@ function fromServiceError(error: unknown): ActionResult<never> {
   ) {
     return fail(error.message, { code: "PERIOD_UNAVAILABLE" });
   }
-  console.error("Sales action failed", error);
+  logger.error("Sales action failed", { module: "Sales", error });
+  recordActionFailure("Sales", ACTION_ERROR.UNEXPECTED);
   return fail(
     "Something went wrong. Nothing was recorded — please try again.",
     { code: ACTION_ERROR.UNEXPECTED },

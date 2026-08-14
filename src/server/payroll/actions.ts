@@ -8,6 +8,8 @@ import {
   type PayrollPolicyInput,
   type PayrollRunInput,
 } from "@/lib/validation/payroll";
+import { logger } from "@/lib/observability/logger";
+import { recordActionFailure } from "@/lib/observability/metrics";
 import {
   ACTION_ERROR,
   fail,
@@ -53,7 +55,8 @@ function fromServiceError(error: unknown): ActionResult<never> {
   ) {
     return fail(error.message, { code: "PERIOD_UNAVAILABLE" });
   }
-  console.error("Payroll action failed", error);
+  logger.error("Payroll action failed", { module: "Payroll", error });
+  recordActionFailure("Payroll", ACTION_ERROR.UNEXPECTED);
   return fail("Something went wrong. Nothing was posted — please try again.", {
     code: ACTION_ERROR.UNEXPECTED,
   });

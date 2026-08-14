@@ -51,3 +51,28 @@ test.describe("health probes", () => {
     }
   });
 });
+
+test.describe("metrics", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test("does not exist until an operator switches it on", async ({
+    request,
+  }) => {
+    // METRICS_TOKEN is unset here, which is the default. A 404 rather than a
+    // 401 is deliberate: a 401 would confirm there is something behind the
+    // door worth guessing a token for.
+    const response = await request.get("/api/metrics");
+    expect(response.status()).toBe(404);
+    expect(await response.text()).not.toMatch(/riai_|# TYPE/);
+  });
+
+  test("a wrong token is answered exactly like an unconfigured endpoint", async ({
+    request,
+  }) => {
+    const response = await request.get("/api/metrics", {
+      headers: { authorization: "Bearer not-the-token-at-all" },
+    });
+    expect(response.status()).toBe(404);
+    expect(await response.text()).not.toMatch(/riai_/);
+  });
+});
