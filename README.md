@@ -13,12 +13,12 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–23 of 27 complete** — project foundation, database schema, design
+**Phases 1–24 of 27 complete** — project foundation, database schema, design
 system, public website, authentication, company onboarding, the application
 shell, master data, the full transaction set, the accounting engine and its
 reports, inventory, GST and income tax preparation, analytics, forecasting, the
-AI accountant, the AI auditor, the AI advisor and subscriptions. See
-[Roadmap](#roadmap) for what is built and what is not.
+AI accountant, the AI auditor, the AI advisor, subscriptions and platform
+administration. See [Roadmap](#roadmap) for what is built and what is not.
 
 You can register a business, sign in and out, reset a password, confirm an email
 address, edit your business and accounting settings, manage branches, invite
@@ -138,10 +138,16 @@ subscription rather than trusting the sidebar. What a lapsed subscription stops
 is new entries and nothing else: the books already recorded stay readable,
 printable and exportable, and the refusal says so in the same breath.
 
-**The admin panel comes next.** Sales and purchase _returns_ are still to come
-as well. Every module that is not built says so on its own page rather than
-showing an empty screen, and no figure anywhere in the product is invented to
-fill a gap.
+**The platform can be run without reading anybody's books.** Administration
+shows how each business uses the service — plan, allowances, counts, status —
+and not one figure from its ledger. There is no way to sign in as a customer,
+and every administrative change is written to the same append-only log the
+tenants' own actions go to.
+
+**Security hardening, a testing pass and deployment come next.** Sales and
+purchase _returns_ are still to come as well. Every module that is not built
+says so on its own page rather than showing an empty screen, and no figure
+anywhere in the product is invented to fill a gap.
 
 ---
 
@@ -257,6 +263,20 @@ stock and a balanced opening journal entry.
 The tenant is flagged `isDemo` and is skipped entirely when `NODE_ENV=production`.
 Set `SEED_DEMO_DATA=false` to skip it in development too.
 
+### Platform administrator
+
+The seed also creates one administrator, so the admin panel at `/admin` is
+reachable on a fresh checkout without a SQL statement. It holds no membership of
+any business, and cannot read one's books from there.
+
+| Email                            | Password           |
+| -------------------------------- | ------------------ |
+| `admin@retailintelligence.local` | `AdminRetail@2026` |
+
+Development only, and refused outside it for the same reason as the demo tenant:
+an account with a published password and platform-wide reach is a security
+incident on a live system, not a convenience.
+
 ---
 
 ## Commands
@@ -292,6 +312,7 @@ src/
     (marketing)/           Public website
     (auth)/                Sign in, register, password reset
     (app)/app/             The signed-in application, inside the shell
+    (admin)/admin/         Platform administration, outside the tenant shell
     globals.css            Design tokens (OKLCH, light + dark)
   components/
     ui/                    shadcn/ui primitives
@@ -314,6 +335,7 @@ src/
     auditor/               Findings with their evidence and ordinary explanations
     advisor/               Suggestions with what they are worth and when to ignore them
     billing/               The plan, what it includes, and what has been used
+    admin/                 Tenant list, one tenant, plan editor, activity
     accounting/            Chart, journal, ledger, trial balance, statements
     company/               Settings, team, branches, business switcher
     brand/                 Logo and identity
@@ -334,6 +356,7 @@ src/
     advisor/catalogue.ts   What may be suggested, and the words it may not promise
     advisor/impact.ts      Recorded, estimated or unquantified — and the ordering
     billing/entitlements.ts Features, allowances, and what lapsing may not do
+    admin/scope.ts         What administration may look at, and what it may not
     inventory/valuation.ts FIFO and weighted average, as pure functions
     settlements/ageing.ts  Ageing buckets and oldest-first allocation, pure
     navigation.ts          One navigation model, gated by permission and plan
@@ -360,6 +383,7 @@ src/
     auditor/               Nine checks as queries, the run, and settled findings
     advisor/               Ten detectors over figures the platform already computes
     billing/               Entitlement resolution, usage counts, plan changes
+    admin/                 Platform metrics, tenant metadata, plan and status changes
     auth/                  Sessions, company context, permission guards
     master-data/           Products, parties, staff; opening-balance posting
     company/               Settings, team, branch and onboarding services
@@ -404,7 +428,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1098 tests: unit + integration
+npm run test          # 1111 tests: unit + integration
 npm run test:unit     # unit only, no database required
 ```
 
@@ -417,7 +441,8 @@ engine and its refusals, the forecasting band and when it declines to draw one,
 the assistant's tenant binding and its read-only guarantee, the vocabulary of
 the auditor and of the advisor — each checked against its own catalogue and
 against the sentences a real run produces — entitlements and what a lapsed
-subscription may not touch, ageing and allocation, account balances and the accounting equation, permission
+subscription may not touch, what platform administration may never see, ageing
+and allocation, account balances and the accounting equation, permission
 boundaries (an auditor cannot write; a cashier
 cannot void), tenant isolation, document numbering under rollback, and every
 database constraint listed above.
@@ -1316,6 +1341,67 @@ shopkeeper about their own money.
 
 ---
 
+## Platform administration
+
+**Running the service does not require reading anybody's books.** Somebody has
+to answer a support email, see why a tenant cannot add a user, change what a
+plan costs, suspend an account that is abusing it — and none of that needs a
+shop's ledger. So the line is written down rather than assumed: operational
+metadata is visible, a tenant's own money is not.
+
+| Visible                                     | Not visible                            |
+| ------------------------------------------- | -------------------------------------- |
+| How many entries a business made this month | What any of them was for               |
+| How many people can sign in, and as what    | What the business sold, owes or earned |
+| Which plan, what it costs us, what it pays  | Who its customers and suppliers are    |
+| Whether the account is suspended            | Any balance, invoice or statement      |
+
+A support engineer needs to know a tenant posted 400 entries last month to
+answer "why am I being told I have hit my limit". Nobody needs to know one of
+them was for four lakh rupees to answer that, and a panel that shows it anyway
+turns every support request into an unlogged disclosure of somebody's turnover.
+
+**The tests run against what the panel actually returns.** A company is
+registered, given stock, and made to sell 250 units at ₹137; then every admin
+payload is swept both for the field names money travels under and for the
+figures themselves, in each of the shapes money leaves this codebase in.
+Customer names are checked the same way — who a shop trades with is worth as
+much as what it sold them. The end-to-end run does it again against the rendered
+page.
+
+The first version of that sweep flagged `tenants.total` and `list.total`, which
+are row counts. A guard that fires on every count gets suppressed within a week,
+so bare `total` came out of the name list and a value-based check went in: it
+catches the same number arriving in a field called something else, which is the
+failure that would actually survive review.
+
+**There is no impersonation.** No "sign in as this customer" button exists,
+because that is the feature that gets used at three in the morning and explained
+afterwards. If an administrator genuinely has to see inside a tenant, a member
+of that tenant invites them the ordinary way — which leaves a record on both
+sides that the tenant can see and withdraw.
+
+**Everything an administrator does is logged**, with their identity, in the same
+append-only table the tenants' own actions go to. The activity page reads it and
+says on the page that nothing there can be edited or removed, including from
+there. Administration that leaves no trace is indistinguishable from a breach
+afterwards.
+
+**What can be changed is deliberately small.** Suspension stops people signing
+in, deletes nothing, and is reversible by the next administrator who disagrees.
+An entitlement override is how a promise made in a support conversation becomes
+a row somebody can find later rather than a conditional in the code; clearing it
+puts the business back on whatever its plan says. A plan's price and name are
+editable — its `key` is not, because subscriptions point at it and renaming an
+identifier under live rows is how a customer silently loses a feature.
+
+The area lives outside the tenant shell. That shell is built around a company
+context, and administration has none; bolting a section onto it would leave an
+administrator permanently looking at some tenant's chrome, which is the
+confusion that ends with somebody acting on the wrong account.
+
+---
+
 ## Opening balances
 
 A business migrating onto this platform arrives owing money, being owed it, and
@@ -1408,8 +1494,8 @@ query text is the only thing the browser controls.
 | 21    | AI Auditor — deterministic checks, observations not allegations | **Done** |
 | 22    | AI Business Advisor — detectors, bands, and when to ignore them | **Done** |
 | 23    | Subscriptions — entitlements, allowances, server-side gates     | **Done** |
-| 24    | Admin panel                                                     | Next     |
-| 25–27 | Security hardening, testing, deployment                         |          |
+| 24    | Admin panel — metadata only, no impersonation, logged           | **Done** |
+| 25–27 | Security hardening, testing, deployment                         | Next     |
 
 ---
 
