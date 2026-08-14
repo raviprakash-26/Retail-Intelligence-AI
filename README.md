@@ -13,13 +13,13 @@ the stock movement, the tax treatment, the statements and the analysis behind it
 
 ## Status
 
-**Phases 1–25 of 27 complete** — project foundation, database schema, design
+**Phases 1–26 of 27 complete** — project foundation, database schema, design
 system, public website, authentication, company onboarding, the application
 shell, master data, the full transaction set, the accounting engine and its
 reports, inventory, GST and income tax preparation, analytics, forecasting, the
 AI accountant, the AI auditor, the AI advisor, subscriptions, platform
-administration and security hardening. See [Roadmap](#roadmap) for what is built
-and what is not.
+administration, security hardening and the testing pass. See
+[Roadmap](#roadmap) for what is built and what is not.
 
 You can register a business, sign in and out, reset a password, confirm an email
 address, edit your business and accounting settings, manage branches, invite
@@ -145,8 +145,8 @@ and not one figure from its ledger. There is no way to sign in as a customer,
 and every administrative change is written to the same append-only log the
 tenants' own actions go to.
 
-**A testing pass and deployment come next.** Sales and purchase _returns_ are
-still to come as well. Every module that is not built
+**Deployment comes next.** Sales and purchase _returns_ are still to come as
+well. Every module that is not built
 says so on its own page rather than showing an empty screen, and no figure
 anywhere in the product is invented to fill a gap.
 
@@ -291,6 +291,7 @@ incident on a live system, not a convenience.
 | `npm run lint`          | ESLint                                             |
 | `npm run test`          | Migrate the test database, then run the full suite |
 | `npm run test:unit`     | Unit tests only (no database needed)               |
+| `npm run test:e2e`      | Browser suite against a production build           |
 | `npm run test:coverage` | Coverage report                                    |
 | `npm run db:migrate`    | Create and apply a migration                       |
 | `npm run db:seed`       | Seed platform data and the demo tenant             |
@@ -429,25 +430,61 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1123 tests: unit + integration
+npm run test          # 1155 tests: unit + integration
 npm run test:unit     # unit only, no database required
+npm run test:e2e      # 25 checks in a browser, against a production build
+npm run test:coverage # line and branch coverage
 ```
 
-Integration tests run against `riai_test` and refuse to start if
-`DATABASE_URL` does not name a `_test` database.
+Three layers, each answering a question the others cannot.
 
-Coverage includes the accounting rules, GST arithmetic, inventory valuation,
-income tax slabs and reliefs, depreciation blocks under the Act, the ratio
-engine and its refusals, the forecasting band and when it declines to draw one,
-the assistant's tenant binding and its read-only guarantee, the vocabulary of
-the auditor and of the advisor — each checked against its own catalogue and
-against the sentences a real run produces — entitlements and what a lapsed
-subscription may not touch, what platform administration may never see, that every
-state-changing action checks its origin and no secret reaches the browser
-bundle, ageing and allocation, account balances and the accounting equation, permission
-boundaries (an auditor cannot write; a cashier
-cannot void), tenant isolation, document numbering under rollback, and every
-database constraint listed above.
+**Unit tests** cover the arithmetic and the vocabulary: accounting rules, GST,
+inventory valuation, income tax slabs and reliefs, depreciation blocks, the
+ratio engine and its refusals, the forecasting band and when it declines to draw
+one, the words the auditor may not use and the outcomes the advisor may not
+promise, how money is written on a page down to the lakh grouping, and what
+configuration the application refuses to boot on.
+
+**Integration tests** run against a real PostgreSQL instance — `riai_test`,
+and they refuse to start if `DATABASE_URL` does not name a `_test` database.
+They cover the things only a database can answer: that every posting balances,
+that a report reconciles with the ledger it reads, that entitlements resolve and
+a lapsed subscription still cannot touch a record, that platform administration
+never returns a figure from a tenant's books, that document numbering survives a
+rollback, and that one company cannot see another's anything.
+
+**End-to-end tests** run in a browser against a production build, not the dev
+server: the content security policy, static versus dynamic rendering and the
+contents of the client bundle all behave differently under `next dev`, and a
+suite that passes only there is checking a build nobody ships. They cover the
+layer the other two cannot reach — server actions need a request context, so
+they sit at zero percent in the unit and integration suites — and they check
+what a person actually sees: that a sale entered through the form posts its own
+accounting, that a cashier asking for the trial balance directly gets the
+refusal and none of the figures, that no page promises or accuses anything, and
+that nothing scrolls sideways on a phone.
+
+Three things worth knowing about how they are written.
+
+They sign in **once per role** and share the session. Signing in per test trips
+the per-account rate limit eight sign-ins in and then fails whichever test
+crossed it — failures that move between runs and read like flakiness while being
+the product working as designed.
+
+The horizontal-overflow check asks the page to scroll and asserts it does not
+move, rather than comparing widths. Chrome inflates
+`documentElement.scrollWidth` with the content of descendant scrollers, so the
+comparison reports overflow for a wide table that is correctly scrolling inside
+its own container — the arrangement the rule exists to encourage.
+
+A cashier asking for a page their role forbids gets HTTP **200**, not 403. The
+guard is doing its job — the page renders the refusal and none of the report —
+but the shell has already streamed by the time a nested page calls
+`forbidden()`, so the status is committed. The tests assert the figures are
+absent, which is what actually matters.
+
+Line coverage sits around 69%. The untested remainder is mostly React
+components and the thin action wrappers the browser suite drives.
 
 ---
 
@@ -1567,7 +1604,8 @@ query text is the only thing the browser controls.
 | 23    | Subscriptions — entitlements, allowances, server-side gates     | **Done** |
 | 24    | Admin panel — metadata only, no impersonation, logged           | **Done** |
 | 25    | Security hardening — CSP, origin coverage, bundle scanning      | **Done** |
-| 26–27 | Testing pass and deployment                                     | Next     |
+| 26    | Testing — a browser suite in the repository, coverage gaps      | **Done** |
+| 27    | Production deployment                                           | Next     |
 
 ---
 
