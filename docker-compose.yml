@@ -16,9 +16,9 @@ services:
     image: postgres:16-bookworm
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-riai}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-riai}
+      POSTGRES_USER: "${POSTGRES_USER:-riai}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+      POSTGRES_DB: "${POSTGRES_DB:-riai}"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -44,9 +44,9 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-riai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-riai}?schema=public
-      APP_URL: ${APP_URL:?set APP_URL in .env}
-      AUTH_SECRET: ${AUTH_SECRET:?generate one with: openssl rand -base64 48}
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-riai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-riai}?schema=public"
+      APP_URL: "${APP_URL:?set APP_URL in .env}"
+      AUTH_SECRET: "${AUTH_SECRET:?generate one with openssl rand -base64 48}"
       # One instance, so in-memory rate limiting is honest here. Two would
       # need Redis, and the environment validator says so rather than letting
       # the limits quietly halve.

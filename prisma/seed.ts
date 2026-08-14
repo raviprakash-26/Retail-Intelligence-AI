@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { seedPermissionsAndRoles } from "./seed/permissions";
@@ -20,8 +21,14 @@ import { PLATFORM_ADMIN, seedPlatformAdmin } from "./seed/platform-admin";
  *   security incident.
  */
 
+// Loaded only if present. These files are gitignored, so they exist on a
+// developer's machine and nowhere else; anywhere that supplies configuration
+// as real environment variables — a container, CI — has none to read.
 const envFile = process.env.NODE_ENV === "test" ? ".env.test" : ".env";
-process.loadEnvFile?.(path.join(process.cwd(), envFile));
+const envPath = path.join(process.cwd(), envFile);
+if (existsSync(envPath)) {
+  process.loadEnvFile?.(envPath);
+}
 
 const prisma = new PrismaClient();
 
