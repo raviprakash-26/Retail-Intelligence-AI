@@ -70,6 +70,7 @@ export async function GET(
         to: search.get("to") ?? undefined,
         year: number("year"),
         month: number("month"),
+        entityId: search.get("entity") ?? undefined,
       },
     });
 

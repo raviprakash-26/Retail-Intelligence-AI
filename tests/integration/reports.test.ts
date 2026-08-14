@@ -25,7 +25,15 @@ import { getTrialBalance } from "@/server/accounting/trial-balance-service";
 import { getFinancialStatements } from "@/server/accounting/statements-service";
 import { stockRows } from "@/server/inventory/inventory-report";
 import { receivablesAgeing } from "@/server/settlements/outstanding";
-import { runReport, ReportError } from "@/server/reports/report-service";
+import {
+  reportEntityOptions,
+  runReport,
+  ReportError,
+} from "@/server/reports/report-service";
+import {
+  getAccountLedger,
+  partyStatement,
+} from "@/server/accounting/ledger-service";
 import {
   disconnectTestDb,
   ensurePlatformData,
@@ -409,6 +417,108 @@ describe("every report agrees with the service it reports", () => {
     expect(total.cells.outstanding).toBe(source.summary.total);
     expect(total.cells.overdue).toBe(source.summary.overdue);
   }, 90_000);
+});
+
+describe("reports about one subject", () => {
+  it("the account ledger report is the ledger of that account", async () => {
+    const fixture = await tradingCompany();
+    const accounts = await reportEntityOptions(fixture.companyId, "account");
+    const sales = accounts.find((option) => /Sales/.test(option.label));
+    expect(sales).toBeDefined();
+
+    const [report, source] = await Promise.all([
+      run(fixture.companyId, "account-ledger", { entityId: sales!.id }),
+      getAccountLedger({
+        companyId: fixture.companyId,
+        accountId: sales!.id,
+        from: YEAR_START,
+        to: today,
+      }),
+    ]);
+
+    expect(
+      cellFor(report.rows, "narration", "Opening balance", "running"),
+    ).toBe(source.openingBalance);
+    expect(
+      cellFor(report.rows, "narration", "Closing balance", "running"),
+    ).toBe(source.closingBalance);
+    expect(
+      cellFor(report.rows, "narration", "Movement in the period", "debit"),
+    ).toBe(source.periodDebit);
+  }, 90_000);
+
+  it("the customer statement is that customer's ledger", async () => {
+    const fixture = await tradingCompany();
+    const customers = await reportEntityOptions(fixture.companyId, "customer");
+    expect(customers.length).toBeGreaterThan(0);
+
+    const [report, source] = await Promise.all([
+      run(fixture.companyId, "customer-statement", {
+        entityId: customers[0]!.id,
+      }),
+      partyStatement({
+        companyId: fixture.companyId,
+        partyType: "CUSTOMER",
+        partyId: customers[0]!.id,
+        from: YEAR_START,
+        to: today,
+      }),
+    ]);
+
+    expect(
+      cellFor(report.rows, "narration", "Closing balance", "running"),
+    ).toBe(source.closingBalance);
+    // The sale was on credit, so the customer owes something.
+    expect(Number(source.closingBalance)).toBeGreaterThan(0);
+  }, 90_000);
+
+  it("offers only this company's accounts and parties", async () => {
+    // The picker is where a cross-tenant id would be introduced, so what it
+    // offers is worth asserting rather than assuming.
+    const [mine, theirs] = await Promise.all([
+      tradingCompany(),
+      tradingCompany(),
+    ]);
+
+    const [mineCustomers, theirCustomers] = await Promise.all([
+      reportEntityOptions(mine.companyId, "customer"),
+      reportEntityOptions(theirs.companyId, "customer"),
+    ]);
+
+    const mineIds = new Set(mineCustomers.map((option) => option.id));
+    for (const option of theirCustomers) {
+      expect(mineIds.has(option.id)).toBe(false);
+    }
+  }, 120_000);
+
+  it("refuses to run without a subject", async () => {
+    const fixture = await createCompany();
+    await expect(run(fixture.companyId, "account-ledger")).rejects.toThrow(
+      /Choose which account/i,
+    );
+  }, 90_000);
+
+  it("refuses another company's account rather than reporting on it", async () => {
+    // The id arrives from the URL, so this is where a cross-tenant read would
+    // happen if it happened anywhere. The ledger service looks the account up
+    // by id *and* companyId, so a borrowed id finds nothing and the report
+    // refuses outright rather than rendering an empty ledger that looks real.
+    const [mine, theirs] = await Promise.all([
+      tradingCompany(),
+      tradingCompany(),
+    ]);
+    const theirAccounts = await reportEntityOptions(
+      theirs.companyId,
+      "account",
+    );
+    const theirSales = theirAccounts.find((option) =>
+      /Sales/.test(option.label),
+    );
+
+    await expect(
+      run(mine.companyId, "account-ledger", { entityId: theirSales!.id }),
+    ).rejects.toThrow();
+  }, 120_000);
 });
 
 describe("what the reports say about themselves", () => {
