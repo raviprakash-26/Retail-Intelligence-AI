@@ -40,6 +40,13 @@ describe("navigation config integrity", () => {
         }
       }
     }
+    for (const section of NAV_SECTIONS) {
+      for (const item of section.items) {
+        for (const key of item.anyPermission ?? []) {
+          expect(known.has(key), `${item.label} → ${key}`).toBe(true);
+        }
+      }
+    }
     for (const action of QUICK_ACTIONS) {
       expect(known.has(action.permission), `${action.label}`).toBe(true);
     }
@@ -168,6 +175,33 @@ describe("permission gating", () => {
 
     // Read-only by construction: nothing that records a transaction.
     expect(visibleQuickActions(visibility)).toHaveLength(0);
+  });
+
+  it("shows an item serving two modules to anyone holding either key", () => {
+    // Returns are reachable from both sides. A member who may see purchases but
+    // not sales still has debit notes to look at, and a single `permission`
+    // would have hidden the page from them.
+    const features = ALL_FEATURES;
+    const labelsFor = (permissions: string[]) =>
+      visibleSections({
+        permissions: new Set(permissions),
+        features,
+      }).flatMap((section) => section.items.map((item) => item.label));
+
+    expect(labelsFor(["sales.view"])).toContain("Returns");
+    expect(labelsFor(["purchases.view"])).toContain("Returns");
+    expect(labelsFor(["expenses.view"])).not.toContain("Returns");
+  });
+
+  it("requires every listed key when an item names only one", () => {
+    // The two gates are not interchangeable: `permission` is still an "all",
+    // and adding `anyPermission` must not have loosened it.
+    expect(
+      isPermitted(
+        { permission: "sales.view" },
+        { permissions: new Set(["purchases.view"]), features: ALL_FEATURES },
+      ),
+    ).toBe(false);
   });
 
   it("drops a section once all of its items are hidden", () => {

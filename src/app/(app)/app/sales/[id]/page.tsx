@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Ban } from "lucide-react";
 import { VoidDocumentDialog } from "@/components/documents/void-document-dialog";
+import { SalesReturnButton } from "@/components/returns/return-buttons";
+import { ReturnsAgainstCard } from "@/components/returns/returns-against-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +26,8 @@ import {
 import { requirePermission } from "@/server/auth/context";
 import { getSale } from "@/server/sales/sale-service";
 import { voidSaleAction } from "@/server/sales/actions";
+import { returnableLines } from "@/server/returns/sales-return-service";
+import { salesReturnsAgainst } from "@/server/returns/return-queries";
 import { MasterDataError } from "@/server/master-data/errors";
 
 export const metadata: Metadata = {
@@ -62,6 +66,14 @@ export default async function SaleDetailPage({
     context.company.gstRegistration as GstRegistration,
   );
 
+  const mayReturn = !voided && context.permissions.has("sales.return");
+  const [returnable, returns] = await Promise.all([
+    mayReturn
+      ? returnableLines({ companyId: context.company.id, saleId: sale.id })
+      : Promise.resolve([]),
+    salesReturnsAgainst({ companyId: context.company.id, saleId: sale.id }),
+  ]);
+
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
       <Link
@@ -94,14 +106,24 @@ export default async function SaleDetailPage({
           </p>
         </div>
 
-        {!voided && context.permissions.has("sales.void") && (
-          <VoidDocumentDialog
-            documentId={sale.id}
-            documentNumber={sale.invoiceNumber}
-            noun="invoice"
-            onVoid={voidSaleAction}
-          />
-        )}
+        <div className="flex flex-wrap gap-2">
+          {mayReturn && returnable.length > 0 && (
+            <SalesReturnButton
+              documentId={sale.id}
+              documentNumber={sale.invoiceNumber}
+              documentDate={sale.invoiceDate.toISOString().slice(0, 10)}
+              lines={returnable}
+            />
+          )}
+          {!voided && context.permissions.has("sales.void") && (
+            <VoidDocumentDialog
+              documentId={sale.id}
+              documentNumber={sale.invoiceNumber}
+              noun="invoice"
+              onVoid={voidSaleAction}
+            />
+          )}
+        </div>
       </header>
 
       {voided && (
@@ -259,6 +281,13 @@ export default async function SaleDetailPage({
               </CardContent>
             </Card>
           )}
+
+          <ReturnsAgainstCard
+            kind="sales"
+            rows={returns.rows}
+            total={returns.total}
+            documentNoun="invoice"
+          />
         </div>
 
         <div className="space-y-6">

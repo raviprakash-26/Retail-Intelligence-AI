@@ -25,6 +25,15 @@ export type NavItem = {
   href: string;
   icon: string;
   permission?: PermissionKey;
+  /**
+   * Shown when the member holds *any* of these.
+   *
+   * For the handful of pages that serve two modules at once — returns are
+   * reachable from both sales and purchases — where a single `permission`
+   * would hide the page from half the people entitled to it. The page still
+   * checks each side itself; this only decides whether the link appears.
+   */
+  anyPermission?: readonly PermissionKey[];
   feature?: FeatureKey;
   status: NavStatus;
   /** Which build phase delivers it. Rendered on the placeholder page. */
@@ -78,6 +87,13 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         permission: "purchases.view",
         status: "ready",
         primary: true,
+      },
+      {
+        label: "Returns",
+        href: "/app/returns",
+        icon: "Undo2",
+        anyPermission: ["sales.view", "purchases.view"],
+        status: "ready",
       },
       {
         label: "Expenses",
@@ -351,10 +367,19 @@ export type NavVisibility = {
 
 /** True when the member's role allows the item at all. */
 export function isPermitted(
-  item: { permission?: PermissionKey },
+  item: {
+    permission?: PermissionKey;
+    anyPermission?: readonly PermissionKey[];
+  },
   visibility: NavVisibility,
 ): boolean {
-  return !item.permission || visibility.permissions.has(item.permission);
+  if (item.permission && !visibility.permissions.has(item.permission)) {
+    return false;
+  }
+  if (item.anyPermission) {
+    return item.anyPermission.some((key) => visibility.permissions.has(key));
+  }
+  return true;
 }
 
 /** True when the subscription includes it. Gated items still render, marked. */

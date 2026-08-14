@@ -1292,6 +1292,9 @@ model SalesReturn {
   sgstAmount     Decimal        @default(0) @db.Decimal(18, 4)
   igstAmount     Decimal        @default(0) @db.Decimal(18, 4)
   cessAmount     Decimal        @default(0) @db.Decimal(18, 4)
+  /// Difference between the exact value returned and the rupee it is
+  /// credited at, posted to Round Off exactly as an invoice's is.
+  roundOff       Decimal        @default(0) @db.Decimal(18, 4)
   totalAmount    Decimal        @default(0) @db.Decimal(18, 4)
   costOfGoodsReturned Decimal   @default(0) @db.Decimal(18, 4)
 
@@ -1443,6 +1446,9 @@ model PurchaseReturn {
   sgstAmount     Decimal        @default(0) @db.Decimal(18, 4)
   igstAmount     Decimal        @default(0) @db.Decimal(18, 4)
   cessAmount     Decimal        @default(0) @db.Decimal(18, 4)
+  /// Difference between the exact value returned and the rupee it is
+  /// credited at, posted to Round Off exactly as an invoice's is.
+  roundOff       Decimal        @default(0) @db.Decimal(18, 4)
   totalAmount    Decimal        @default(0) @db.Decimal(18, 4)
 
   journalEntryId String?        @db.Uuid

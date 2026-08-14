@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Ban } from "lucide-react";
 import { VoidDocumentDialog } from "@/components/documents/void-document-dialog";
+import { PurchaseReturnButton } from "@/components/returns/return-buttons";
+import { ReturnsAgainstCard } from "@/components/returns/returns-against-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +21,8 @@ import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
 import { requirePermission } from "@/server/auth/context";
 import { getPurchase } from "@/server/purchases/purchase-service";
 import { voidPurchaseAction } from "@/server/purchases/actions";
+import { returnableBillLines } from "@/server/returns/purchase-return-service";
+import { purchaseReturnsAgainst } from "@/server/returns/return-queries";
 import { MasterDataError } from "@/server/master-data/errors";
 
 export const metadata: Metadata = {
@@ -58,6 +62,20 @@ export default async function PurchaseDetailPage({
     Number(purchase.igstAmount) +
     Number(purchase.cessAmount);
 
+  const mayReturn = !voided && context.permissions.has("purchases.return");
+  const [returnable, returns] = await Promise.all([
+    mayReturn
+      ? returnableBillLines({
+          companyId: context.company.id,
+          purchaseId: purchase.id,
+        })
+      : Promise.resolve([]),
+    purchaseReturnsAgainst({
+      companyId: context.company.id,
+      purchaseId: purchase.id,
+    }),
+  ]);
+
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
       <Link
@@ -92,15 +110,25 @@ export default async function PurchaseDetailPage({
           </p>
         </div>
 
-        {!voided && context.permissions.has("purchases.void") && (
-          <VoidDocumentDialog
-            documentId={purchase.id}
-            documentNumber={purchase.billNumber}
-            noun="bill"
-            onVoid={voidPurchaseAction}
-            placeholder="Goods returned to the supplier"
-          />
-        )}
+        <div className="flex flex-wrap gap-2">
+          {mayReturn && returnable.length > 0 && (
+            <PurchaseReturnButton
+              documentId={purchase.id}
+              documentNumber={purchase.billNumber}
+              documentDate={purchase.billDate.toISOString().slice(0, 10)}
+              lines={returnable}
+            />
+          )}
+          {!voided && context.permissions.has("purchases.void") && (
+            <VoidDocumentDialog
+              documentId={purchase.id}
+              documentNumber={purchase.billNumber}
+              noun="bill"
+              onVoid={voidPurchaseAction}
+              placeholder="Bill entered twice"
+            />
+          )}
+        </div>
       </header>
 
       {voided && (
@@ -257,6 +285,13 @@ export default async function PurchaseDetailPage({
               </CardContent>
             </Card>
           )}
+
+          <ReturnsAgainstCard
+            kind="purchase"
+            rows={returns.rows}
+            total={returns.total}
+            documentNoun="bill"
+          />
         </div>
 
         <div className="space-y-6">
