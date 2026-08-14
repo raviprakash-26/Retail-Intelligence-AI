@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { BillingInterval } from "@prisma/client";
 import { PLAN_DEFINITIONS } from "@/lib/billing/plans";
+import { withPlatformSeedLock } from "./lock";
 
 /**
  * Seeds the subscription plans.
@@ -10,28 +11,32 @@ import { PLAN_DEFINITIONS } from "@/lib/billing/plans";
  * in `@/lib/billing/plans` are only the initial values.
  */
 export async function seedSubscriptionPlans(prisma: PrismaClient) {
-  for (const plan of PLAN_DEFINITIONS) {
-    const data = {
-      name: plan.name,
-      tagline: plan.tagline,
-      description: plan.description,
-      priceMinor: plan.priceMinor,
-      currency: plan.currency,
-      interval: BillingInterval[plan.interval],
-      trialDays: plan.trialDays,
-      features: [...plan.features],
-      limits: { ...plan.limits },
-      sortOrder: plan.sortOrder,
-      isPublic: true,
-      isActive: true,
-    };
+  // Prisma's upsert is a read followed by a write, not an ON CONFLICT, so it
+  // races against a concurrent copy exactly as the role seeding does.
+  return withPlatformSeedLock(prisma, async (tx) => {
+    for (const plan of PLAN_DEFINITIONS) {
+      const data = {
+        name: plan.name,
+        tagline: plan.tagline,
+        description: plan.description,
+        priceMinor: plan.priceMinor,
+        currency: plan.currency,
+        interval: BillingInterval[plan.interval],
+        trialDays: plan.trialDays,
+        features: [...plan.features],
+        limits: { ...plan.limits },
+        sortOrder: plan.sortOrder,
+        isPublic: true,
+        isActive: true,
+      };
 
-    await prisma.subscriptionPlan.upsert({
-      where: { key: plan.key },
-      create: { key: plan.key, ...data },
-      update: data,
-    });
-  }
+      await tx.subscriptionPlan.upsert({
+        where: { key: plan.key },
+        create: { key: plan.key, ...data },
+        update: data,
+      });
+    }
 
-  return { plans: PLAN_DEFINITIONS.length };
+    return { plans: PLAN_DEFINITIONS.length };
+  });
 }
