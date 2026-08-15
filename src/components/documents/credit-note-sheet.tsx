@@ -1,47 +1,40 @@
 import { formatCurrency, formatDate } from "@/lib/format";
-import {
-  amountInWords,
-  INVOICE_COPIES,
-  type InvoiceCopy,
-} from "@/lib/documents/tax-invoice";
+import { amountInWords } from "@/lib/documents/tax-invoice";
 import { PartyBlock } from "@/components/documents/party-block";
-import type { InvoiceDocument } from "@/server/documents/tax-invoice-document";
+import type { CreditNoteDocument } from "@/server/documents/credit-note-document";
 
 /**
- * The invoice a customer takes away.
+ * The credit note a customer takes away.
  *
- * Laid out for paper rather than for a screen: black on white, borders that
- * survive a monochrome printer, and every particular the rule asks for in a
- * place somebody can point at. The `data-particular` attributes are what the
- * browser suite walks to check nothing was dropped in a layout change — a
- * missing GSTIN on a document a buyer's accountant will read is not a thing to
- * discover from a complaint.
- *
- * It renders on screen too, at the same size, so what somebody sees before
- * pressing print is what comes out.
+ * The same paper treatment as the invoice, and a shorter list of particulars —
+ * Rule 53 does not ask for an HSN code against each line the way Rule 46 does.
+ * What it does ask for, and what an invoice has no equivalent of, is the serial
+ * number and date of the invoice this is issued against. A credit note that
+ * does not say which supply it adjusts cannot be matched by the person
+ * receiving it.
  */
-
-export function TaxInvoiceSheet({
+export function CreditNoteSheet({
   document,
-  copy = INVOICE_COPIES[0],
 }: {
-  document: InvoiceDocument;
-  copy?: InvoiceCopy;
+  document: CreditNoteDocument;
 }) {
   const { totals, lines, interState } = document;
 
   return (
     <article className="mx-auto max-w-[210mm] border bg-white text-black print:max-w-none print:border-0">
       <header className="border-b p-4 text-center">
-        <p className="text-sm font-semibold tracking-[0.2em] uppercase">
-          Tax Invoice
+        <p
+          className="text-sm font-semibold tracking-[0.2em] uppercase"
+          data-particular="document-nature"
+        >
+          Credit Note
         </p>
-        <p className="mt-0.5 text-[0.6875rem]" data-particular="copy-label">
-          {copy}
+        <p className="mt-0.5 text-[0.6875rem]">
+          Issued under section 34 of the CGST Act
         </p>
         {document.voided && (
           <p className="mt-2 text-sm font-bold tracking-widest uppercase">
-            — This invoice has been cancelled —
+            — This credit note has been cancelled —
           </p>
         )}
       </header>
@@ -55,54 +48,46 @@ export function TaxInvoiceSheet({
           />
         </div>
         <div>
-          {document.recipient ? (
+          {document.recipient && (
             <PartyBlock
               party={document.recipient}
               heading="Recipient"
               testId="recipient-block"
             />
-          ) : (
-            <div className="p-3" data-particular="recipient-block">
-              <p className="text-[0.6875rem] font-semibold tracking-wide uppercase">
-                Recipient
-              </p>
-              <p className="mt-1 font-semibold">Counter sale</p>
-              <p className="text-xs">Not registered under GST</p>
-            </div>
           )}
         </div>
       </div>
 
       <dl className="grid grid-cols-2 border-b text-xs sm:grid-cols-4">
-        <div className="border-r p-2" data-particular="invoice-number">
-          <dt className="font-medium">Invoice number</dt>
-          <dd className="mt-0.5 font-semibold">{document.invoiceNumber}</dd>
+        <div className="border-r p-2" data-particular="note-number">
+          <dt className="font-medium">Credit note number</dt>
+          <dd className="mt-0.5 font-semibold">{document.noteNumber}</dd>
         </div>
-        <div className="border-r p-2" data-particular="invoice-date">
+        <div className="border-r p-2" data-particular="note-date">
           <dt className="font-medium">Date of issue</dt>
           <dd className="mt-0.5">
-            {formatDate(document.invoiceDate, { style: "long" })}
+            {formatDate(document.noteDate, { style: "long" })}
           </dd>
         </div>
-        <div className="border-r p-2" data-particular="place-of-supply">
-          <dt className="font-medium">Place of supply</dt>
+        <div className="col-span-2 p-2" data-particular="against-invoice">
+          <dt className="font-medium">Against tax invoice</dt>
           <dd className="mt-0.5">
-            {document.placeOfSupply.name ?? "—"}
-            {document.placeOfSupply.code
-              ? ` (${document.placeOfSupply.code})`
-              : ""}
+            {document.against ? (
+              <>
+                <span className="font-semibold">{document.against.number}</span>{" "}
+                dated {formatDate(document.against.date, { style: "long" })}
+              </>
+            ) : (
+              "Not issued against a specific invoice"
+            )}
           </dd>
-        </div>
-        <div className="p-2" data-particular="reverse-charge">
-          <dt className="font-medium">Tax payable on reverse charge</dt>
-          <dd className="mt-0.5">{document.reverseCharge ? "Yes" : "No"}</dd>
         </div>
       </dl>
 
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-xs">
           <caption className="sr-only">
-            Goods supplied under invoice {document.invoiceNumber}
+            Goods credited under note {document.noteNumber}
           </caption>
           <thead>
             <tr className="border-b bg-black/[0.04]">
@@ -111,9 +96,6 @@ export function TaxInvoiceSheet({
               </th>
               <th scope="col" className="border-r p-2 text-left">
                 Description
-              </th>
-              <th scope="col" className="border-r p-2 text-left">
-                HSN
               </th>
               <th scope="col" className="border-r p-2 text-right">
                 Qty
@@ -136,32 +118,20 @@ export function TaxInvoiceSheet({
             {lines.map((line) => (
               <tr key={line.lineNumber} className="border-b">
                 <td className="border-r p-2">{line.lineNumber}</td>
-                <td className="border-r p-2" data-particular="line-description">
-                  {line.description}
-                </td>
-                <td className="border-r p-2" data-particular="line-hsn">
-                  {line.hsnCode ?? "—"}
-                </td>
-                <td
-                  className="tabular-figures border-r p-2 text-right"
-                  data-particular="line-quantity"
-                >
+                <td className="border-r p-2">{line.description}</td>
+                <td className="tabular-figures border-r p-2 text-right">
                   {line.quantity}
-                  {line.unit ? ` ${line.unit}` : ""}
                 </td>
                 <td className="tabular-figures border-r p-2 text-right">
                   {formatCurrency(line.rate)}
                 </td>
                 <td
                   className="tabular-figures border-r p-2 text-right"
-                  data-particular="line-taxable"
+                  data-particular="credited-taxable"
                 >
                   {formatCurrency(line.taxableAmount)}
                 </td>
-                <td
-                  className="tabular-figures border-r p-2 text-right"
-                  data-particular="line-tax-rate"
-                >
+                <td className="tabular-figures border-r p-2 text-right">
                   {line.taxPercent}%
                 </td>
                 <td className="tabular-figures p-2 text-right">
@@ -176,40 +146,39 @@ export function TaxInvoiceSheet({
       <div className="grid grid-cols-1 border-t sm:grid-cols-2">
         <div className="border-b p-3 sm:border-r sm:border-b-0">
           <p className="text-[0.6875rem] font-semibold tracking-wide uppercase">
-            Amount in words
+            Amount credited, in words
           </p>
-          <p className="mt-1 text-xs" data-particular="amount-in-words">
-            {amountInWords(totals.totalAmount)}
+          <p className="mt-1 text-xs">{amountInWords(totals.totalAmount)}</p>
+          <p
+            className="mt-3 text-xs leading-relaxed"
+            data-particular="credit-reason"
+          >
+            <span className="font-medium">Reason:</span>{" "}
+            {document.reason?.trim() || "Goods returned by the recipient"}
           </p>
-          {document.notes && (
-            <p className="mt-3 text-xs leading-relaxed">{document.notes}</p>
-          )}
         </div>
 
-        <dl className="text-xs" data-particular="tax-summary">
-          <Row label="Taxable value" value={totals.taxableAmount} />
-          {Number(totals.discountAmount) > 0 && (
-            <Row label="Discount" value={`-${totals.discountAmount}`} />
-          )}
+        <dl className="text-xs" data-particular="credited-tax">
+          <Row label="Taxable value credited" value={totals.taxableAmount} />
           {interState ? (
-            <Row label="IGST" value={totals.igstAmount} />
+            <Row label="IGST credited" value={totals.igstAmount} />
           ) : (
             <>
-              <Row label="CGST" value={totals.cgstAmount} />
-              <Row label="SGST" value={totals.sgstAmount} />
+              <Row label="CGST credited" value={totals.cgstAmount} />
+              <Row label="SGST credited" value={totals.sgstAmount} />
             </>
           )}
           {Number(totals.cessAmount) > 0 && (
-            <Row label="Cess" value={totals.cessAmount} />
+            <Row label="Cess credited" value={totals.cessAmount} />
           )}
           {Number(totals.roundOff) !== 0 && (
             <Row label="Rounding" value={totals.roundOff} />
           )}
           <div
             className="flex items-baseline justify-between border-t p-2 font-semibold"
-            data-particular="invoice-total"
+            data-particular="credit-total"
           >
-            <dt>Total</dt>
+            <dt>Total credited</dt>
             <dd className="tabular-figures">
               {formatCurrency(totals.totalAmount)}
             </dd>
@@ -221,8 +190,8 @@ export function TaxInvoiceSheet({
         <div className="border-b p-3 text-[0.6875rem] leading-relaxed sm:border-r sm:border-b-0">
           <p className="font-semibold">Declaration</p>
           <p className="mt-1">
-            We declare that this invoice shows the actual price of the goods
-            described and that all particulars are true and correct.
+            We declare that the particulars given above are true and correct,
+            and that the tax shown has been credited against the invoice named.
           </p>
         </div>
         <div className="p-3 text-right" data-particular="signature">

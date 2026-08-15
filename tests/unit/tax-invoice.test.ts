@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   amountInWords,
+  CREDIT_NOTE_PARTICULARS,
   INVOICE_COPIES,
   INVOICE_PARTICULARS,
 } from "@/lib/documents/tax-invoice";
@@ -99,5 +100,31 @@ describe("the particulars an invoice must carry", () => {
   it("knows an invoice for goods is issued in triplicate", () => {
     expect(INVOICE_COPIES).toHaveLength(3);
     expect(INVOICE_COPIES[0]).toContain("Recipient");
+  });
+});
+
+describe("the particulars a credit note must carry", () => {
+  it("asks for the invoice it is issued against", () => {
+    // The particular an invoice has no equivalent of, and the one that makes
+    // the note usable: a credit adjusting a supply nobody can identify is an
+    // adjustment to nothing.
+    const keys = CREDIT_NOTE_PARTICULARS.map((entry) => entry.key);
+    expect(keys).toContain("againstInvoice");
+    expect(keys).toContain("nature");
+    expect(keys).toContain("taxCredited");
+    expect(keys).toContain("signature");
+  });
+
+  it("does not ask for an HSN code, which its rule does not require", () => {
+    // Rule 46 asks an invoice for one against each line. Rule 53 does not ask
+    // a credit note for one, and inventing a requirement would fail documents
+    // that are correct.
+    const keys = CREDIT_NOTE_PARTICULARS.map((entry) => entry.key);
+    expect(keys).not.toContain("hsn");
+  });
+
+  it("gives every particular a distinct anchor", () => {
+    const ids = CREDIT_NOTE_PARTICULARS.map((entry) => entry.testId);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

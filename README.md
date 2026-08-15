@@ -1924,6 +1924,18 @@ result honours the print stylesheet this application already had, and a
 generated PDF would be a second layout to keep in step with the first. That is
 how the paper copy and the screen end up disagreeing.
 
+**A credit note is its own document, under its own rule.** Rule 53 asks for a
+shorter list than Rule 46 — no HSN against each line — and for one particular an
+invoice has no equivalent of: the serial number and date of the invoice being
+adjusted. A credit note that does not say which supply it corrects cannot be
+matched by the person receiving it, and corrects nothing. It has its own
+checklist and its own walk of the rendered page.
+
+Only sales returns produce a document here. A purchase return produces a debit
+note the _supplier_ issues against us — we are its recipient, not its issuer,
+and printing one on our own letterhead would be asserting something we have no
+standing to assert.
+
 ---
 
 ## Taking your data with you
