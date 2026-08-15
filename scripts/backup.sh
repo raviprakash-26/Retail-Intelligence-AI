@@ -15,6 +15,20 @@ set -Eeuo pipefail
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 
+# Off-machine copy. Unset means local only, which is the default and is stated
+# plainly rather than implied: a dump sitting beside the database it came from
+# survives a dropped table and not a dead disk.
+#
+# Any S3-compatible store works — S3, R2, Supabase, MinIO — because the only
+# thing that differs between them is the endpoint. The AWS CLI does the signing
+# and the multipart upload; hand-rolling SigV4 in a backup script would put a
+# correctness risk exactly where nobody would notice it until a restore.
+S3_BUCKET="${BACKUP_S3_BUCKET:-}"
+S3_PREFIX="${BACKUP_S3_PREFIX:-riai}"
+S3_ENDPOINT="${BACKUP_S3_ENDPOINT:-}"
+S3_STORAGE_CLASS="${BACKUP_S3_STORAGE_CLASS:-}"
+S3_SSE="${BACKUP_S3_SSE:-}"
+
 # Prisma's DATABASE_URL carries `?schema=`, which libpq does not understand and
 # rejects outright — "invalid URI query parameter". Every URL in this project
 # has it, so stripping that one parameter is the difference between these
@@ -62,6 +76,80 @@ trap - EXIT
 
 bytes="$(wc -c <"$target" | tr -d ' ')"
 echo "backup: wrote ${target} (${bytes} bytes, ${tables} tables)"
+
+# --------------------------------------------------------------------------
+# Off the machine
+# --------------------------------------------------------------------------
+# Runs before local retention, deliberately. If the copy cannot be sent
+# somewhere else, the local copies that already exist are the only ones there
+# are, and deleting the oldest of them because a clock ticked would be the
+# wrong response to a failure.
+if [[ -n "$S3_BUCKET" ]]; then
+  if ! command -v aws >/dev/null 2>&1; then
+    echo "backup: BACKUP_S3_BUCKET is set but the aws CLI is not installed" >&2
+    exit 2
+  fi
+
+  key="${S3_PREFIX%/}/$(basename "$target")"
+  s3_uri="s3://${S3_BUCKET}/${key}"
+
+  # Endpoint and storage class are optional and provider-specific. Built as an
+  # array so an unset value contributes no argument at all rather than an empty
+  # string the CLI would reject.
+  aws_args=()
+  [[ -n "$S3_ENDPOINT" ]] && aws_args+=(--endpoint-url "$S3_ENDPOINT")
+
+  copy_args=()
+  [[ -n "$S3_STORAGE_CLASS" ]] && copy_args+=(--storage-class "$S3_STORAGE_CLASS")
+  [[ -n "$S3_SSE" ]] && copy_args+=(--sse "$S3_SSE")
+
+  echo "backup: uploading to ${s3_uri}"
+  if ! aws "${aws_args[@]}" s3 cp "$target" "$s3_uri" "${copy_args[@]}" --only-show-errors; then
+    echo "backup: upload failed — the local copy is kept and nothing was pruned" >&2
+    exit 1
+  fi
+
+  # Verify the object that landed, for the same reason the dump is read back
+  # before it is kept: an upload that truncated is the ordinary way an offsite
+  # backup turns out to be worthless, and it costs one request to find out.
+  remote_bytes="$(aws "${aws_args[@]}" s3api head-object \
+    --bucket "$S3_BUCKET" --key "$key" \
+    --query 'ContentLength' --output text 2>/dev/null || true)"
+
+  if [[ "${remote_bytes:-}" != "$bytes" ]]; then
+    echo "backup: uploaded object is ${remote_bytes:-missing} bytes, expected ${bytes}" >&2
+    echo "backup: treating the offsite copy as failed — nothing was pruned" >&2
+    exit 1
+  fi
+  echo "backup: uploaded ${key} (${remote_bytes} bytes, verified)"
+
+  # Remote retention, after a verified upload and never before. Objects are
+  # named with a sortable UTC stamp, so "older than" is a string comparison
+  # against a cutoff rather than a per-object metadata read.
+  if [[ "$RETENTION_DAYS" -gt 0 ]]; then
+    cutoff="$(date -u -d "${RETENTION_DAYS} days ago" +%Y%m%dT%H%M%SZ 2>/dev/null \
+      || date -u -v"-${RETENTION_DAYS}d" +%Y%m%dT%H%M%SZ)"
+    pruned=0
+    while read -r old_key; do
+      [[ -z "$old_key" ]] && continue
+      stamp_part="${old_key##*/riai-}"
+      stamp_part="${stamp_part%.dump}"
+      # Anything that is not one of ours, or has no readable stamp, is left
+      # alone. A retention job that deletes files it does not recognise is a
+      # retention job that eventually deletes something it should not.
+      [[ "$stamp_part" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || continue
+      if [[ "$stamp_part" < "$cutoff" ]]; then
+        aws "${aws_args[@]}" s3 rm "s3://${S3_BUCKET}/${old_key}" --only-show-errors && pruned=$((pruned + 1))
+      fi
+    done < <(aws "${aws_args[@]}" s3api list-objects-v2 \
+      --bucket "$S3_BUCKET" --prefix "${S3_PREFIX%/}/riai-" \
+      --query 'Contents[].Key' --output text 2>/dev/null | tr '\t' '\n')
+
+    [[ "$pruned" -gt 0 ]] && echo "backup: removed ${pruned} remote copies older than ${RETENTION_DAYS} days"
+  fi
+else
+  echo "backup: no BACKUP_S3_BUCKET set — this copy is on the same machine as the database"
+fi
 
 # Retention runs only after a good backup, so a run of failures never deletes
 # the last known-good copy.

@@ -74,15 +74,27 @@ services:
       timeout: 5s
       retries: 10
 
-  # A nightly dump into a local volume, and nothing more than that.
+  # A nightly dump, kept locally and — if a bucket is configured — sent off the
+  # machine as well.
   #
-  # This is the floor, not the ceiling. The dump lives on the same machine as
-  # the database it came from, so it survives a dropped table and not a dead
-  # disk. For books somebody will need in a tax dispute three years from now,
-  # use managed Postgres with point-in-time recovery — and either way, restore
-  # one somewhere harmless before you need to.
+  # Without BACKUP_S3_BUCKET this is still the floor: the dump lives on the same
+  # disk as the database it came from, so it survives a dropped table and not a
+  # dead machine, and the script says so on every run. With one set, the same
+  # dump is uploaded and the uploaded object is read back to confirm its size
+  # before anything is pruned.
+  #
+  # Any S3-compatible store works — S3, Cloudflare R2, Supabase, MinIO — since
+  # the only thing that differs is the endpoint. Credentials come from the
+  # standard AWS variables so nothing here has to reimplement how the CLI is
+  # configured.
+  #
+  # Even with this, managed Postgres with point-in-time recovery is the better
+  # answer for books somebody will need in a tax dispute three years from now.
+  # A nightly dump loses up to a day.
   backup:
-    image: postgres:16-bookworm
+    build:
+      context: .
+      dockerfile: deploy/backup.Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:
@@ -91,6 +103,16 @@ services:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-riai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-riai}"
       BACKUP_DIR: /backups
       BACKUP_RETENTION_DAYS: "${BACKUP_RETENTION_DAYS:-14}"
+      # Unset by default. Setting the bucket is what turns on the off-machine
+      # copy; everything else has a working default.
+      BACKUP_S3_BUCKET: "${BACKUP_S3_BUCKET:-}"
+      BACKUP_S3_PREFIX: "${BACKUP_S3_PREFIX:-riai}"
+      BACKUP_S3_ENDPOINT: "${BACKUP_S3_ENDPOINT:-}"
+      BACKUP_S3_STORAGE_CLASS: "${BACKUP_S3_STORAGE_CLASS:-}"
+      BACKUP_S3_SSE: "${BACKUP_S3_SSE:-}"
+      AWS_ACCESS_KEY_ID: "${BACKUP_S3_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${BACKUP_S3_SECRET_ACCESS_KEY:-}"
+      AWS_DEFAULT_REGION: "${BACKUP_S3_REGION:-auto}"
     volumes:
       - ./scripts:/scripts:ro
       - backups:/backups

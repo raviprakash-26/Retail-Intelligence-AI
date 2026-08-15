@@ -184,3 +184,25 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The backup job is a second image — Postgres client tools plus the AWS
+      # CLI — and it is the one nobody would notice was broken until the night
+      # it was needed. Same reasoning as above: a Dockerfile that has never
+      # been built is a Dockerfile that does not work.
+      - name: Build the backup image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/backup.Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Cheap proof that the tools the backup scripts call are actually in it.
+      # `command -v` inside the image beats trusting a package name.
+      - name: Check the backup image carries the tools the scripts need
+        run: |
+          docker build -f deploy/backup.Dockerfile -t riai-backup:ci .
+          docker run --rm riai-backup:ci bash -c '
+            command -v pg_dump && command -v pg_restore && command -v aws
+          
