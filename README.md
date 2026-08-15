@@ -155,7 +155,7 @@ evidence that made it fire alongside the ordinary reasons it usually happens.
 The score is arithmetic on the severities, re-derivable by hand, and says on the
 page that it is not a measure of honesty.
 
-**The advisor suggests, and promises nothing.** Ten detectors over figures the
+**The advisor suggests, and promises nothing.** Eleven detectors over figures the
 platform has already computed — cash sitting with customers, stock sitting still,
 margin slipping, costs outrunning sales — each saying what the books show, what it
 is worth, and the reasons a shopkeeper who knows their trade would be right to
@@ -427,7 +427,7 @@ src/
     forecast/              Revenue projection and the cash commitment roll-forward
     ai/                    Tool runner bound to one tenant, provider, transcript
     auditor/               Ten checks as queries, the run, and settled findings
-    advisor/               Ten detectors over figures the platform already computes
+    advisor/               Eleven detectors over figures the platform already computes
     billing/               Entitlement resolution, usage counts, plan changes
     admin/                 Platform metrics, tenant metadata, plan and status changes
     auth/                  Sessions, company context, permission guards
@@ -1632,7 +1632,7 @@ A purchase recorded against Rent passes every one of them and is still wrong.
 
 ## The AI Business Advisor
 
-**No model produced any of this either.** Ten detectors run over figures the
+**No model produced any of this either.** Eleven detectors run over figures the
 platform has already computed — the receivables ageing, the cash projection, the
 analytics report, the stock positions — and every threshold in them is a named
 constant. The same books produce the same list every time, which is the whole
@@ -1683,13 +1683,39 @@ still money somebody owes. The page says when a suggestion was moved and why.
 
 **Nothing is padded.** A detector that finds nothing returns nothing, there is no
 minimum list length, and a shop with nothing to fix is told that rather than
-handed three vague ideas so the screen looks busy. Where one of the four readings
-of the books fails, it is named — a short list is not the same as a clean one.
+handed three vague ideas so the screen looks busy. Where one of the readings of
+the books fails, it is named — a short list is not the same as a clean one. A
+detector that _throws_ is named the same way and takes out only its own
+suggestion: the service went to some trouble to survive a source it could not
+read, and one detector meeting a shape it did not expect used to throw all of
+that away and return an error page instead of the suggestions that were fine.
+
+**It says when the shop owes money, not only when it is owed.** The advisor read
+the receivables ageing from the start and never the payables one, though that
+service was built and sitting there — so a shop chasing its customers got a
+suggestion and a shop being chased by its suppliers got nothing. Overdue bills
+are now read the same way overdue invoices are, and stated the same way: a
+recorded amount rather than an estimate, because those bills were received and
+posted. What is deliberately not said is anything about whether the shop can pay
+them, which depends on money the books cannot see. The reasons to ignore it are
+the real ones — an informal longer term that was never written down, a bill in
+dispute, a cash payment never recorded against it.
 
 **Two decisions were about not duplicating logic.** Concentration defers entirely
 to the threshold the analytics service already applies, because two rules for one
 fact is two pages that can disagree about it. And the stock detectors read the
 same rows the inventory page builds, extracted rather than reimplemented.
+
+**An empty shelf is only worth mentioning where somebody meant to keep
+something on it.** A product sits at "out of stock" the moment its quantity
+reaches nil, whether or not a reorder level was ever set — so a catalogue full
+of lines the shop has stopped selling produced "twelve lines are at or below the
+reorder level you set", about twelve products where no level was set and none is
+wanted. It said that on every visit, because a discontinued product stays at
+nil, and the sentence was not true of any of them. A line now counts as stocked
+if the owner entered a reorder level or the line has traded inside the same
+window the slow-moving check uses, and the sentence distinguishes the two cases
+rather than claiming a level nobody set.
 
 The slow-moving-stock detector fired on every newly registered company before it
 shipped, for the same reason the auditor's backdated-entry check did: opening
@@ -2361,48 +2387,49 @@ query text is the only thing the browser controls.
 
 ## Roadmap
 
-| Phase | Scope                                                             | Status   |
-| ----- | ----------------------------------------------------------------- | -------- |
-| 1     | Foundation, schema, design system, public site, auth UI           | **Done** |
-| 2     | Authentication — sessions, verification, rate limiting, audit     | **Done** |
-| 3     | Company onboarding — settings, branches, team, invitations        | **Done** |
-| 4     | Application shell — navigation, search, dashboard                 | **Done** |
-| 5     | Master data — products, parties, staff, opening balances          | **Done** |
-| 6     | Sales — invoicing, GST split, stock issue, void                   | **Done** |
-| 7     | Purchases — bills, input tax credit, landed cost, void            | **Done** |
-| 8     | Expenses — categories, GST, capital vs revenue, void              | **Done** |
-| 9     | Receipts & payments — allocation, ageing, void                    | **Done** |
-| 10    | Accounting engine — chart of accounts, balances, the equation     | **Done** |
-| 11    | Journal — register, manual entries, reversal                      | **Done** |
-| 12    | Ledger — running balance, party statements                        | **Done** |
-| 13    | Trial balance — two columns, and what balancing proves            | **Done** |
-| 14    | Financial statements — trading, P&L, balance sheet                | **Done** |
-| 15    | Inventory — positions, stock cards, reconciliation, counts        | **Done** |
-| 16    | GST preparation — GSTR-1 working paper, set-off, reconciled       | **Done** |
-| 17    | Income tax — computation, depreciation, 44AD, advance tax         | **Done** |
-| 18    | Analytics — trend, products, customers, ratios, health            | **Done** |
-| 19    | Forecasting — revenue band, cash commitments, refusals            | **Done** |
-| 20    | AI Accountant — read-only tools, traceable answers                | **Done** |
-| 21    | AI Auditor — deterministic checks, observations not allegations   | **Done** |
-| 22    | AI Business Advisor — detectors, bands, and when to ignore them   | **Done** |
-| 23    | Subscriptions — entitlements, allowances, server-side gates       | **Done** |
-| 24    | Admin panel — metadata only, no impersonation, logged             | **Done** |
-| 25    | Security hardening — CSP, origin coverage, bundle scanning        | **Done** |
-| 26    | Testing — a browser suite in the repository, coverage gaps        | **Done** |
-| 27    | Deployment — image, compose, probes, pipeline, honest limits      | **Done** |
-| 28    | Returns — credit and debit notes, contra accounts, GST reversal   | **Done** |
-| 29    | Reports — one catalogue over existing services, CSV and print     | **Done** |
-| 30    | Payroll — statutory deductions, four liabilities, no invented TDS | **Done** |
-| 31    | Observability — structured logs, a gated scrape, honest scope     | **Done** |
-| 32    | Backups — a verified dump, and a restore with a safety catch      | **Done** |
-| 33    | Shared rate limits — one counter across instances, bounded wait   | **Done** |
-| 34    | Reports about one subject — account ledger, party statements      | **Done** |
-| 35    | Bank reconciliation — statement import, matching, the identity    | **Done** |
-| 36    | Payments — Razorpay checkout, signed webhooks, one upgrade path   | **Done** |
-| 37    | Multi-replica — two behind a balancer, draining shutdown, labels  | **Done** |
-| 38    | Off-machine backups — verified upload, retention, fetch back      | **Done** |
-| 39    | AI provider — the official SDK, refusals, truncation, caching     | **Done** |
-| 40    | Auditor — the missing GST check, true totals, honest partial runs | **Done** |
+| Phase | Scope                                                               | Status   |
+| ----- | ------------------------------------------------------------------- | -------- |
+| 1     | Foundation, schema, design system, public site, auth UI             | **Done** |
+| 2     | Authentication — sessions, verification, rate limiting, audit       | **Done** |
+| 3     | Company onboarding — settings, branches, team, invitations          | **Done** |
+| 4     | Application shell — navigation, search, dashboard                   | **Done** |
+| 5     | Master data — products, parties, staff, opening balances            | **Done** |
+| 6     | Sales — invoicing, GST split, stock issue, void                     | **Done** |
+| 7     | Purchases — bills, input tax credit, landed cost, void              | **Done** |
+| 8     | Expenses — categories, GST, capital vs revenue, void                | **Done** |
+| 9     | Receipts & payments — allocation, ageing, void                      | **Done** |
+| 10    | Accounting engine — chart of accounts, balances, the equation       | **Done** |
+| 11    | Journal — register, manual entries, reversal                        | **Done** |
+| 12    | Ledger — running balance, party statements                          | **Done** |
+| 13    | Trial balance — two columns, and what balancing proves              | **Done** |
+| 14    | Financial statements — trading, P&L, balance sheet                  | **Done** |
+| 15    | Inventory — positions, stock cards, reconciliation, counts          | **Done** |
+| 16    | GST preparation — GSTR-1 working paper, set-off, reconciled         | **Done** |
+| 17    | Income tax — computation, depreciation, 44AD, advance tax           | **Done** |
+| 18    | Analytics — trend, products, customers, ratios, health              | **Done** |
+| 19    | Forecasting — revenue band, cash commitments, refusals              | **Done** |
+| 20    | AI Accountant — read-only tools, traceable answers                  | **Done** |
+| 21    | AI Auditor — deterministic checks, observations not allegations     | **Done** |
+| 22    | AI Business Advisor — detectors, bands, and when to ignore them     | **Done** |
+| 23    | Subscriptions — entitlements, allowances, server-side gates         | **Done** |
+| 24    | Admin panel — metadata only, no impersonation, logged               | **Done** |
+| 25    | Security hardening — CSP, origin coverage, bundle scanning          | **Done** |
+| 26    | Testing — a browser suite in the repository, coverage gaps          | **Done** |
+| 27    | Deployment — image, compose, probes, pipeline, honest limits        | **Done** |
+| 28    | Returns — credit and debit notes, contra accounts, GST reversal     | **Done** |
+| 29    | Reports — one catalogue over existing services, CSV and print       | **Done** |
+| 30    | Payroll — statutory deductions, four liabilities, no invented TDS   | **Done** |
+| 31    | Observability — structured logs, a gated scrape, honest scope       | **Done** |
+| 32    | Backups — a verified dump, and a restore with a safety catch        | **Done** |
+| 33    | Shared rate limits — one counter across instances, bounded wait     | **Done** |
+| 34    | Reports about one subject — account ledger, party statements        | **Done** |
+| 35    | Bank reconciliation — statement import, matching, the identity      | **Done** |
+| 36    | Payments — Razorpay checkout, signed webhooks, one upgrade path     | **Done** |
+| 37    | Multi-replica — two behind a balancer, draining shutdown, labels    | **Done** |
+| 38    | Off-machine backups — verified upload, retention, fetch back        | **Done** |
+| 39    | AI provider — the official SDK, refusals, truncation, caching       | **Done** |
+| 40    | Auditor — the missing GST check, true totals, honest partial runs   | **Done** |
+| 41    | Advisor — overdue payables, stock-out precision, detector isolation | **Done** |
 
 ---
 

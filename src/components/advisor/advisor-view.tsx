@@ -229,6 +229,7 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
 /** Where the figures behind each suggestion can be checked. */
 const DESTINATION: Record<Suggestion["key"], string> = {
   OVERDUE_RECEIVABLES: "/app/receipts",
+  OVERDUE_PAYABLES: "/app/payments",
   CASH_SHORTFALL_AHEAD: "/app/forecasting",
   SLOW_MOVING_STOCK: "/app/inventory",
   STOCK_OUT_RISK: "/app/inventory",
