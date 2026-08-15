@@ -121,6 +121,14 @@ export const PERMISSIONS = {
     module: "Accounting",
     description: "View financial statements",
   },
+  "banking.view": {
+    module: "Accounting",
+    description: "View bank accounts and reconciliation",
+  },
+  "banking.reconcile": {
+    module: "Accounting",
+    description: "Import statements and match them to entries",
+  },
 
   // Tax & GST
   "gst.view": {
@@ -235,6 +243,7 @@ const MANAGER_PERMISSIONS: readonly PermissionKey[] = [
   "payroll.view",
   "accounting.view",
   "accounting.statements.view",
+  "banking.view",
   "gst.view",
   "tax.view",
   "ai.accountant",
@@ -287,6 +296,8 @@ const ACCOUNTANT_PERMISSIONS: readonly PermissionKey[] = [
   "accounting.accounts.manage",
   "accounting.period.close",
   "accounting.statements.view",
+  "banking.view",
+  "banking.reconcile",
   "gst.view",
   "gst.prepare",
   "tax.view",
@@ -336,6 +347,7 @@ const AUDITOR_PERMISSIONS: readonly PermissionKey[] = [
   "payroll.view",
   "accounting.view",
   "accounting.statements.view",
+  "banking.view",
   "gst.view",
   "tax.view",
   "ai.auditor",
@@ -356,6 +368,7 @@ const TAX_CONSULTANT_PERMISSIONS: readonly PermissionKey[] = [
   "suppliers.view",
   "accounting.view",
   "accounting.statements.view",
+  "banking.view",
   "gst.view",
   "gst.prepare",
   "gst.settings",
