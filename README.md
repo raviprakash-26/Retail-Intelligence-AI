@@ -148,7 +148,7 @@ those queries returned, and shows them behind every answer. Where no provider is
 configured it says so and answers nothing, rather than substituting something
 plausible.
 
-**The auditor observes, and accuses nobody.** Nine checks run as queries over
+**The auditor observes, and accuses nobody.** Ten checks run as queries over
 the books — a ledger that does not balance, cash that goes below zero, a
 duplicate invoice number, a sale below cost — and each finding carries the
 evidence that made it fire alongside the ordinary reasons it usually happens.
@@ -426,7 +426,7 @@ src/
     analytics/             Trend from the ledger, breakdowns from the invoice lines
     forecast/              Revenue projection and the cash commitment roll-forward
     ai/                    Tool runner bound to one tenant, provider, transcript
-    auditor/               Nine checks as queries, the run, and settled findings
+    auditor/               Ten checks as queries, the run, and settled findings
     advisor/               Ten detectors over figures the platform already computes
     billing/               Entitlement resolution, usage counts, plan changes
     admin/                 Platform metrics, tenant metadata, plan and status changes
@@ -1582,9 +1582,16 @@ finding, and re-raising it every night is how a list teaches people to ignore it
 Each run records the rule-set version that produced it, so a finding that
 vanishes next month can be explained by the rules changing rather than the books.
 
-**A check that fails is named, not hidden.** The checks run independently and the
-run reports which could not be completed. An audit that returned nothing because
-one query broke would be worse than one that says which one broke.
+**A check that fails is named, not hidden — and the naming outlives the
+request.** The checks run independently and the run records which could not be
+completed. An audit that returned nothing because one query broke would be worse
+than one that says which one broke. That list is now stored on the run rather
+than returned once: it used to travel back with the response and nowhere else,
+so reopening the page showed the same score with nothing to say that part of the
+sweep had never run. A score from an incomplete sweep is a summary of what was
+looked at, not of what is there, and the page now says so beside the number —
+and refuses to show the green tick for "nothing found" when not everything
+looked.
 
 One check earned its keep before shipping: the backdated-entry rule fired on
 every newly registered company, because the opening-balance entry is dated the
@@ -1594,10 +1601,29 @@ excluded from anything measuring when work was entered — rather than tested
 around. A rule that fires on clean books on day one is precisely how a findings
 list gets ignored.
 
-Ten of the eleven rules in the catalogue have a check behind them. The eleventh,
-the GST register against the ledger, is reconciled on the GST page but is not yet
-part of an audit run — it is listed here because the catalogue is the honest
-place to see what is and is not covered.
+**Every rule in the catalogue now has a check behind it, and a test enforces
+that.** The GST register against the ledger was advertised in the catalogue from
+the first version — with a severity, a description and a recommendation — and
+nothing in the suite could ever produce it. The rule list is shown to the
+reader, so a registered shop was being told its tax register was cross-checked
+when no query compared the two. It now walks each month in the audited window
+and reads the same reconciliation the GST working paper computes for its own
+panel, so the auditor and the GST page cannot disagree; composition dealers and
+unregistered businesses are skipped rather than passed, because a finding about
+a return they never file is noise. A tripwire test now reads the check source
+and fails if any rule has no call site, if any call site names a rule that is
+not in the catalogue, or if a check is written but never wired into the suite —
+the three ways this particular gap can open.
+
+**Totals are totals.** The long-overdue check aggregates in the database over
+every matching invoice. It used to take the first fifty rows and sum those,
+presenting the result as the amount outstanding — a figure that was wrong,
+looked exact, and understated the problem more the worse it got. The negative
+cash check reports only days inside the audited period, while still accumulating
+the running balance from the beginning of the books: the position on a day is
+everything that ever went through the drawer, but a finding about a quarter
+nobody asked about would reappear on every run forever, because the past does
+not change.
 
 Passing every check is not an audit in the statutory sense, and the page says so.
 A purchase recorded against Rent passes every one of them and is still wrong.
@@ -2376,6 +2402,7 @@ query text is the only thing the browser controls.
 | 37    | Multi-replica — two behind a balancer, draining shutdown, labels  | **Done** |
 | 38    | Off-machine backups — verified upload, retention, fetch back      | **Done** |
 | 39    | AI provider — the official SDK, refusals, truncation, caching     | **Done** |
+| 40    | Auditor — the missing GST check, true totals, honest partial runs | **Done** |
 
 ---
 

@@ -182,7 +182,12 @@ async function createCompany(): Promise<Fixture> {
 
 async function sell(
   fixture: Fixture,
-  options: { quantity: number; rate: number; date?: string },
+  options: {
+    quantity: number;
+    rate: number;
+    date?: string;
+    paymentMode?: "CREDIT" | "CASH";
+  },
 ) {
   return createSale({
     companyId: fixture.companyId,
@@ -192,7 +197,7 @@ async function sell(
     input: {
       customerId: fixture.customerId,
       invoiceDate: options.date ?? daysBefore(1),
-      paymentMode: "CREDIT",
+      paymentMode: options.paymentMode ?? "CREDIT",
       placeOfSupply: "",
       priceIncludesTax: false,
       notes: "",
@@ -513,5 +518,126 @@ describe("tenant isolation", () => {
       select: { status: true },
     });
     expect(untouched.status).toBe(AuditFindingStatus.OPEN);
+  });
+});
+
+describe("figures a person might act on", () => {
+  it("totals every overdue invoice, not the page of them it fetched", async () => {
+    // The defect this replaces: the check took the first fifty overdue
+    // invoices and added those up, then presented the result as the amount
+    // outstanding. A shop with more than fifty saw a number that was wrong,
+    // looked exact, and understated the problem more the worse it got.
+    const fixture = await createCompany();
+
+    const COUNT = 55;
+    const RATE = 100;
+    for (let index = 0; index < COUNT; index += 1) {
+      await sell(fixture, { quantity: 1, rate: RATE, date: daysBefore(1) });
+    }
+
+    // Document numbering is provisioned per fiscal year, so invoices cannot be
+    // dated a year back in a fresh company. The window is moved forward
+    // instead: the check measures against the end of the audited period, so a
+    // period ending well ahead makes yesterday's invoices long overdue —
+    // which is the condition under test, reached from the other side.
+    const report = await runAudit({
+      companyId: fixture.companyId,
+      from: WINDOW.from,
+      to: new Date(TODAY.getTime() + 200 * DAY),
+    });
+    const overdue = report.findings.find(
+      (entry) => entry.ruleKey === "LONG_OVERDUE_RECEIVABLE",
+    );
+    expect(overdue).toBeDefined();
+
+    // Against the books rather than against a constant: whatever the tax rate
+    // adds, the finding has to agree with what the invoices actually say.
+    const owed = await prisma.sale.aggregate({
+      where: { companyId: fixture.companyId, status: "POSTED" },
+      _sum: { totalAmount: true, paidAmount: true },
+      _count: true,
+    });
+    const expected =
+      Number(owed._sum.totalAmount) - Number(owed._sum.paidAmount);
+
+    expect(overdue!.evidence.invoices).toBe(COUNT);
+    expect(Number(overdue!.evidence.outstanding)).toBeCloseTo(expected, 2);
+    // The point of the fix: more than a page of invoices, and the total is not
+    // the total of a page.
+    expect(Number(overdue!.evidence.outstanding)).toBeGreaterThan(
+      50 * RATE * 1.0,
+    );
+  }, 120_000);
+
+  it("reports cash going negative only for days inside the audited period", async () => {
+    // The balance still has to accumulate from the beginning of the books —
+    // a drawer's position today is everything that ever went through it — but
+    // a day outside the window is answering a question nobody asked, and it
+    // would reappear on every run forever because the past does not change.
+    const fixture = await createCompany();
+
+    // Cash goes under on day 5 and is back above water by day 3.
+    await createPayment({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        kind: "SUPPLIER",
+        partyId: fixture.supplierId,
+        date: daysBefore(5),
+        paymentMode: "CASH",
+        amount: 80_000, // more than the ₹20,000 opening balance
+        referenceNo: "",
+        notes: "",
+        allocations: [],
+      } satisfies PaymentInput,
+    });
+    await sell(fixture, {
+      quantity: 2_000,
+      rate: 100,
+      date: daysBefore(3),
+      paymentMode: "CASH",
+    });
+
+    const inside = await runAudit({ companyId: fixture.companyId, ...WINDOW });
+    expect(keysOf(inside)).toContain("NEGATIVE_CASH_BALANCE");
+
+    // The same books over a window that opens after the drawer recovered. The
+    // balance still has to accumulate from the beginning — if it restarted at
+    // the period opening this would report nil rather than the true position —
+    // but no day inside the window closes below zero, so nothing is raised.
+    const after = await runAudit({
+      companyId: fixture.companyId,
+      from: new Date(TODAY.getTime() - 2 * DAY),
+      to: WINDOW.to,
+    });
+    expect(keysOf(after)).not.toContain("NEGATIVE_CASH_BALANCE");
+  }, 60_000);
+});
+
+describe("when part of the sweep does not run", () => {
+  it("keeps the incompleteness beside the score it qualifies", async () => {
+    // This used to be computed, returned once and forgotten. Reopening the
+    // page showed the same score with nothing to say that two of the checks
+    // behind it had never run — a partial sweep reading as a clean one.
+    const fixture = await createCompany();
+    await audit(fixture);
+
+    await prisma.auditRun.updateMany({
+      where: { companyId: fixture.companyId },
+      data: { incompleteChecks: ["gst", "stock"] },
+    });
+
+    const readBack = await getLatestAudit({ companyId: fixture.companyId });
+    expect(readBack.run?.incomplete).toEqual(["gst", "stock"]);
+    expect(readBack.run?.partial).toBe(true);
+  });
+
+  it("is not partial when every check ran", async () => {
+    const fixture = await createCompany();
+    const report = await audit(fixture);
+
+    expect(report.run?.incomplete).toEqual([]);
+    expect(report.run?.partial).toBe(false);
   });
 });

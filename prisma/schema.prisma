@@ -2054,6 +2054,11 @@ model AuditRun {
   riskLevel     AuditSeverity @default(LOW)
   findingsCount Int       @default(0)
   rulesVersion  String
+  /// Checks that could not be completed on this run, named rather than hidden.
+  /// Persisted because a score computed from an incomplete sweep must never be
+  /// read later as a clean bill of health — the caveat has to outlive the
+  /// request that produced it.
+  incompleteChecks String[] @default([])
   startedAt     DateTime  @default(now())
   completedAt   DateTime?
   triggeredById String?   @db.Uuid

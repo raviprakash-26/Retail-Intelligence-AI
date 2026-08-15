@@ -128,11 +128,25 @@ export function AuditorView({ report }: { report: AuditReport }) {
       {report.findings.length === 0 ? (
         report.run ? (
           <div className="flex items-start gap-2 rounded-xl border px-5 py-4">
-            <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success-foreground" />
+            {report.run.partial ? (
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning-foreground" />
+            ) : (
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success-foreground" />
+            )}
             <p className="text-sm leading-relaxed">
-              Nothing in your books trips any of these checks. That is not the
-              same as everything being right — a purchase recorded against Rent
-              passes every one of them and is still wrong.
+              {report.run.partial ? (
+                <>
+                  The checks that ran found nothing — but not all of them ran,
+                  so this is not a clean result. It says only that the checks
+                  listed above were not the ones that looked.
+                </>
+              ) : (
+                <>
+                  Nothing in your books trips any of these checks. That is not
+                  the same as everything being right — a purchase recorded
+                  against Rent passes every one of them and is still wrong.
+                </>
+              )}
             </p>
           </div>
         ) : null
@@ -186,6 +200,13 @@ function ScorePanel({ report }: { report: AuditReport }) {
         </p>
       </div>
       <p className="border-t px-5 py-3 text-xs leading-relaxed text-muted-foreground">
+        {run.partial ? (
+          <>
+            <span className="font-medium text-warning-foreground">
+              This score covers only the checks that ran.
+            </span>{" "}
+          </>
+        ) : null}
         {SCORE_DISCLAIMER} It starts at 100 and each finding takes off a fixed
         amount for its severity, so you can work it out yourself.
       </p>

@@ -38,6 +38,15 @@ export type RunSummary = {
   completedAt: string | null;
   /** Checks that could not be completed, named rather than hidden. */
   incomplete: string[];
+  /**
+   * True where part of the sweep did not run.
+   *
+   * Kept beside the score rather than left for a caller to derive, because the
+   * derivation is the thing that gets forgotten. A score from an incomplete
+   * sweep is a summary of what was looked at, not of what is there, and it must
+   * never be read as a clean bill of health.
+   */
+  partial: boolean;
 };
 
 export type StoredFinding = {
@@ -166,16 +175,19 @@ export async function runAudit(params: {
       score,
       riskLevel: riskLevel as AuditSeverity,
       findingsCount: findings.length,
+      // Stored, not just returned. This used to travel back with the response
+      // and nowhere else, so reopening the page showed the same score with no
+      // sign that two of the checks behind it had never run.
+      incompleteChecks: failed,
       completedAt: new Date(),
     },
   });
 
-  return getLatestAudit({ companyId: params.companyId, incomplete: failed });
+  return getLatestAudit({ companyId: params.companyId });
 }
 
 export async function getLatestAudit(params: {
   companyId: string;
-  incomplete?: string[];
 }): Promise<AuditReport> {
   const [run, open, settled] = await Promise.all([
     prisma.auditRun.findFirst({
@@ -189,6 +201,7 @@ export async function getLatestAudit(params: {
         riskLevel: true,
         findingsCount: true,
         rulesVersion: true,
+        incompleteChecks: true,
         startedAt: true,
         completedAt: true,
       },
@@ -242,7 +255,8 @@ export async function getLatestAudit(params: {
           rulesVersion: run.rulesVersion,
           startedAt: run.startedAt.toISOString(),
           completedAt: run.completedAt?.toISOString() ?? null,
-          incomplete: params.incomplete ?? [],
+          incomplete: run.incompleteChecks,
+          partial: run.incompleteChecks.length > 0,
         }
       : null,
     findings: open.map(toStored),
