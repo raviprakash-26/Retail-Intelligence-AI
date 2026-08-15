@@ -101,12 +101,36 @@ test.describe("what the pages promise", () => {
     expect(text).toMatch(/between|to |range|not enough|too (short|uneven)/);
   });
 
-  test("no payment can be taken, and the page says so", async ({ page }) => {
+  test("says whether a payment can be taken, and offers no button when it cannot", async ({
+    page,
+  }) => {
+    // Razorpay is integrated, but this installation has no credentials — which
+    // is the state most installations will be in. The page has to say that
+    // plainly rather than showing a button that resolves against nothing.
     const text = await readModule(page, "/app/settings/billing");
     expect(text).toMatch(
-      /no payment provider is connected|cannot take a payment/,
+      /no payment provider is connected|cannot take a payment|keys are missing/i,
     );
+    await expect(
+      page.getByRole("button", { name: /^Pay and move to/ }),
+    ).toHaveCount(0);
     // And the promise that matters most on that page.
     expect(text).toContain("unreadable");
+  });
+
+  test("the payment webhook is not a page, and answers nothing useful unconfigured", async ({
+    page,
+  }) => {
+    // The one publicly reachable endpoint that could change what a business has
+    // paid for. With no secret configured it must not exist at all — an
+    // endpoint that accepted unsigned bodies would be worse than no endpoint.
+    const posted = await page.request.post("/api/webhooks/razorpay", {
+      data: { event: "payment.captured" },
+    });
+    expect(posted.status()).toBe(404);
+    expect(await posted.text()).not.toMatch(/stack|prisma|secret/i);
+
+    const fetched = await page.request.get("/api/webhooks/razorpay");
+    expect(fetched.status()).toBe(404);
   });
 });

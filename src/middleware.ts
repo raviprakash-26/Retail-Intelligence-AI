@@ -67,29 +67,61 @@ function hasSessionCookie(request: NextRequest): boolean {
  */
 const STRICT_PREFIXES = ["/app", "/admin", "/onboarding"] as const;
 
+/**
+ * Hosts the Razorpay checkout widget needs, and nothing else.
+ *
+ * Card details must never touch this server, which means the payment form has
+ * to be the provider's own — and their script and iframe have to be allowed
+ * through the policy for that to work. This is a genuine widening of the
+ * policy, so it is applied **only where payments are switched on**: an
+ * installation that takes no money keeps the tighter policy it has today
+ * rather than inheriting a hole for a feature it never uses.
+ *
+ * Read from `process.env` directly rather than through the validated `env`
+ * module: middleware runs on the edge runtime, where importing the server-side
+ * environment schema would pull in far more than belongs there.
+ */
+const RAZORPAY_HOSTS = {
+  script: ["https://checkout.razorpay.com"],
+  frame: ["https://api.razorpay.com", "https://checkout.razorpay.com"],
+  connect: ["https://api.razorpay.com", "https://lumberjack.razorpay.com"],
+} as const;
+
+function paymentsEnabled(): boolean {
+  return process.env.PAYMENTS_DRIVER === "razorpay";
+}
+
 function contentSecurityPolicy(params: {
   nonce: string;
   strict: boolean;
   development: boolean;
+  payments: boolean;
 }): string {
   const script = params.strict
     ? `'self' 'nonce-${params.nonce}'`
     : "'self' 'unsafe-inline'";
 
+  const extra = (hosts: readonly string[]) =>
+    params.payments ? ` ${hosts.join(" ")}` : "";
+
   return [
     "default-src 'self'",
     // The dev server needs eval for fast refresh. Production never gets it.
-    `script-src ${script}${params.development ? " 'unsafe-eval'" : ""}`,
+    `script-src ${script}${params.development ? " 'unsafe-eval'" : ""}${extra(RAZORPAY_HOSTS.script)}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    // Every outbound call the product makes — the AI provider, a payment
-    // gateway — is made by the server. The browser talks only to us.
-    "connect-src 'self'",
+    // Every outbound call the product makes — the AI provider, the payment
+    // gateway's API — is made by the server. The browser talks only to us, and
+    // to the checkout widget where one is configured.
+    `connect-src 'self'${extra(RAZORPAY_HOSTS.connect)}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
+    // The checkout itself is an iframe served by the provider. Without this it
+    // is blocked and the payment cannot be made at all.
+    `frame-src 'self'${extra(RAZORPAY_HOSTS.frame)}`,
     "worker-src 'self' blob:",
     "manifest-src 'self'",
     ...(params.development ? [] : ["upgrade-insecure-requests"]),
@@ -105,6 +137,7 @@ export function middleware(request: NextRequest): NextResponse {
     nonce,
     strict: STRICT_PREFIXES.some((prefix) => pathname.startsWith(prefix)),
     development: process.env.NODE_ENV !== "production",
+    payments: paymentsEnabled(),
   });
 
   const headers = new Headers(request.headers);

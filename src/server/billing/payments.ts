@@ -1,28 +1,27 @@
 import "server-only";
 import { env } from "@/lib/env";
+import { razorpayCredentials } from "./razorpay";
 
 /**
  * Taking money.
  *
- * **This build cannot charge anybody.** The environment schema knows about
- * Razorpay and Stripe, the subscription tables carry the provider columns, and
- * this module is the seam an integration goes into — but no integration has
- * been written, and nothing here pretends otherwise.
+ * Razorpay is integrated. Whether *this* installation can charge anybody
+ * depends on whether it has been given credentials, and most will not have
+ * been — so the honest states are enumerated here rather than assumed, and the
+ * billing page says which one it is in.
  *
- * That refusal is the point. A billing page with a working-looking "Pay now"
- * button that resolves against nothing would be a lie told to a shopkeeper
- * about their own money, and a fake success would leave a subscription marked
- * paid that no bank has ever heard of. So the page says plainly that no
- * payments can be taken here, in the same way the GST page says it cannot file
- * and the assistant says when it has no provider.
+ * The webhook secret is required, not optional. Without it there is no way to
+ * verify that a payment notification came from the provider, and a checkout
+ * that can be opened but never confirmed would take somebody's money and leave
+ * their plan unchanged. Refusing to offer the button is the correct behaviour;
+ * offering one that cannot complete is not.
  *
- * What still works without a provider is everything that costs nothing:
- * starting a trial, moving to a cheaper plan, cancelling, and reading every
- * figure on the page.
+ * What works without any provider is everything that costs nothing: starting a
+ * trial, moving to a cheaper plan, cancelling, and reading every figure.
  */
 
 export type PaymentsStatus =
-  | { available: true; provider: "razorpay" | "stripe" }
+  | { available: true; provider: "razorpay" }
   | { available: false; reason: string };
 
 export function paymentsStatus(): PaymentsStatus {
@@ -34,12 +33,33 @@ export function paymentsStatus(): PaymentsStatus {
     };
   }
 
-  // Configured, but this build has no code that talks to them. Saying so is
-  // better than a button that appears to work.
-  return {
-    available: false,
-    reason: `This installation is configured for ${env.PAYMENTS_DRIVER}, which this build does not talk to yet. No payment can be taken.`,
-  };
+  if (env.PAYMENTS_DRIVER === "stripe") {
+    // The seam is provider-shaped, but only one provider has been written.
+    // Saying so beats a button that resolves against nothing.
+    return {
+      available: false,
+      reason:
+        "This installation is configured for Stripe, which this build does not talk to. Razorpay is the provider that has been integrated.",
+    };
+  }
+
+  if (!razorpayCredentials()) {
+    return {
+      available: false,
+      reason:
+        "Razorpay is selected but its keys are missing, so no payment can be taken.",
+    };
+  }
+
+  if (!env.RAZORPAY_WEBHOOK_SECRET) {
+    return {
+      available: false,
+      reason:
+        "Razorpay is connected but RAZORPAY_WEBHOOK_SECRET is not set. Without it a payment cannot be confirmed, so no payment will be started.",
+    };
+  }
+
+  return { available: true, provider: "razorpay" };
 }
 
 /** Whether a plan change needs money to change hands before it can apply. */

@@ -193,15 +193,16 @@ export async function getBillingOverview(
 
 export type PlanChangeResult =
   | { changed: true; planName: string; overLimit: UsageLine[] }
-  | { changed: false; reason: string };
+  | { changed: false; reason: string; needsCheckout?: boolean };
 
 /**
  * Moving between plans.
  *
  * Downwards and sideways happen immediately: nothing has to be collected, so
- * there is nothing to wait for. Upwards needs a payment, and this build cannot
- * take one — so it refuses and says why, rather than granting an upgrade nobody
- * paid for or writing a paid invoice no bank has seen.
+ * there is nothing to wait for. Upwards needs a payment, and this function does
+ * not take one — it reports that a checkout is needed and stops. The plan moves
+ * only when the provider confirms the money arrived, which happens in the
+ * webhook handler. Nothing here grants an upgrade nobody has paid for.
  *
  * A downgrade is never blocked by what the business has already recorded. If
  * they have five users and move to a plan with two, all five keep working and
@@ -259,10 +260,15 @@ export async function changePlan(params: {
         reason: `Moving to ${target.name} costs more than your current plan, so it needs a payment. ${payments.reason}`,
       };
     }
+    // Payments are available, so this is a checkout rather than a refusal.
+    // `changePlan` deliberately does not open one itself: a plan change that
+    // silently started a payment would be a different act from the one the
+    // caller asked for. The billing page calls `startPlanUpgradeAction`, and
+    // the plan moves when the webhook confirms the money arrived.
     return {
       changed: false,
-      reason:
-        "Taking the payment for an upgrade has not been built yet, and nothing here will pretend to have taken one.",
+      reason: `Moving to ${target.name} costs more than your current plan, so it has to be paid for before it applies.`,
+      needsCheckout: true,
     };
   }
 
