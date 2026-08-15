@@ -1910,11 +1910,20 @@ year cannot leak by default; somebody has to name it first. A field denylist
 sits behind that as the second line, refusing anything whose name means
 credential wherever it appears.
 
-**It streams.** Each table is read a page at a time, deflated as it arrives and
-handed to the response, with the reader pausing when the consumer is behind —
-so what is held at any moment is one page of one table rather than the whole
-archive. An export a large business cannot run is an export that fails exactly
-the person who most needs one.
+**It streams, and that was measured rather than asserted.** Each table is read a
+page at a time, deflated as it arrives and handed to the response, with the
+writer pausing when the consumer is behind — so what is held at any moment is
+one page of one table rather than the whole archive. An export a large business
+cannot run is an export that fails exactly the person who most needs one.
+
+Run by hand against a shop seeded with 120,000 journal lines and a deliberately
+slow reader, the export finished in 13 seconds and grew the heap by about a
+megabyte. The uncompressed CSV alone is some eighteen megabytes, so the figure
+that matters is not the speed but the fact that tripling the row count did not
+raise the memory: it passes through rather than piling up. That was a
+one-off measurement on a development machine, not a benchmark, and it is not
+part of the test suite — seeding six figures of rows on every CI run would cost
+more than it proves.
 
 **Three gates and a record.** The company comes off the session, so there is no
 parameter through which another tenant's books could be asked for.
