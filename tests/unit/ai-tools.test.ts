@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai/tools";
 import {
   PROMPT_RULES,
+  statedFigures,
   statesUnverifiedFigures,
   systemPrompt,
 } from "@/lib/ai/prompt";
@@ -232,5 +233,101 @@ describe("marking a figure nothing was asked for", () => {
     expect(statesUnverifiedFigures("There were 4 invoices last week.", 0)).toBe(
       false,
     );
+  });
+});
+
+describe("checking a figure against what the tools actually returned", () => {
+  /** A tool result in the shape one really arrives in: amounts as strings. */
+  const statements = {
+    revenue: "420000.0000",
+    costOfSales: "294000.0000",
+    grossProfit: "126000.0000",
+    expenses: { rent: "30000.0000", salaries: "48000.0000" },
+  };
+
+  it("passes a figure that came from a tool", () => {
+    expect(
+      statesUnverifiedFigures("Your revenue was ₹4,20,000.", [statements]),
+    ).toBe(false);
+  });
+
+  it("flags a figure the model worked out for itself", () => {
+    // The failure counting tool calls could never see. Revenue and expenses
+    // were both fetched, so a count says "verified" — but ₹48,000 taken off
+    // ₹1,26,000 is arithmetic the model did, and 78,000 appears in no result.
+    // The prompt forbids exactly this and nothing else enforces it.
+    expect(
+      statesUnverifiedFigures("After salaries your profit is ₹78,000.", [
+        statements,
+      ]),
+    ).toBe(true);
+  });
+
+  it("reads Indian digit grouping as the same number", () => {
+    // ₹1,26,000 and "126000.0000" are the same figure written two ways, and
+    // flagging the answer because the formatting differs would make the mark
+    // meaningless within a week.
+    expect(
+      statesUnverifiedFigures("Gross profit came to ₹1,26,000.", [statements]),
+    ).toBe(false);
+  });
+
+  it("matches a figure quoted to the paisa", () => {
+    expect(
+      statesUnverifiedFigures("The rent line is 30000.00 for the period.", [
+        statements,
+      ]),
+    ).toBe(false);
+  });
+
+  it("finds a figure however deeply it was nested in the result", () => {
+    expect(
+      statesUnverifiedFigures("Rent was ₹30,000.", [
+        { sections: [{ rows: [{ label: "Rent", amount: "30000.0000" }] }] },
+      ]),
+    ).toBe(false);
+  });
+
+  it("flags every stated figure, not only the first", () => {
+    expect(
+      statesUnverifiedFigures("Revenue was ₹4,20,000 and net profit ₹99,999.", [
+        statements,
+      ]),
+    ).toBe(true);
+  });
+
+  it("says nothing about an answer that quotes no money", () => {
+    expect(
+      statesUnverifiedFigures("I cannot post that. Use the sales page.", [
+        statements,
+      ]),
+    ).toBe(false);
+  });
+
+  it("flags money quoted when every tool call failed", () => {
+    // A failed call has no result, so nothing in the turn can support a figure.
+    expect(
+      statesUnverifiedFigures("Your revenue was ₹4,20,000.", [undefined]),
+    ).toBe(true);
+  });
+
+  it("still answers a caller that only knows how many tools ran", () => {
+    // The old signature. It cannot check figures, and must not pretend to.
+    expect(statesUnverifiedFigures("Revenue was ₹4,20,000.", 1)).toBe(false);
+    expect(statesUnverifiedFigures("Revenue was ₹4,20,000.", 0)).toBe(true);
+  });
+});
+
+describe("reading the figures out of an answer", () => {
+  it("takes rupee amounts and amounts written to the paisa", () => {
+    expect(statedFigures("₹1,04,522 and 3,000.50 and ₹90")).toEqual([
+      104522, 3000.5, 90,
+    ]);
+  });
+
+  it("leaves bare counts and years alone", () => {
+    // "3 customers" and "2026" are not claims about money, and treating them
+    // as such would mark every answer ever written.
+    expect(statedFigures("3 customers in 2026 across 12 invoices")).toEqual([]);
   });
 });

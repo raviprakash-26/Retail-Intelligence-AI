@@ -97,7 +97,13 @@ function toStored(row: {
     toolCalls,
     unverified:
       row.role === AiRole.ASSISTANT &&
-      statesUnverifiedFigures(row.content, toolCalls.length),
+      // The results themselves, not how many there were. A turn that fetched
+      // revenue and expenses and then stated a profit called two tools and
+      // produced a figure neither of them returned.
+      statesUnverifiedFigures(
+        row.content,
+        toolCalls.map((call) => call.result),
+      ),
     errorMessage: row.errorMessage,
     createdAt: row.createdAt.toISOString(),
   };
