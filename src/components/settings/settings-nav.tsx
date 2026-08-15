@@ -8,6 +8,7 @@ import {
   CreditCard,
   Download,
   MapPin,
+  Upload,
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -55,6 +56,12 @@ const ITEMS = [
     label: "Your data",
     icon: Download,
     permission: "data.export",
+  },
+  {
+    href: "/app/settings/import",
+    label: "Bring data in",
+    icon: Upload,
+    permission: "data.import",
   },
 ] as const;
 

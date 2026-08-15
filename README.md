@@ -1949,6 +1949,42 @@ the other — and a second walks every row of every file asserting the
 `companyId` column holds only the company that asked. Removing the `where`
 clause fails both.
 
+**And bringing data in.** The other half, and the one that decides whether a
+shop ever gets started. Every business moving onto this arrives with a
+spreadsheet — from Tally, from Excel, from whatever their last accountant
+used — and without an import, onboarding means typing four hundred products in
+by hand. Products, customers and suppliers come in from CSV, under whatever
+headings the file already has: "Item Code" and "Product Code" and "SKU" are one
+column, "₹1,04,522.50" and "1,110" are numbers, and a heading nothing claims is
+named rather than silently dropped. It is the same matching the bank statement
+parser does, for the same reason.
+
+**Nothing is written until somebody has seen what would be written.** An import
+is checked first and reported row by row: what would be created, what is already
+here, and exactly which row and column is wrong where something is. The row
+number is the one in the file — blank lines are counted, not skipped, because a
+person told "row 6 is wrong" needs to be able to open their spreadsheet and go
+to row 6. A file with one bad row is not committed at all: fixing it and
+uploading again costs a minute, and discovering later that row 194 never arrived
+costs a great deal more.
+
+**Rows arrive through the ordinary services.** A product with opening stock
+posts the same balanced journal entry it would have posted had somebody typed it
+into the form, and a customer's opening balance is an entry rather than a number
+stored beside a name. There is deliberately no faster path that skips the
+ledger, because a faster path that skips the ledger is how the masters and the
+books end up disagreeing.
+
+**Re-running is safe.** A code already present is skipped rather than
+duplicated, and a code the file repeats inside itself is skipped too — so an
+import interrupted at row 300 can simply be run again. Nothing updates an
+existing record: quietly changing a price somebody has since corrected, because
+it was still old in a spreadsheet, is not a decision an import gets to make.
+
+Sales, purchases and journal entries are deliberately not importable. A year of
+invoices would mean inventing the stock movements and tax entries behind them,
+and this product would be asserting a ledger it never posted.
+
 ---
 
 ## Platform administration
@@ -2528,52 +2564,53 @@ query text is the only thing the browser controls.
 
 ## Roadmap
 
-| Phase | Scope                                                                 | Status   |
-| ----- | --------------------------------------------------------------------- | -------- |
-| 1     | Foundation, schema, design system, public site, auth UI               | **Done** |
-| 2     | Authentication — sessions, verification, rate limiting, audit         | **Done** |
-| 3     | Company onboarding — settings, branches, team, invitations            | **Done** |
-| 4     | Application shell — navigation, search, dashboard                     | **Done** |
-| 5     | Master data — products, parties, staff, opening balances              | **Done** |
-| 6     | Sales — invoicing, GST split, stock issue, void                       | **Done** |
-| 7     | Purchases — bills, input tax credit, landed cost, void                | **Done** |
-| 8     | Expenses — categories, GST, capital vs revenue, void                  | **Done** |
-| 9     | Receipts & payments — allocation, ageing, void                        | **Done** |
-| 10    | Accounting engine — chart of accounts, balances, the equation         | **Done** |
-| 11    | Journal — register, manual entries, reversal                          | **Done** |
-| 12    | Ledger — running balance, party statements                            | **Done** |
-| 13    | Trial balance — two columns, and what balancing proves                | **Done** |
-| 14    | Financial statements — trading, P&L, balance sheet                    | **Done** |
-| 15    | Inventory — positions, stock cards, reconciliation, counts            | **Done** |
-| 16    | GST preparation — GSTR-1 working paper, set-off, reconciled           | **Done** |
-| 17    | Income tax — computation, depreciation, 44AD, advance tax             | **Done** |
-| 18    | Analytics — trend, products, customers, ratios, health                | **Done** |
-| 19    | Forecasting — revenue band, cash commitments, refusals                | **Done** |
-| 20    | AI Accountant — read-only tools, traceable answers                    | **Done** |
-| 21    | AI Auditor — deterministic checks, observations not allegations       | **Done** |
-| 22    | AI Business Advisor — detectors, bands, and when to ignore them       | **Done** |
-| 23    | Subscriptions — entitlements, allowances, server-side gates           | **Done** |
-| 24    | Admin panel — metadata only, no impersonation, logged                 | **Done** |
-| 25    | Security hardening — CSP, origin coverage, bundle scanning            | **Done** |
-| 26    | Testing — a browser suite in the repository, coverage gaps            | **Done** |
-| 27    | Deployment — image, compose, probes, pipeline, honest limits          | **Done** |
-| 28    | Returns — credit and debit notes, contra accounts, GST reversal       | **Done** |
-| 29    | Reports — one catalogue over existing services, CSV and print         | **Done** |
-| 30    | Payroll — statutory deductions, four liabilities, no invented TDS     | **Done** |
-| 31    | Observability — structured logs, a gated scrape, honest scope         | **Done** |
-| 32    | Backups — a verified dump, and a restore with a safety catch          | **Done** |
-| 33    | Shared rate limits — one counter across instances, bounded wait       | **Done** |
-| 34    | Reports about one subject — account ledger, party statements          | **Done** |
-| 35    | Bank reconciliation — statement import, matching, the identity        | **Done** |
-| 36    | Payments — Razorpay checkout, signed webhooks, one upgrade path       | **Done** |
-| 37    | Multi-replica — two behind a balancer, draining shutdown, labels      | **Done** |
-| 38    | Off-machine backups — verified upload, retention, fetch back          | **Done** |
-| 39    | AI provider — the official SDK, refusals, truncation, caching         | **Done** |
-| 40    | Auditor — the missing GST check, true totals, honest partial runs     | **Done** |
-| 41    | Advisor — overdue payables, stock-out precision, detector isolation   | **Done** |
-| 42    | Accountant — figures checked against results, a cheaper chart, paging | **Done** |
-| 43    | Data export — a shop's whole books as a zip, and never a credential   | **Done** |
-| 44    | Accessibility — an axe gate, and the four colour defects it found     | **Done** |
+| Phase | Scope                                                                   | Status   |
+| ----- | ----------------------------------------------------------------------- | -------- |
+| 1     | Foundation, schema, design system, public site, auth UI                 | **Done** |
+| 2     | Authentication — sessions, verification, rate limiting, audit           | **Done** |
+| 3     | Company onboarding — settings, branches, team, invitations              | **Done** |
+| 4     | Application shell — navigation, search, dashboard                       | **Done** |
+| 5     | Master data — products, parties, staff, opening balances                | **Done** |
+| 6     | Sales — invoicing, GST split, stock issue, void                         | **Done** |
+| 7     | Purchases — bills, input tax credit, landed cost, void                  | **Done** |
+| 8     | Expenses — categories, GST, capital vs revenue, void                    | **Done** |
+| 9     | Receipts & payments — allocation, ageing, void                          | **Done** |
+| 10    | Accounting engine — chart of accounts, balances, the equation           | **Done** |
+| 11    | Journal — register, manual entries, reversal                            | **Done** |
+| 12    | Ledger — running balance, party statements                              | **Done** |
+| 13    | Trial balance — two columns, and what balancing proves                  | **Done** |
+| 14    | Financial statements — trading, P&L, balance sheet                      | **Done** |
+| 15    | Inventory — positions, stock cards, reconciliation, counts              | **Done** |
+| 16    | GST preparation — GSTR-1 working paper, set-off, reconciled             | **Done** |
+| 17    | Income tax — computation, depreciation, 44AD, advance tax               | **Done** |
+| 18    | Analytics — trend, products, customers, ratios, health                  | **Done** |
+| 19    | Forecasting — revenue band, cash commitments, refusals                  | **Done** |
+| 20    | AI Accountant — read-only tools, traceable answers                      | **Done** |
+| 21    | AI Auditor — deterministic checks, observations not allegations         | **Done** |
+| 22    | AI Business Advisor — detectors, bands, and when to ignore them         | **Done** |
+| 23    | Subscriptions — entitlements, allowances, server-side gates             | **Done** |
+| 24    | Admin panel — metadata only, no impersonation, logged                   | **Done** |
+| 25    | Security hardening — CSP, origin coverage, bundle scanning              | **Done** |
+| 26    | Testing — a browser suite in the repository, coverage gaps              | **Done** |
+| 27    | Deployment — image, compose, probes, pipeline, honest limits            | **Done** |
+| 28    | Returns — credit and debit notes, contra accounts, GST reversal         | **Done** |
+| 29    | Reports — one catalogue over existing services, CSV and print           | **Done** |
+| 30    | Payroll — statutory deductions, four liabilities, no invented TDS       | **Done** |
+| 31    | Observability — structured logs, a gated scrape, honest scope           | **Done** |
+| 32    | Backups — a verified dump, and a restore with a safety catch            | **Done** |
+| 33    | Shared rate limits — one counter across instances, bounded wait         | **Done** |
+| 34    | Reports about one subject — account ledger, party statements            | **Done** |
+| 35    | Bank reconciliation — statement import, matching, the identity          | **Done** |
+| 36    | Payments — Razorpay checkout, signed webhooks, one upgrade path         | **Done** |
+| 37    | Multi-replica — two behind a balancer, draining shutdown, labels        | **Done** |
+| 38    | Off-machine backups — verified upload, retention, fetch back            | **Done** |
+| 39    | AI provider — the official SDK, refusals, truncation, caching           | **Done** |
+| 40    | Auditor — the missing GST check, true totals, honest partial runs       | **Done** |
+| 41    | Advisor — overdue payables, stock-out precision, detector isolation     | **Done** |
+| 42    | Accountant — figures checked against results, a cheaper chart, paging   | **Done** |
+| 43    | Data export — a shop's whole books as a zip, and never a credential     | **Done** |
+| 44    | Accessibility — an axe gate, and the four colour defects it found       | **Done** |
+| 45    | Data import — a shop's spreadsheet in, previewed before anything writes | **Done** |
 
 ---
 

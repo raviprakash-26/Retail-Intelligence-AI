@@ -179,7 +179,20 @@ function findColumn(
  * KUMAR, BANGALORE"), so splitting on commas would shift every column after the
  * description and silently read an amount out of the wrong cell.
  */
-export function parseCsv(text: string): string[][] {
+export function parseCsv(
+  text: string,
+  options: {
+    /**
+     * Keep rows that are entirely empty.
+     *
+     * A statement import wants them gone — a blank line between sections is
+     * noise. An import that reports "row 6 is wrong" so somebody can open their
+     * spreadsheet and go to row 6 needs them, because dropping them silently
+     * shifts every line number after the first gap.
+     */
+    keepBlankRows?: boolean;
+  } = {},
+): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";
@@ -233,6 +246,7 @@ export function parseCsv(text: string): string[][] {
   // A file that does not end in a newline still has a last row.
   if (field.length > 0 || row.length > 0) endRow();
 
+  if (options.keepBlankRows) return rows;
   return rows.filter((entry) => entry.some((cell) => cell.trim() !== ""));
 }
 
