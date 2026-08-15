@@ -1,15 +1,18 @@
 import "server-only";
 import {
   DocumentStatus,
+  GstRegistrationType,
   JournalStatus,
   VoucherType,
   type Prisma,
 } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
+import { compare, isNegative, money, PRESENTATION_SCALE } from "@/lib/money";
 import { CASH_PAYMENT_LIMIT } from "@/lib/tax/presumptive";
 import { RULES, type RuleKey, type Severity } from "@/lib/auditor/rules";
 import { getTrialBalance } from "@/server/accounting/trial-balance-service";
+import { getGstWorkingPaper } from "@/server/gst/gst-return-service";
 import { reconcileStock } from "@/server/inventory/inventory-report";
 
 /**
@@ -85,11 +88,20 @@ async function checkLedgerBalances(context: CheckContext): Promise<Finding[]> {
 type DayRow = { day: Date; running: Prisma.Decimal };
 
 /**
- * The first day the cash account closes below zero.
+ * The first day inside the audited period that cash closes below zero.
  *
  * A running balance in the database rather than in JavaScript: a busy shop's
  * cash account is tens of thousands of lines, and the question is only "did it
- * ever go under", which SQL answers without moving any of them.
+ * go under", which SQL answers without moving any of them.
+ *
+ * Two dates matter here and they are not the same one. The balance has to
+ * accumulate from the **beginning of the books**, because a drawer's position
+ * today is the sum of everything that ever went through it — starting the
+ * running total at the period opening would report a shop as overdrawn for
+ * every period that begins mid-month. But only days **inside the audited
+ * window** are reported: an audit of this quarter that surfaces a day in a
+ * quarter nobody asked about is answering a different question, and the finding
+ * reappears on every run forever because the past does not change.
  */
 async function checkNegativeCash(context: CheckContext): Promise<Finding[]> {
   const rows = await prisma.$queryRaw<DayRow[]>`
@@ -101,18 +113,28 @@ async function checkNegativeCash(context: CheckContext): Promise<Finding[]> {
       WHERE l."companyId" = ${context.companyId}::uuid
         AND l.status = ${JournalStatus.POSTED}::"JournalStatus"
         AND a."systemKey" = ${SYSTEM_ACCOUNT.CASH}
+        -- Everything up to the end of the window: the balance on a day is the
+        -- whole history behind it, so the period opening is not a floor here.
+        AND l."entryDate" <= ${context.to}
       GROUP BY 1
+    ),
+    running AS (
+      SELECT day, SUM(movement) OVER (ORDER BY day) AS running
+      FROM daily
     )
-    SELECT day, SUM(movement) OVER (ORDER BY day) AS running
-    FROM daily
+    SELECT day, running
+    FROM running
+    -- Reported only for days the audit was asked about.
+    WHERE day >= ${context.from}
     ORDER BY day
   `;
 
-  const firstNegative = rows.find((row) => Number(row.running) < 0);
+  const negative = rows.filter((row) => isNegative(row.running.toString()));
+  const firstNegative = negative[0];
   if (!firstNegative) return [];
 
-  const lowest = rows.reduce((worst, row) =>
-    Number(row.running) < Number(worst.running) ? row : worst,
+  const lowest = negative.reduce((worst, row) =>
+    compare(row.running.toString(), worst.running.toString()) < 0 ? row : worst,
   );
 
   return [
@@ -121,7 +143,7 @@ async function checkNegativeCash(context: CheckContext): Promise<Finding[]> {
       balanceThatDay: firstNegative.running.toString(),
       lowestDate: isoDay(lowest.day),
       lowestBalance: lowest.running.toString(),
-      daysBelowZero: rows.filter((row) => Number(row.running) < 0).length,
+      daysBelowZero: negative.length,
     }),
   ];
 }
@@ -345,6 +367,90 @@ async function checkVoidRate(context: CheckContext): Promise<Finding[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Tax
+// ---------------------------------------------------------------------------
+
+/** The months an audit window touches, oldest first. */
+function monthsBetween(
+  from: Date,
+  to: Date,
+): Array<{ year: number; month: number }> {
+  const months: Array<{ year: number; month: number }> = [];
+  const cursor = new Date(
+    Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), 1),
+  );
+  const last = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), 1));
+
+  // Bounded so a window opened by a typo — a from-date in 1970 — walks a
+  // sensible number of periods rather than a thousand.
+  while (cursor <= last && months.length < MAX_GST_PERIODS) {
+    months.push({
+      year: cursor.getUTCFullYear(),
+      month: cursor.getUTCMonth() + 1,
+    });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  return months;
+}
+
+/** How many monthly periods one audit will cross-check. */
+const MAX_GST_PERIODS = 24;
+
+/**
+ * The tax register against the ledger, month by month.
+ *
+ * This rule was in the catalogue from the start and nothing produced it — the
+ * one check a GST-registered shop would most want was advertised and absent.
+ * The comparison itself already existed behind the GST working paper, which
+ * computes both figures for its own reconciliation panel; this reads that
+ * rather than recomputing it, so the auditor and the GST page cannot disagree.
+ *
+ * Businesses that do not file this return are skipped rather than passed:
+ * composition dealers and unregistered shops have no output tax to reconcile,
+ * and a finding about a return they never file is noise.
+ */
+async function checkGstRegister(context: CheckContext): Promise<Finding[]> {
+  const company = await prisma.company.findUnique({
+    where: { id: context.companyId },
+    select: { gstRegistration: true },
+  });
+
+  if (
+    company?.gstRegistration !== GstRegistrationType.REGULAR &&
+    company?.gstRegistration !== GstRegistrationType.SEZ
+  ) {
+    return [];
+  }
+
+  const findings: Finding[] = [];
+
+  for (const period of monthsBetween(context.from, context.to)) {
+    const paper = await getGstWorkingPaper({
+      companyId: context.companyId,
+      year: period.year,
+      month: period.month,
+    });
+
+    // A month with no documents has nothing to disagree about.
+    if (paper.empty || paper.reconciliation.agrees) continue;
+
+    findings.push(
+      finding("GST_REGISTER_MISMATCH", {
+        period: paper.label,
+        outputFromRegister: paper.reconciliation.outputFromRegister,
+        outputFromLedger: paper.reconciliation.outputFromLedger,
+        outputDifference: paper.reconciliation.outputDifference,
+        inputFromRegister: paper.reconciliation.inputFromRegister,
+        inputFromLedger: paper.reconciliation.inputFromLedger,
+        inputDifference: paper.reconciliation.inputDifference,
+      }),
+    );
+  }
+
+  return findings;
+}
+
+// ---------------------------------------------------------------------------
 // Money
 // ---------------------------------------------------------------------------
 
@@ -402,53 +508,76 @@ async function checkCashOverLimit(context: CheckContext): Promise<Finding[]> {
 /** Days past due at which an unpaid invoice is worth surfacing. */
 const LONG_OVERDUE_DAYS = 90;
 
+type OverdueTotals = {
+  invoices: bigint;
+  outstanding: Prisma.Decimal | null;
+};
+
+/**
+ * Money owed for a long time.
+ *
+ * The total is aggregated in the database over every matching invoice, not
+ * summed from a page of them. It used to take the first fifty rows and add
+ * those up, which meant a shop with two hundred overdue invoices was shown the
+ * outstanding of fifty presented as the whole — a figure that was wrong, looked
+ * exact, and got smaller the worse the problem was.
+ *
+ * The oldest invoice is fetched separately, because naming one is a detail and
+ * totalling them is a number somebody may act on.
+ */
 async function checkLongOverdue(context: CheckContext): Promise<Finding[]> {
   const cutoff = new Date(
     context.to.getTime() - LONG_OVERDUE_DAYS * 86_400_000,
   );
 
-  const sales = await prisma.sale.findMany({
-    where: {
-      companyId: context.companyId,
-      status: DocumentStatus.POSTED,
-      customerId: { not: null },
-      OR: [
-        { dueDate: { lt: cutoff } },
-        { dueDate: null, invoiceDate: { lt: cutoff } },
-      ],
-    },
+  const where: Prisma.SaleWhereInput = {
+    companyId: context.companyId,
+    status: DocumentStatus.POSTED,
+    customerId: { not: null },
+    OR: [
+      { dueDate: { lt: cutoff } },
+      { dueDate: null, invoiceDate: { lt: cutoff } },
+    ],
+  };
+
+  // Postgres does the subtraction and the sum, in the numeric type the columns
+  // are stored in. Nothing passes through a float on the way.
+  const totals = await prisma.$queryRaw<OverdueTotals[]>`
+    SELECT COUNT(*)::bigint AS invoices,
+           SUM(s."totalAmount" - s."paidAmount") AS outstanding
+    FROM sales s
+    WHERE s."companyId" = ${context.companyId}::uuid
+      AND s.status = ${DocumentStatus.POSTED}::"DocumentStatus"
+      AND s."customerId" IS NOT NULL
+      AND s."totalAmount" > s."paidAmount"
+      AND COALESCE(s."dueDate", s."invoiceDate") < ${cutoff}
+  `;
+
+  const row = totals[0];
+  const invoices = Number(row?.invoices ?? 0);
+  if (invoices === 0) return [];
+
+  const oldest = await prisma.sale.findFirst({
+    where: { ...where, totalAmount: { gt: prisma.sale.fields.paidAmount } },
     select: {
-      id: true,
       invoiceNumber: true,
       invoiceDate: true,
       dueDate: true,
-      totalAmount: true,
-      paidAmount: true,
       customer: { select: { name: true } },
     },
     orderBy: { invoiceDate: "asc" },
-    take: 50,
   });
-
-  const open = sales.filter(
-    (sale) => Number(sale.totalAmount) - Number(sale.paidAmount) > 0,
-  );
-  if (open.length === 0) return [];
-
-  const outstanding = open.reduce(
-    (sum, sale) => sum + Number(sale.totalAmount) - Number(sale.paidAmount),
-    0,
-  );
-  const oldest = open[0]!;
 
   return [
     finding("LONG_OVERDUE_RECEIVABLE", {
-      invoices: open.length,
-      outstanding: outstanding.toFixed(2),
+      invoices,
+      outstanding: money(row?.outstanding?.toString() ?? 0).toFixed(
+        PRESENTATION_SCALE,
+      ),
       thresholdDays: LONG_OVERDUE_DAYS,
-      oldestInvoice: oldest.invoiceNumber,
-      oldestCustomer: oldest.customer?.name ?? "Unnamed customer",
-      oldestDate: isoDay(oldest.dueDate ?? oldest.invoiceDate),
+      oldestInvoice: oldest?.invoiceNumber ?? null,
+      oldestCustomer: oldest?.customer?.name ?? "Unnamed customer",
+      oldestDate: oldest ? isoDay(oldest.dueDate ?? oldest.invoiceDate) : null,
     }),
   ];
 }
@@ -471,6 +600,7 @@ export const CHECKS: ReadonlyArray<{ name: string; run: Check }> = [
   { name: "stock", run: checkStock },
   { name: "duplicates", run: checkDuplicateInvoices },
   { name: "belowCost", run: checkSalesBelowCost },
+  { name: "gst", run: checkGstRegister },
   { name: "cashLimit", run: checkCashOverLimit },
   { name: "voids", run: checkVoidRate },
   { name: "backdated", run: checkBackdatedEntries },

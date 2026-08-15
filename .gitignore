@@ -57,3 +57,7 @@ prisma/*.db-journal
 /playwright-report
 /blob-report
 backups/
+
+# Redis writes a snapshot into the working directory when it is run locally for
+# the rate-limiter tests. It is a database file, not source.
+dump.rdb
