@@ -60,7 +60,10 @@ const serverSchema = z
     AI_DRIVER: z.enum(["disabled", "anthropic", "openai"]).default("disabled"),
     AI_API_KEY: z.string().optional(),
     AI_MODEL: z.string().default("claude-sonnet-5"),
-    AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(2048),
+    // Covers the model's thinking *and* its answer, not the answer alone. The
+    // previous 2048 was sized as if it were the answer alone, which on the
+    // current models silently cut replies off mid-sentence.
+    AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(8192),
 
     PAYMENTS_DRIVER: z
       .enum(["disabled", "razorpay", "stripe"])
