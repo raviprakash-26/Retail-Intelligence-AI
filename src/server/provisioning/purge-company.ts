@@ -36,6 +36,18 @@ export async function purgeCompany(companyId: string): Promise<void> {
     // delete, which is the point of having it.
     await tx.payroll.deleteMany({ where: { companyId } });
 
+    // Payment events, explicitly.
+    //
+    // The table has no foreign key to companies — a webhook can arrive naming
+    // an order nobody recognises, and a row that belongs to no tenant still has
+    // to be recordable. So a cascade would never reach these, and erasing a
+    // business would leave behind what it paid and when. Only the rows actually
+    // attributed to this company go; unattributed ones are not their data.
+    //
+    // The append-only trigger refuses a DELETE unless the purge flag set above
+    // is on, which is the same escape hatch audit_logs uses.
+    await tx.paymentEvent.deleteMany({ where: { companyId } });
+
     await tx.company.delete({ where: { id: companyId } });
   });
 }

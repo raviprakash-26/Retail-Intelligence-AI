@@ -653,7 +653,8 @@ model SubscriptionPlan {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
-  subscriptions Subscription[]
+  subscriptions   Subscription[]
+  targetedByInvoices SubscriptionInvoice[]
 
   @@map("subscription_plans")
 }
@@ -702,13 +703,55 @@ model SubscriptionInvoice {
   providerPaymentId String?
   paidAt            DateTime?
   failureReason     String?
+  /// The plan this invoice was raised to buy.
+  ///
+  /// Named explicitly rather than inferred from the amount when the payment
+  /// lands: two plans can legitimately cost the same, and a webhook is no place
+  /// to be guessing which one somebody bought.
+  targetPlanId      String?       @db.Uuid
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
-  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  subscription Subscription      @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  targetPlan   SubscriptionPlan? @relation(fields: [targetPlanId], references: [id], onDelete: Restrict)
 
   @@index([subscriptionId, status])
+  @@index([providerInvoiceId])
   @@map("subscription_invoices")
+}
+
+/// Everything a payment provider has told us, kept whether or not we believed it.
+///
+/// Append-only, and written *before* the event is acted on. Two reasons. A
+/// webhook that arrives twice — which every provider does, deliberately — must
+/// apply once, and the unique key on (provider, eventId) is what makes the
+/// second delivery a no-op rather than a second upgrade. And when a payment is
+/// disputed months later, "what exactly did Razorpay send us, and when" is the
+/// only question that settles it; a row written only on the happy path cannot
+/// answer it.
+model PaymentEvent {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  provider          String
+  /// The provider's own event id, from the delivery header.
+  eventId           String
+  eventType         String
+  /// Whether the signature checked out. False rows are kept on purpose: a run
+  /// of them is somebody probing the endpoint, and deleting the evidence of
+  /// that would be the wrong instinct.
+  signatureVerified Boolean   @default(false)
+  payload           Json
+  /// Set once the event has been applied. Null means received but not acted on.
+  processedAt       DateTime?
+  /// Why it was not applied, when it was not.
+  outcome           String?
+  invoiceId         String?   @db.Uuid
+  companyId         String?   @db.Uuid
+  receivedAt        DateTime  @default(now())
+
+  @@unique([provider, eventId])
+  @@index([provider, eventType, receivedAt])
+  @@index([companyId, receivedAt])
+  @@map("payment_events")
 }
 
 // =============================================================================

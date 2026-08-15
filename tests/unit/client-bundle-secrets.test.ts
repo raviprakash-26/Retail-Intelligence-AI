@@ -98,6 +98,30 @@ describe("the client bundle", () => {
     },
   );
 
+  it.skipIf(FILES.length === 0)(
+    "does not carry the server-side payment client into the browser",
+    () => {
+      // The env-value check above proves nothing where the variable is unset —
+      // which is every CI run and most installations. This is the check that
+      // works regardless: `razorpay.ts` holds the API root and the code that
+      // builds the Basic auth header from the key secret, and it is the module
+      // a careless import would drag into a client bundle. Its API root is a
+      // string that appears nowhere else in the browser's code, so finding it
+      // means the module leaked.
+      //
+      // `checkout.razorpay.com` is a different host and belongs there: it is
+      // the widget the browser is supposed to load.
+      const leaked = FILES.filter((file) =>
+        readFileSync(file, "utf8").includes("api.razorpay.com"),
+      );
+
+      expect(
+        leaked,
+        "the server-side payment client reached the browser",
+      ).toEqual([]);
+    },
+  );
+
   it("says plainly when there is no build to inspect", () => {
     // A security test that silently passes because it found nothing to read is
     // worse than no test: it reports green for a check that never ran.

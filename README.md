@@ -45,6 +45,11 @@ any account and a statement for any customer or supplier — each running the
 service that owns its numbers rather than recomputing them, exportable as a CSV
 that carries the same figures and the same caveats, and laid out to print.
 
+**And it can now be paid for.** Razorpay checkout, a signed webhook, and one
+path to an upgrade: the plan moves when the provider tells the server the money
+arrived, never because a browser came back from a payment page. No card number
+touches this server.
+
 **And the bank can be checked against the books.** Import the CSV the bank gave
 you and the two sides sit next to each other: what the statement says, what the
 ledger says, and the classic reconciliation between them. Matching links a
@@ -469,9 +474,9 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1371 tests: unit + integration
+npm run test          # 1405 tests: unit + integration
 npm run test:unit     # unit only, no database required
-npm run test:e2e      # 54 checks in a browser, against a production build
+npm run test:e2e      # 55 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
 ```
 
@@ -1652,6 +1657,75 @@ page like this gets ignored on day one and never opened again.
 
 ---
 
+---
+
+## Taking payments
+
+Razorpay, chosen for who this product is for: a shop in Bengaluru is paid by UPI
+and netbanking far more than by card, and Stripe's India offering is not the
+same product. The driver is configuration, so a second provider slots in beside
+this one; only this one has been written.
+
+**No card number ever reaches this server.** Checkout is Razorpay's own, in
+their iframe, on their domain. The application is told an id afterwards and
+nothing more. That is the entire reason for using a gateway, and it keeps a
+shopkeeper's customers' card details out of a database that was never designed
+to hold them.
+
+**A payment is real when the provider tells the server, and not before.** The
+browser coming back from a checkout proves only that a browser reached a URL. It
+can lie, and more often it simply closes before saying anything. So the only
+path to a paid invoice is a webhook signed with a secret only the two parties
+hold — there is no action a browser can call that marks anything paid, because
+there is nothing to call.
+
+That distinction is visible in the interface rather than hidden by it. After
+paying, the page says the payment was submitted and the plan updates when it is
+confirmed. It does not say "you are on the Business plan", because at that
+moment nobody knows.
+
+**Four rules in the webhook handler**, each guarding a different failure:
+
+|                       |                                                                                                      |
+| --------------------- | ---------------------------------------------------------------------------------------------------- |
+| Verify before reading | An unsigned body is recorded and dropped, never parsed for meaning                                   |
+| Record before acting  | The event row is written first, so a crash leaves evidence rather than silence                       |
+| Apply once            | Providers retry deliberately; a unique key on (provider, event id) makes the second delivery a no-op |
+| Check the amount      | Against our own invoice — otherwise somebody opens a checkout for ₹1, pays it, and is upgraded       |
+
+The signature comparison is constant-time, and the body is read as raw text
+rather than parsed and re-serialised: JSON round-tripping reorders keys and
+drops whitespace, and the signature then fails for a reason that looks like a
+provider outage. An `authorized` payment is not treated as paid either — that is
+a hold that can still expire, and granting a month against it gives away a month
+for money that never arrives.
+
+**The amount comes from the plan, on the server.** Never from the request. And
+the price is compared again against what the provider echoed back when the order
+was created, because charging against a number the gateway chose would mean
+collecting something other than what the page displayed. Both sides are integers
+in paise — Razorpay's unit and this product's are the same, so nothing multiplies
+by a hundred, which is precisely where a rounding error would enter.
+
+**What the provider said is append-only.** `payment_events` keeps every delivery,
+including the ones that failed verification: a run of those is somebody probing
+the endpoint, and deleting the evidence would be the wrong instinct. A database
+trigger refuses to change what arrived, in the same way `audit_logs` does. Rows
+attributed to a company are removed when that company is purged; rows belonging
+to no tenant are not theirs to erase.
+
+**The policy is widened only where payments are switched on.** The checkout
+widget needs its script and iframe allowed through the CSP, which is a genuine
+loosening — so an installation that takes no money keeps the tighter policy it
+has today rather than inheriting a hole for a feature it never uses.
+
+**What has not been tested is the network.** Every refusal, every amount check,
+every idempotency guarantee and every state transition is exercised against a
+transport that returns canned Razorpay responses. The round trip to Razorpay
+itself has never run, because this build has never held credentials. That is
+stated here and in the limits section rather than implied away — run the first
+transaction in test mode and watch the webhook land.
+
 ## Subscriptions
 
 **Entitlements are data, and the server is what checks them.** A plan's
@@ -2025,9 +2099,16 @@ other half, and it is here because a deployment guide that implies more
 readiness than exists is the same kind of dishonesty the rest of the build
 avoids.
 
-- **No payment can be taken.** There is a seam for Razorpay and Stripe and no
-  integration behind it. Subscriptions work, plan changes that cost nothing
-  apply immediately, and an upgrade is declined with the reason.
+- **Payments are integrated but have never been run against a live gateway.**
+  Razorpay is implemented end to end — order, hosted checkout, signed webhook,
+  entitlement — and every part of it is tested except the network round trip to
+  Razorpay themselves, which needs credentials this build has never had. The
+  refusals, the amount checks, the idempotency and the state transitions are
+  exercised against a transport that returns canned provider responses. Treat
+  the first real transaction as the first real transaction: run it in test mode,
+  against a test key, and watch the webhook arrive.
+- **Stripe is still only a seam.** The driver is selected by configuration and
+  only one driver has been written.
 - **Nothing is filed with any authority.** GST and income tax are prepared for a
   human to review and submit.
 - **Backups run, but only to the same machine.** There is a nightly dump, a
@@ -2156,6 +2237,7 @@ query text is the only thing the browser controls.
 | 33    | Shared rate limits — one counter across instances, bounded wait   | **Done** |
 | 34    | Reports about one subject — account ledger, party statements      | **Done** |
 | 35    | Bank reconciliation — statement import, matching, the identity    | **Done** |
+| 36    | Payments — Razorpay checkout, signed webhooks, one upgrade path   | **Done** |
 
 ---
 

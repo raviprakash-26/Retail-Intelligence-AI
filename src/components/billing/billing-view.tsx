@@ -18,14 +18,21 @@ import {
   changePlanAction,
   resumeSubscriptionAction,
 } from "@/server/billing/actions";
+import { UpgradeButton } from "@/components/billing/upgrade-button";
 
 /**
  * The plan, what it includes, and what has been used of it.
  *
  * Two things this page will not do. It will not show a payment button that
  * resolves against nothing — where no provider is connected it says so, in
- * those words. And it will not imply that a lapsed subscription puts a
- * business's own records out of reach, because it does not.
+ * those words, and the button is simply absent. And it will not imply that a
+ * lapsed subscription puts a business's own records out of reach, because it
+ * does not.
+ *
+ * A third, now that payments work: it will not tell somebody they are on a new
+ * plan because their browser came back from a checkout. Paying and being
+ * upgraded are separate events, seconds apart, and the page says which one has
+ * happened rather than assuming the second follows the first.
  */
 
 const STATUS_LABEL: Record<string, string> = {
@@ -157,6 +164,9 @@ export function BillingView({
               pending={pending === plan.key}
               disabled={pending !== null}
               paymentsAvailable={overview.payments.available}
+              onBusyChange={(value) => setPending(value ? plan.key : null)}
+              onNotice={setMessage}
+              onError={setError}
               onChoose={() =>
                 void run(plan.key, async () => {
                   const result = await changePlanAction(plan.key);
@@ -276,6 +286,9 @@ function PlanCard({
   disabled,
   paymentsAvailable,
   onChoose,
+  onBusyChange,
+  onNotice,
+  onError,
 }: {
   plan: PlanOption;
   canManage: boolean;
@@ -283,8 +296,15 @@ function PlanCard({
   disabled: boolean;
   paymentsAvailable: boolean;
   onChoose: () => void;
+  onBusyChange: (busy: boolean) => void;
+  onNotice: (message: string) => void;
+  onError: (message: string) => void;
 }) {
   const blocked = plan.needsPayment && !paymentsAvailable;
+  // A dearer plan is bought, not switched to. The two are different buttons
+  // because they are different acts: one opens a payment, the other applies
+  // immediately.
+  const payable = plan.needsPayment && paymentsAvailable && canManage;
 
   return (
     <div className="flex flex-col rounded-xl border px-4 py-4">
@@ -312,6 +332,15 @@ function PlanCard({
         <p className="text-xs leading-relaxed text-muted-foreground">
           Needs a payment, and no payment can be taken here.
         </p>
+      ) : payable ? (
+        <UpgradeButton
+          planKey={plan.key}
+          planName={plan.name}
+          disabled={disabled}
+          onBusyChange={onBusyChange}
+          onNotice={onNotice}
+          onError={onError}
+        />
       ) : canManage ? (
         <Button
           size="sm"
