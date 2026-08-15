@@ -101,3 +101,46 @@ test.describe("signed out", () => {
     expect(page.url()).toContain("/login");
   });
 });
+
+test.describe("taking the books out", () => {
+  test.use({ storageState: STATE.owner });
+
+  test("an owner can download the whole business as a zip", async ({
+    page,
+  }) => {
+    await page.goto("/app/settings/data");
+    await expect(
+      page.getByRole("heading", { name: "Your data" }),
+    ).toBeVisible();
+
+    // The page says what will not be in the file before anybody downloads it.
+    const text = await page.locator("body").innerText();
+    expect(text).toContain("Sign-in credentials are never exported");
+
+    const response = await page.request.get("/app/settings/data/export");
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-type"]).toContain("application/zip");
+    expect(response.headers()["content-disposition"]).toContain(".zip");
+
+    // Not an empty shell: a zip starts PK, and this one has real content.
+    const body = await response.body();
+    expect(body.length).toBeGreaterThan(1_000);
+    expect(body.subarray(0, 2).toString("latin1")).toBe("PK");
+  });
+});
+
+test.describe("what a cashier may not carry out of the building", () => {
+  test.use({ storageState: STATE.cashier });
+
+  test("is not offered the export, and is refused at the URL", async ({
+    page,
+  }) => {
+    await page.goto("/app/settings/business");
+    const nav = await page.locator("body").innerText();
+    expect(nav).not.toContain("Your data");
+
+    // The gate is on the server, not on whether the tab was rendered.
+    const response = await page.request.get("/app/settings/data/export");
+    expect(response.status()).toBe(403);
+  });
+});

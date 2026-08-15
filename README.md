@@ -1887,6 +1887,61 @@ shopkeeper about their own money.
 
 ---
 
+## Taking your data with you
+
+**A business's books belong to the business.** One click on Settings → Your
+data produces a zip of CSV files, one per table, in UTF-8 with a byte-order
+mark so Excel reads the rupee sign rather than mojibake. It is the answer to
+"send me my data" — to an accountant at year end, to another product, or into a
+drawer against the day somebody asks for records from six years ago. A
+bookkeeping product that cannot answer that question is one that holds a shop's
+records hostage, and everything else here about not overclaiming to a
+shopkeeper would be undone by it.
+
+**The safety boundary is a list, not a filter.** Fifty-two tables carry a
+`companyId` and a few of them hold material nobody should be handed: `Session`
+holds live session tokens, `VerificationToken` holds the hashes behind password
+resets, `PaymentEvent` holds raw provider webhooks. Selecting every scalar
+column of every scoped table — which is what Prisma's default selection does —
+would put all of that in a file the owner can email. So every company-scoped
+table is classified as exported or withheld, with the reason written down, and
+a test fails if a new one appears in neither. A table added to the schema next
+year cannot leak by default; somebody has to name it first. A field denylist
+sits behind that as the second line, refusing anything whose name means
+credential wherever it appears.
+
+**It streams.** Each table is read a page at a time, deflated as it arrives and
+handed to the response, with the reader pausing when the consumer is behind —
+so what is held at any moment is one page of one table rather than the whole
+archive. An export a large business cannot run is an export that fails exactly
+the person who most needs one.
+
+**Three gates and a record.** The company comes off the session, so there is no
+parameter through which another tenant's books could be asked for.
+`data.export` is a permission of its own and is deliberately in no role list —
+exporting one report is a normal day's work, but taking a complete copy of the
+books out of the building is an owner's decision rather than something that
+arrives with a job title. It is rate limited, being the most expensive thing
+the application can be asked to do. And it is written to the append-only
+activity log before the download starts, because a complete copy of the books
+leaving is the single event an owner would most want to find afterwards.
+
+**The archive says what it is not.** A manifest travels with the files listing
+what was included, what was withheld and why, and stating plainly that these
+are the figures as recorded rather than anything filed with an authority.
+Somebody migrating onto another product would otherwise assume the zip is
+everything and find out during the migration that it was not.
+
+The risk in a module like this is the obvious one: a complete dump of every
+company-scoped table is exactly where a tenant-isolation mistake would be
+worst. So the central test builds two businesses whose every record carries a
+word unique to it, exports one, and reads every byte of the archive looking for
+the other — and a second walks every row of every file asserting the
+`companyId` column holds only the company that asked. Removing the `where`
+clause fails both.
+
+---
+
 ## Platform administration
 
 **Running the service does not require reading anybody's books.** Somebody has
@@ -2461,6 +2516,7 @@ query text is the only thing the browser controls.
 | 40    | Auditor — the missing GST check, true totals, honest partial runs     | **Done** |
 | 41    | Advisor — overdue payables, stock-out precision, detector isolation   | **Done** |
 | 42    | Accountant — figures checked against results, a cheaper chart, paging | **Done** |
+| 43    | Data export — a shop's whole books as a zip, and never a credential   | **Done** |
 
 ---
 

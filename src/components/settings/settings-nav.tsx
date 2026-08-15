@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Calculator, CreditCard, MapPin, Users } from "lucide-react";
+import {
+  Building2,
+  Calculator,
+  CreditCard,
+  Download,
+  MapPin,
+  Users,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -42,6 +49,12 @@ const ITEMS = [
     label: "Plan",
     icon: CreditCard,
     permission: "billing.view",
+  },
+  {
+    href: "/app/settings/data",
+    label: "Your data",
+    icon: Download,
+    permission: "data.export",
   },
 ] as const;
 
