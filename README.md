@@ -1887,6 +1887,45 @@ shopkeeper about their own money.
 
 ---
 
+## Issuing an invoice
+
+**A shop could record a sale and not hand the customer a bill.** The detail
+screen showed every figure — invoice number, HSN per line, place of supply, the
+CGST/SGST split — and there was no document. No print view, no PDF, no way to
+send it. Reports and payslips printed properly; the one piece of paper a
+customer actually receives did not exist.
+
+That is not a missing convenience. A registered supplier is required to _issue_
+a tax invoice carrying prescribed particulars — supplier and recipient with
+their GSTINs, an HSN code against each line, the tax split, the place of supply,
+whether tax is payable on reverse charge, and a signature (Rule 46, CGST Rules).
+This product built GSTR-1 working papers **out of** those invoices while leaving
+the business unable to issue one.
+
+**The particulars are a written-down list, not an implicit template.** Each one
+names what the rule asks for and where the document shows it, and the browser
+suite walks the rendered invoice checking every one is there. A field dropped in
+a layout change is exactly what nobody notices until a buyer's accountant
+refuses the invoice — so removing a particular fails the build rather than
+shipping.
+
+**Nothing on the document is recomputed.** Every figure is the figure that was
+posted: line taxable values, the tax split, the total. An invoice that worked
+out its own totals could disagree with the ledger behind it, and the one
+document here that a third party relies on is the last place for that.
+
+**The amount is written out in words** the way an Indian invoice writes it —
+crore and lakh rather than million — because a figure written twice is harder to
+alter than a figure written once. Paise are stated separately, as the amount is
+spoken.
+
+**Printing is the browser's.** No PDF library: every browser prints to PDF, the
+result honours the print stylesheet this application already had, and a
+generated PDF would be a second layout to keep in step with the first. That is
+how the paper copy and the screen end up disagreeing.
+
+---
+
 ## Taking your data with you
 
 **A business's books belong to the business.** One click on Settings → Your
@@ -2624,6 +2663,7 @@ query text is the only thing the browser controls.
 | 43    | Data export — a shop's whole books as a zip, and never a credential     | **Done** |
 | 44    | Accessibility — an axe gate, and the four colour defects it found       | **Done** |
 | 45    | Data import — a shop's spreadsheet in, previewed before anything writes | **Done** |
+| 46    | Tax invoice — the document a customer takes away, with its particulars  | **Done** |
 
 ---
 
