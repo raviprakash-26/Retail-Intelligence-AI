@@ -8,7 +8,9 @@ import {
   ProviderError,
   providerStatus,
   type ContentBlock,
+  type MessagesClient,
   type ProviderMessage,
+  type ReplyOutcome,
 } from "@/server/ai/provider";
 import { runTool, type ToolContext } from "@/server/ai/tool-runner";
 
@@ -58,6 +60,23 @@ function textOf(blocks: readonly ContentBlock[]): string {
     .map((block) => block.text)
     .join("\n\n")
     .trim();
+}
+
+/**
+ * Says so when an answer stopped early.
+ *
+ * The failure this exists to prevent: a reply cut off at the token limit
+ * arrives looking exactly like a finished one, and half an answer about
+ * somebody's tax position read as the whole of one is worse than no answer.
+ * Nothing is invented to fill the gap — the reader is told where it ends.
+ */
+function truncationAware(text: string, outcome: ReplyOutcome): string {
+  if (outcome !== "truncated") return text;
+  const note =
+    "\n\n_This answer was cut short at its length limit, so it is incomplete. Ask a narrower question to see the rest._";
+  return text.length > 0
+    ? `${text}${note}`
+    : "The assistant ran out of room before it wrote anything. Try a narrower question.";
 }
 
 function toStored(row: {
@@ -172,6 +191,15 @@ export async function askAccountant(params: {
     fiscalYearFrom: string | null;
     fiscalYearTo: string | null;
   };
+  /**
+   * Defaulted in production; supplied by the tests.
+   *
+   * The loop is the part that decides what a tenant actually reads — which
+   * replies become answers, which become warnings, and what a refusal turns
+   * into — so it is worth driving against canned replies and a real database
+   * rather than only in the state where no provider is configured.
+   */
+  client?: MessagesClient;
 }): Promise<AskResult> {
   const status = providerStatus();
   if (!status.available) return { ok: false, error: status.reason };
@@ -238,7 +266,11 @@ export async function askAccountant(params: {
 
   try {
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
-      const reply = await completeTurn({ system, messages: history });
+      const reply = await completeTurn({
+        system,
+        messages: history,
+        client: params.client,
+      });
       promptTokens = reply.promptTokens;
       outputTokens = reply.outputTokens;
 
@@ -253,8 +285,26 @@ export async function askAccountant(params: {
         } => block.type === "tool_use",
       );
 
+      // A refusal is the provider's classifiers declining, not an answer.
+      // Whatever sits in `content` past one is empty or partial, and showing
+      // either as an answer about somebody's books would be inventing one.
+      if (reply.outcome === "refused") {
+        answer =
+          "The assistant declined to answer that one. Rephrasing it, or asking about the figures directly, usually works.";
+        break;
+      }
+
       if (toolUses.length === 0) {
-        answer = textOf(reply.content);
+        answer = truncationAware(textOf(reply.content), reply.outcome);
+        break;
+      }
+
+      // A turn cut off at the token limit stops here rather than looping. The
+      // tool calls in a truncated reply can themselves be half-written, and
+      // running a partial request against somebody's ledger to produce an
+      // answer that was already going to be incomplete helps nobody.
+      if (reply.outcome === "truncated") {
+        answer = truncationAware(textOf(reply.content), reply.outcome);
         break;
       }
 

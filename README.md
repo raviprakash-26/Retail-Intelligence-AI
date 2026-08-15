@@ -1515,8 +1515,26 @@ depend on the model admitting anything.
 `AI_DRIVER=disabled`; in that state the page says the assistant is not switched
 on, the composer is disabled, and no substitute answers anything. An assistant
 that invented plausible replies when its provider was missing would be worse
-than one that is honestly off. The API key is read in one module, used in one
-header, and never returned, logged, or put into an error message.
+than one that is honestly off. The API key is read in one module, handed to the
+client once, and never returned, logged, or put into an error message.
+
+**A half-written answer is never shown as a whole one.** The provider reports
+why it stopped, and this application reads that rather than ignoring it. A reply
+cut off at the token limit arrives looking exactly like a finished one — and on
+an answer about somebody's tax position, half of one read as the whole is the
+worst available failure. Such a reply is labelled as incomplete, and the loop
+stops rather than running tool calls that may themselves be half-written. A
+refusal is likewise not read as content: it becomes a note that the assistant
+declined, not an empty answer about the books.
+
+**The provider's own words are never repeated to a tenant.** A failure is mapped
+by status to a sentence written here — the raw text is dropped, not sanitised.
+That is a boundary rather than a nicety: this message is persisted to the
+transcript and readable by the customer, and the SDK builds its message by
+serialising the entire error body, so a provider that echoed the offending
+request back would put a credential in a customer's database. The status, error
+class and request id go to the server log, where an operator can read them and a
+tenant cannot.
 
 A transcript belongs to one user of one company. A conversation id from somebody
 else's session resolves to nothing rather than to their transcript, which may
@@ -2238,9 +2256,13 @@ avoids.
   there is a token-gated Prometheus endpoint, but there is no tracing, no
   alerting, and the counters are per-process — two replicas each report their
   own, and a restart resets them.
-- **The AI features need a provider that has not been paid for.** With none
-  configured they say so and answer nothing, which is the intended state rather
-  than a broken one.
+- **The assistant has never been run against a live provider.** It talks to the
+  official Anthropic SDK, and every decision this application makes on top of it
+  — reading a refusal, catching a truncated reply, mapping a failure to advice —
+  is tested against canned responses. What is untested is the round trip itself:
+  no API key has been paid for, so no question has ever reached a model. With no
+  provider configured the feature says so and answers nothing, which is the
+  intended state rather than a broken one.
 - **It has never been run at scale.** Every figure in this document comes from a
   test suite and a seeded shop, not from production traffic.
 
@@ -2353,6 +2375,7 @@ query text is the only thing the browser controls.
 | 36    | Payments — Razorpay checkout, signed webhooks, one upgrade path   | **Done** |
 | 37    | Multi-replica — two behind a balancer, draining shutdown, labels  | **Done** |
 | 38    | Off-machine backups — verified upload, retention, fetch back      | **Done** |
+| 39    | AI provider — the official SDK, refusals, truncation, caching     | **Done** |
 
 ---
 
