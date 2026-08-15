@@ -198,11 +198,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Cheap proof that the tools the backup scripts call are actually in it.
-      # `command -v` inside the image beats trusting a package name.
+      # Cheap proof that the tools the backup scripts call are actually in
+      # the image. Three separate commands rather than one compound: each
+      # failure then names the tool that is missing, and there is no quoting
+      # to get wrong.
       - name: Check the backup image carries the tools the scripts need
         run: |
           docker build -f deploy/backup.Dockerfile -t riai-backup:ci .
-          docker run --rm riai-backup:ci bash -c '
-            command -v pg_dump && command -v pg_restore && command -v aws
-          
+          docker run --rm riai-backup:ci pg_dump --version
+          docker run --rm riai-backup:ci pg_restore --version
+          docker run --rm riai-backup:ci aws --version
