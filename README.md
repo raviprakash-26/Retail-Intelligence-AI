@@ -45,6 +45,13 @@ any account and a statement for any customer or supplier — each running the
 service that owns its numbers rather than recomputing them, exportable as a CSV
 that carries the same figures and the same caveats, and laid out to print.
 
+**And the bank can be checked against the books.** Import the CSV the bank gave
+you and the two sides sit next to each other: what the statement says, what the
+ledger says, and the classic reconciliation between them. Matching links a
+statement line to the entry that produced it and posts nothing; re-importing an
+overlapping range adds nothing; and anything the outstanding items do not
+explain is reported as a figure rather than quietly absorbed.
+
 **And goods can come back.** A credit note against an invoice puts the stock
 back at what the sale issued it for, debits a contra-revenue account rather than
 shrinking Sales, and appends negative rows to the GST register. A debit note
@@ -356,6 +363,7 @@ src/
     returns/               Return dialog, note lists, notes against a document
     expenses/              Expense form, list and category breakdown
     settlements/           Receipt/payment form, allocation table, ageing panel
+    banking/               Bank accounts, statement import, the two sides
     inventory/             Stock list, stock card, count correction
     gst/                   GST working paper: GSTR-1 tables, set-off, reconciliation
     tax/                   Income tax working paper: computation, blocks, 44AD
@@ -397,6 +405,7 @@ src/
     validation/            Zod schemas shared by client and server, and one date
     env.ts                 Validated environment; the app refuses to boot without it
     db.ts                  Prisma singleton
+    banking/               Statement CSV parser and the deterministic matcher
   server/
     accounting/            Posting, balances, ledger, trial balance, statements
     documents/             Accounts, GST register, reversal — shared by modules
@@ -405,6 +414,7 @@ src/
     returns/               Credit and debit notes, read from the original document
     expenses/              Expense posting: categories, capital vs revenue
     settlements/           Receipts and payments: allocation, ageing, void
+    banking/               Statement import, matching, the reconciliation identity
     inventory/             Positions, movements, reconciliation, adjustments
     gst/                   GST working paper, periods, register reconciliation
     tax/                   Income tax computation, disallowances found in records
@@ -459,9 +469,9 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1296 tests: unit + integration
+npm run test          # 1371 tests: unit + integration
 npm run test:unit     # unit only, no database required
-npm run test:e2e      # 49 checks in a browser, against a production build
+npm run test:e2e      # 54 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
 ```
 
@@ -1054,6 +1064,82 @@ The reports catalogue offers the same page as an account ledger and a party
 statement, so it can be exported and printed with the rest. It calls this
 service. There is no second query that walks the journal again and eventually
 disagrees with this one about what a customer owes.
+
+---
+
+## Bank reconciliation
+
+Two sequences of movements over the same window: what the bank says, and what
+the books say. The module compares them and reports the difference. It computes
+neither side — the book side is journal lines the accounting engine posted, and
+the bank side is exactly what the statement said.
+
+**Matching links; it never posts.** Confirming a match writes a foreign key and
+a timestamp. It does not adjust an amount, create an entry, or touch the journal
+in any way. A reconciliation that could quietly fix a difference would not be a
+reconciliation — it would be a way of making one disappear.
+
+**Reading the file is parsing, not interpretation.** Every Indian bank exports a
+different CSV, so columns are matched by name across a list of synonyms, lakh
+grouping is stripped before a number is read, and dates are read day-first
+because 03/04/2026 is 3 April on every statement printed in the country. A row
+the parser cannot read with certainty is reported against its line number and
+skipped, rather than guessed at: a statement with one bad line is still worth
+importing, and a guessed figure is worse than a missing one.
+
+Nothing here calls a model. A language model that read ₹1,04,522 as ₹104.522
+would corrupt the books of somebody who trusted it, and no amount of prompting
+makes that risk acceptable in a file whose whole purpose is to be compared
+against real money.
+
+**The direction convention is stated once and obeyed everywhere.** A bank
+statement is written from the bank's point of view: your deposit is money the
+bank owes you, so it lands in a column headed "Credit". In your books the bank
+account is an asset, so money arriving is a _debit_. The parser flips the bank's
+vocabulary at the boundary and everything downstream works in the books' terms.
+Getting this wrong produces a reconciliation that balances and is out by exactly
+twice the amount — which is why the code says so at the point of definition and
+the tests assert it directly.
+
+**Importing the same statement twice does nothing the second time.** People
+re-download overlapping ranges constantly — April, then April to June. Each row
+carries a fingerprint of the things that identify it, and a row already held is
+counted and skipped. The uniqueness is a database index rather than a check in
+the importer, because two people uploading at the same moment would both read an
+empty set and both write.
+
+Two identical transactions on one day, with the same description and no
+reference, will collide and only one will import. That is a real limitation, and
+it is the safer direction to be wrong in: under-importing surfaces as a
+difference somebody investigates, while over-importing surfaces as a
+reconciliation that balances against a doubled figure. The import result names
+every count, so the second one is visible rather than silent.
+
+**Suggestions explain themselves, and amounts must be equal.** The matcher pairs
+on equal amounts and equal direction only — never a tolerance, because the
+difference between the two sides is the entire output of the exercise and a
+tolerance would consume it. A cheque number found in the statement reference or
+in a narration somebody typed is the strongest evidence available and widens the
+date window; without one, a few days' gap is "likely" and a week's is "possible,
+check before accepting". Each side is used once, and ties break by date so two
+runs of the same reconciliation agree. It does not chase combinations that add
+up: three ₹500 entries totalling a ₹1,500 deposit is a real thing, and searching
+for subsets that happen to total correctly produces coincidences at a rate no
+person could audit.
+
+**The reconciliation statement is an identity, and it is checked.** Balance per
+books, less entries the bank has not seen, equals balance per statement, less
+lines the books have not seen. Anything left over is reported as an unexplained
+figure rather than absorbed — the page says how much, because a bank
+reconciliation that rounds away its own remainder has defeated itself.
+
+**One posting, deliberately.** Bank charges and bank interest genuinely start
+life on a statement: the bank applies them and the business finds out afterwards.
+Those can be recorded from the page, through the same `postJournalEntry` every
+other module uses, and are matched in the same step so they cannot be recorded
+twice. Everything else — a receipt, a payment, an expense — is recorded in the
+module that owns it. A bank page that could post anything would become a second,
+less careful way into the ledger.
 
 ---
 
@@ -2069,6 +2155,7 @@ query text is the only thing the browser controls.
 | 32    | Backups — a verified dump, and a restore with a safety catch      | **Done** |
 | 33    | Shared rate limits — one counter across instances, bounded wait   | **Done** |
 | 34    | Reports about one subject — account ledger, party statements      | **Done** |
+| 35    | Bank reconciliation — statement import, matching, the identity    | **Done** |
 
 ---
 

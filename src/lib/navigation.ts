@@ -193,6 +193,13 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         status: "ready",
       },
       {
+        label: "Bank reconciliation",
+        href: "/app/accounting/banking",
+        icon: "Landmark",
+        permission: "banking.view",
+        status: "ready",
+      },
+      {
         label: "Trial balance",
         href: "/app/accounting/trial-balance",
         icon: "Scale",

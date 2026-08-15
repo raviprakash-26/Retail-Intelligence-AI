@@ -900,6 +900,7 @@ model JournalEntry {
   lines        JournalLine[]
   reverses     JournalEntry? @relation("JournalReversal", fields: [reversesId], references: [id], onDelete: SetNull)
   reversedBy   JournalEntry? @relation("JournalReversal")
+  bankTransactions BankTransaction[]
 
   @@unique([companyId, entryNumber])
   @@index([companyId, entryDate])
@@ -1183,12 +1184,19 @@ model BankTransaction {
   journalEntryId String? @db.Uuid
   reconciledAt  DateTime?
   importBatchId String?  @db.Uuid
+  /// Identifies the statement line, so re-importing an overlapping range is a
+  /// no-op. Unique per bank account, enforced by the database rather than by
+  /// the importer alone: two people uploading at once would both pass a
+  /// read-then-write check.
+  fingerprint   String
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bankAccount  BankAccount   @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  journalEntry JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
 
+  @@unique([bankAccountId, fingerprint])
   @@index([companyId, bankAccountId, txnDate])
   @@index([companyId, reconciledAt])
   @@map("bank_transactions")
