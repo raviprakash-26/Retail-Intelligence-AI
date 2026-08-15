@@ -1,0 +1,56 @@
+# Two application replicas behind a load balancer.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.replicas.yml up -d --build
+#
+# An overlay on the single-machine file rather than a copy of it: the database,
+# Redis and the backup job are unchanged, and the only differences are the ones
+# that actually matter when there is more than one of the application.
+#
+# What changes:
+#   • the app is scaled to two, and stops publishing a port directly
+#   • nginx publishes instead, and round-robins between them
+#   • each replica gets its own INSTANCE_ID, so logs and metrics are attributable
+#
+# What does not change, and is the point: no sticky sessions, no shared volume,
+# no leader. Sessions and every figure live in Postgres, rate limits are counted
+# in Redis, and nothing in a request path is kept in the process that served it.
+#
+# Redis stops being optional here. On the in-memory driver each replica would
+# keep its own counter and a configured limit of five attempts would quietly
+# become ten.
+
+services:
+  app:
+    # No INSTANCE_ID is set, deliberately. Docker gives each replica its own
+    # hostname, which is what the application falls back to — so the two are
+    # distinguishable in logs and metrics without anybody configuring anything,
+    # and the name matches what `docker ps` shows.
+    deploy:
+      replicas: 2
+    environment:
+      RATE_LIMIT_DRIVER: redis
+      REDIS_URL: "redis://redis:6379"
+      # Longer than nginx's health-check interval, or draining achieves nothing:
+      # the balancer has to notice the 503 before the process goes away.
+      SHUTDOWN_DRAIN_MS: "15000"
+    # Replicas cannot each publish the same host port. nginx is the way in.
+    ports: !reset []
+    # Compose sends SIGTERM and waits this long before SIGKILL. It has to
+    # exceed SHUTDOWN_DRAIN_MS or the drain is cut short by the thing it exists
+    # to survive.
+    stop_grace_period: 30s
+
+  proxy:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${APP_PORT:-3000}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/nginx-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

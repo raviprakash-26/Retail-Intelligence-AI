@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/db";
+import {
+  INSTANCE_ID,
+  STARTED_AT,
+  isDraining,
+} from "@/lib/observability/instance";
 import { env } from "@/lib/env";
 import { renderPrometheus, setGauge } from "@/lib/observability/metrics";
 
@@ -77,7 +82,37 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     databaseUp,
   );
 
-  const body = `# Counts are per-process and reset when the process restarts.\n${renderPrometheus()}`;
+  // Which replica answered, and whether it is on its way out.
+  //
+  // Behind several instances a scrape reaches whichever one the balancer chose,
+  // and without this the counts are unattributable — two replicas each showing
+  // "40 failures" is either eighty failures or one replica scraped twice, and
+  // there is no way to tell them apart. `riai_instance_info` carries the name
+  // as a label so Prometheus can group by it.
+  setGauge(
+    "riai_instance_info",
+    "Always 1. The labels identify which replica answered this scrape.",
+    1,
+    { instance: INSTANCE_ID },
+  );
+  setGauge(
+    "riai_instance_started_at_seconds",
+    "Unix time this process started. A change means this replica restarted.",
+    STARTED_AT,
+    { instance: INSTANCE_ID },
+  );
+  setGauge(
+    "riai_instance_draining",
+    "1 while this replica is shutting down and refusing new traffic.",
+    isDraining() ? 1 : 0,
+    { instance: INSTANCE_ID },
+  );
+
+  const body =
+    `# Counts are per-process and reset when the process restarts.\n` +
+    `# Behind several replicas each answers for itself — scrape every instance, ` +
+    `and group by the instance label rather than summing blindly.\n` +
+    renderPrometheus();
 
   return new NextResponse(body, {
     headers: {
