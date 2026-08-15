@@ -371,3 +371,129 @@ describe("what the tools return", () => {
     }
   });
 });
+
+describe("what the chart of accounts costs to read", () => {
+  it("sends each account once, without the page's own scaffolding", async () => {
+    // The page's whole data structure was being handed to the model: 49KB on a
+    // demo shop, six times every other tool put together, and most of it
+    // unusable. `tree` and `accounts` were the same accounts twice over, once
+    // nested and once flat, and every account carried a UUID that no tool in
+    // the catalogue accepts as input.
+    const fixture = await createCompany();
+    const outcome = await call(fixture, "chart_of_accounts", {});
+    expect(outcome.ok).toBe(true);
+
+    const json = JSON.stringify((outcome as { result: unknown }).result);
+
+    // No duplicate nesting, and no identifiers the model has nowhere to use.
+    expect(json).not.toContain('"tree"');
+    expect(json).not.toContain('"id"');
+    expect(json).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
+    expect(json).not.toContain('"sortOrder"');
+  });
+
+  it("keeps what the question actually needs", async () => {
+    const fixture = await createCompany();
+    const outcome = await call(fixture, "chart_of_accounts", {});
+
+    const result = (
+      outcome as {
+        result: {
+          accounts: Array<{
+            code: string;
+            name: string;
+            group: string;
+            balance: string;
+          }>;
+        };
+      }
+    ).result;
+
+    expect(result.accounts.length).toBeGreaterThan(10);
+    const cash = result.accounts.find((row) => row.name.includes("Cash"));
+    // Enough to answer "which account does this belong in" and "what does it
+    // hold" — which is what the tool is for.
+    expect(cash?.code).toBeTruthy();
+    expect(cash?.group).toBeTruthy();
+    expect(cash?.balance).toBeTruthy();
+  });
+
+  it("is a projection rather than a recomputation", async () => {
+    // The rule the whole module rests on: no tool computes a financial figure.
+    // Selecting fields does not break it, and the balance beside an account
+    // must still be the one the trial balance reads.
+    const fixture = await createCompany();
+    await sell(fixture, 40); // ₹4,000
+
+    const [chart, trial] = await Promise.all([
+      call(fixture, "chart_of_accounts", {}),
+      call(fixture, "trial_balance", { to: "2027-03-31" }),
+    ]);
+
+    const accounts = (
+      chart as {
+        result: { accounts: Array<{ name: string; balance: string }> };
+      }
+    ).result.accounts;
+    const rows = (
+      trial as {
+        result: {
+          sections: Array<{
+            rows: Array<{
+              name: string;
+              closingDebit: string;
+              closingCredit: string;
+            }>;
+          }>;
+        };
+      }
+    ).result.sections.flatMap((section) => section.rows);
+
+    const sales = accounts.find((row) =>
+      row.name.toLowerCase().includes("sales"),
+    );
+    const sameRow = rows.find((row) => row.name === sales?.name);
+    expect(sales).toBeDefined();
+    expect(sameRow).toBeDefined();
+    // Same figure, from the same engine, whichever tool asked.
+    expect(Number(sales!.balance)).toBe(
+      Number(sameRow!.closingCredit) - Number(sameRow!.closingDebit),
+    );
+  });
+});
+
+describe("stock that does not fit on one page", () => {
+  it("can be asked for the next page", async () => {
+    // Rows come back a page at a time and the model had no way to ask for
+    // page two — a shop with more lines than fit had the rest permanently
+    // unreachable, with nothing saying so.
+    const fixture = await createCompany();
+
+    const first = await call(fixture, "stock_position", {});
+    expect(first.ok).toBe(true);
+
+    const summary = (
+      first as {
+        result: {
+          rows: unknown[];
+          total: number;
+          page: number;
+          pageCount: number;
+        };
+      }
+    ).result;
+
+    expect(summary.page).toBe(1);
+    expect(summary.total).toBeGreaterThanOrEqual(summary.rows.length);
+
+    const second = await call(fixture, "stock_position", { page: 2 });
+    expect(second.ok).toBe(true);
+    expect((second as { result: { page: number } }).result.page).toBe(2);
+  });
+
+  it("refuses a page number that is not one", async () => {
+    const fixture = await createCompany();
+    const outcome = await call(fixture, "stock_position", { page: 0 });
+    expect(outcome.ok).toBe(false);
+  });
+});

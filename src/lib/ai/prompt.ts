@@ -85,19 +85,96 @@ in this product has been filed with anybody, and nothing in it can file.`;
 }
 
 /**
- * Whether an answer states money without having asked for any.
+ * Every money-shaped figure in a piece of text, as numbers.
  *
- * The one check that does not rely on the model behaving. A reply containing a
- * rupee figure when no tool was called in that turn is, by construction, a
- * figure the model produced from its own head — so it is marked, and the
- * interface says the number could not be traced to a query. This is cheap,
- * deterministic, and catches the exact failure the rules above are written to
- * prevent.
+ * Deliberately narrow: rupee amounts and bare two-decimal amounts, which is
+ * what a stated financial figure looks like. A bare integer is not matched —
+ * "3 customers" and "2026" are not claims about money, and treating them as
+ * such would flag every answer ever written.
+ */
+export function statedFigures(text: string): number[] {
+  const found: number[] = [];
+  const pattern = /₹\s?([\d,]+(?:\.\d+)?)|\b(\d[\d,]*\.\d{2})\b/g;
+
+  for (const match of text.matchAll(pattern)) {
+    const raw = (match[1] ?? match[2] ?? "").replace(/,/g, "");
+    if (raw === "") continue;
+    const value = Number(raw);
+    if (Number.isFinite(value)) found.push(value);
+  }
+  return found;
+}
+
+/** Every number appearing anywhere in a tool result, however deeply nested. */
+function numbersWithin(value: unknown, into: Set<number>): void {
+  if (typeof value === "number") {
+    if (Number.isFinite(value)) into.add(round2(value));
+    return;
+  }
+  if (typeof value === "string") {
+    // Amounts cross the wire as strings — "104522.0000" — so a string that is
+    // wholly a number counts, and one that merely contains digits does not.
+    const trimmed = value.trim();
+    if (trimmed !== "" && Number.isFinite(Number(trimmed))) {
+      into.add(round2(Number(trimmed)));
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) numbersWithin(entry, into);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const entry of Object.values(value)) numbersWithin(entry, into);
+  }
+}
+
+const round2 = (value: number): number => Math.round(value * 100) / 100;
+
+/**
+ * Whether an answer states money the tools did not produce.
+ *
+ * The one check that does not rely on the model behaving, and the only thing
+ * standing between "do not add the figures a tool gives you" being a rule and
+ * being enforced.
+ *
+ * It used to ask only whether *any* tool had been called in the turn. That
+ * caught the worst case — a figure invented with no query at all — and missed
+ * the more likely one: a model that fetches revenue and expenses, adds them in
+ * its head, and states a profit that appears in no tool result. The prompt
+ * forbids exactly that, and counting calls cannot see it.
+ *
+ * So every money-shaped figure in the answer is now looked for in what the
+ * tools actually returned. A figure that is not there was not traced to a
+ * query, however many queries were run, and the interface says so.
+ *
+ * Deliberately not a correctness check. A figure that matches a tool result is
+ * not thereby the *right* figure for the question — this establishes only that
+ * the model did not make the number up, which is the claim the page makes.
  */
 export function statesUnverifiedFigures(
   text: string,
-  toolCallCount: number,
+  toolResults: readonly unknown[] | number,
 ): boolean {
-  if (toolCallCount > 0) return false;
-  return /₹\s?[\d,]+|\b\d[\d,]*\.\d{2}\b|\brupees\b/i.test(text);
+  const results = typeof toolResults === "number" ? null : toolResults;
+  const toolCount = results ? results.length : toolResults;
+
+  // Nothing was asked. Any money-shaped text is a figure from the model's own
+  // head — including one spelled out in words, which no arithmetic can check
+  // but which is just as invented.
+  if (toolCount === 0) {
+    return /₹\s?[\d,]+|\b\d[\d,]*\.\d{2}\b|\brupees\b/i.test(text);
+  }
+
+  // Tools ran, but a caller that only counted them cannot say which figures
+  // came back. Nothing more can be established than the count already did.
+  if (!results) return false;
+
+  const figures = statedFigures(text);
+  if (figures.length === 0) return false;
+
+  const known = new Set<number>();
+  for (const result of results) numbersWithin(result, known);
+
+  return figures.some((figure) => !known.has(round2(figure)));
 }

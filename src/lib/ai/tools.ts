@@ -92,7 +92,7 @@ export const TOOLS: Record<ToolName, ToolDefinition> = {
   stock_position: {
     name: "stock_position",
     description:
-      "What is on the shelves, at what it cost, with what has run out or is running low. Optionally narrowed to products matching a search.",
+      "What is on the shelves, at what it cost, with what has run out or is running low. Optionally narrowed to products matching a search. Rows come back one page at a time: `total` is how many match, `page` is which one you were given and `pageCount` how many there are. Never state or count rows as if they were all of them — say how many matched, and ask for the next page if the question needs it. The summary figures are for the whole business and do not change with the page.",
     input: z.object({
       search: z
         .string()
@@ -104,6 +104,12 @@ export const TOOLS: Record<ToolName, ToolDefinition> = {
         .enum(["low", "out"])
         .optional()
         .describe("Narrow to stock that is low, or that has run out."),
+      page: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("Which page of rows to return. Defaults to the first."),
     }),
     readOnly: true,
   },

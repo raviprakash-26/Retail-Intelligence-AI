@@ -1488,6 +1488,24 @@ analytics displays. The model is never in a position to calculate a financial
 figure, because it never has the pieces: it asks a question and receives an
 answer application code computed.
 
+**The assistant is not charged for what it cannot use.** The chart of accounts
+was the most expensive thing it could ask for — 49KB on a demo shop with 57
+accounts, six times every other tool put together — and most of it could not be
+used. `tree` and `accounts` were the same accounts twice over, once nested and
+once flat; every account carried a UUID, and no tool in the catalogue accepts an
+account id. That cost was not paid once, either: a tool result stays in the
+conversation and is sent again with every later turn, uncached, so three
+follow-up questions paid for the whole chart three times. What the model
+receives now is a projection — code, name, group, type, balance — which is 6KB,
+88% smaller, and answers the two questions the tool exists for. Selection, not
+computation: an integration test asserts the balance beside an account still
+equals the one the trial balance reads.
+
+**A paged tool says it is paged, and can be paged.** Stock positions come back
+one page at a time. The model had no way to ask for the second, so a shop with
+more lines out of stock than fit on a page had the rest permanently unreachable,
+with nothing in the tool description saying so.
+
 **No tool takes a company.** Not one input schema has a `companyId`, and a test
 walks every schema — nested fields included — asserting none ever appears. The
 tenant is bound by the runner from the session. A call carrying `companyId`,
@@ -1505,11 +1523,23 @@ can.
 the message with their arguments and results, and the interface puts them one
 click away — so a figure quoted in June can be traced in December.
 
-**An answer that quotes money without asking for any is marked.** That check is
-deterministic and runs before anybody reads the reply: no tool call in the turn
-plus a rupee figure in the text means the number came from the model's own head,
-and the interface says the figure could not be traced to a query. It does not
+**Every figure in an answer is checked against what the tools returned.** That
+check is deterministic and runs before anybody reads the reply, and it does not
 depend on the model admitting anything.
+
+It used to ask only whether _any_ tool had been called in the turn. That caught
+the worst case — a number invented with no query at all — and missed the more
+likely one: a model that fetches revenue and expenses, subtracts them in its
+head, and states a profit that appears in no tool result. The prompt forbids
+exactly that arithmetic, and counting calls cannot see it. Now every
+money-shaped figure in the answer is looked for in the results themselves,
+however deeply nested, with Indian digit grouping read as the same number that
+crossed the wire as `126000.0000`. A figure that is not there was not traced to
+a query, however many queries ran, and the interface says so.
+
+It is deliberately not a correctness check. A figure that matches a tool result
+is not thereby the _right_ figure for the question — this establishes only that
+the model did not make the number up, which is the claim the page makes.
 
 **Where no provider is configured, nothing is faked.** A fresh installation has
 `AI_DRIVER=disabled`; in that state the page says the assistant is not switched
@@ -2387,49 +2417,50 @@ query text is the only thing the browser controls.
 
 ## Roadmap
 
-| Phase | Scope                                                               | Status   |
-| ----- | ------------------------------------------------------------------- | -------- |
-| 1     | Foundation, schema, design system, public site, auth UI             | **Done** |
-| 2     | Authentication — sessions, verification, rate limiting, audit       | **Done** |
-| 3     | Company onboarding — settings, branches, team, invitations          | **Done** |
-| 4     | Application shell — navigation, search, dashboard                   | **Done** |
-| 5     | Master data — products, parties, staff, opening balances            | **Done** |
-| 6     | Sales — invoicing, GST split, stock issue, void                     | **Done** |
-| 7     | Purchases — bills, input tax credit, landed cost, void              | **Done** |
-| 8     | Expenses — categories, GST, capital vs revenue, void                | **Done** |
-| 9     | Receipts & payments — allocation, ageing, void                      | **Done** |
-| 10    | Accounting engine — chart of accounts, balances, the equation       | **Done** |
-| 11    | Journal — register, manual entries, reversal                        | **Done** |
-| 12    | Ledger — running balance, party statements                          | **Done** |
-| 13    | Trial balance — two columns, and what balancing proves              | **Done** |
-| 14    | Financial statements — trading, P&L, balance sheet                  | **Done** |
-| 15    | Inventory — positions, stock cards, reconciliation, counts          | **Done** |
-| 16    | GST preparation — GSTR-1 working paper, set-off, reconciled         | **Done** |
-| 17    | Income tax — computation, depreciation, 44AD, advance tax           | **Done** |
-| 18    | Analytics — trend, products, customers, ratios, health              | **Done** |
-| 19    | Forecasting — revenue band, cash commitments, refusals              | **Done** |
-| 20    | AI Accountant — read-only tools, traceable answers                  | **Done** |
-| 21    | AI Auditor — deterministic checks, observations not allegations     | **Done** |
-| 22    | AI Business Advisor — detectors, bands, and when to ignore them     | **Done** |
-| 23    | Subscriptions — entitlements, allowances, server-side gates         | **Done** |
-| 24    | Admin panel — metadata only, no impersonation, logged               | **Done** |
-| 25    | Security hardening — CSP, origin coverage, bundle scanning          | **Done** |
-| 26    | Testing — a browser suite in the repository, coverage gaps          | **Done** |
-| 27    | Deployment — image, compose, probes, pipeline, honest limits        | **Done** |
-| 28    | Returns — credit and debit notes, contra accounts, GST reversal     | **Done** |
-| 29    | Reports — one catalogue over existing services, CSV and print       | **Done** |
-| 30    | Payroll — statutory deductions, four liabilities, no invented TDS   | **Done** |
-| 31    | Observability — structured logs, a gated scrape, honest scope       | **Done** |
-| 32    | Backups — a verified dump, and a restore with a safety catch        | **Done** |
-| 33    | Shared rate limits — one counter across instances, bounded wait     | **Done** |
-| 34    | Reports about one subject — account ledger, party statements        | **Done** |
-| 35    | Bank reconciliation — statement import, matching, the identity      | **Done** |
-| 36    | Payments — Razorpay checkout, signed webhooks, one upgrade path     | **Done** |
-| 37    | Multi-replica — two behind a balancer, draining shutdown, labels    | **Done** |
-| 38    | Off-machine backups — verified upload, retention, fetch back        | **Done** |
-| 39    | AI provider — the official SDK, refusals, truncation, caching       | **Done** |
-| 40    | Auditor — the missing GST check, true totals, honest partial runs   | **Done** |
-| 41    | Advisor — overdue payables, stock-out precision, detector isolation | **Done** |
+| Phase | Scope                                                                 | Status   |
+| ----- | --------------------------------------------------------------------- | -------- |
+| 1     | Foundation, schema, design system, public site, auth UI               | **Done** |
+| 2     | Authentication — sessions, verification, rate limiting, audit         | **Done** |
+| 3     | Company onboarding — settings, branches, team, invitations            | **Done** |
+| 4     | Application shell — navigation, search, dashboard                     | **Done** |
+| 5     | Master data — products, parties, staff, opening balances              | **Done** |
+| 6     | Sales — invoicing, GST split, stock issue, void                       | **Done** |
+| 7     | Purchases — bills, input tax credit, landed cost, void                | **Done** |
+| 8     | Expenses — categories, GST, capital vs revenue, void                  | **Done** |
+| 9     | Receipts & payments — allocation, ageing, void                        | **Done** |
+| 10    | Accounting engine — chart of accounts, balances, the equation         | **Done** |
+| 11    | Journal — register, manual entries, reversal                          | **Done** |
+| 12    | Ledger — running balance, party statements                            | **Done** |
+| 13    | Trial balance — two columns, and what balancing proves                | **Done** |
+| 14    | Financial statements — trading, P&L, balance sheet                    | **Done** |
+| 15    | Inventory — positions, stock cards, reconciliation, counts            | **Done** |
+| 16    | GST preparation — GSTR-1 working paper, set-off, reconciled           | **Done** |
+| 17    | Income tax — computation, depreciation, 44AD, advance tax             | **Done** |
+| 18    | Analytics — trend, products, customers, ratios, health                | **Done** |
+| 19    | Forecasting — revenue band, cash commitments, refusals                | **Done** |
+| 20    | AI Accountant — read-only tools, traceable answers                    | **Done** |
+| 21    | AI Auditor — deterministic checks, observations not allegations       | **Done** |
+| 22    | AI Business Advisor — detectors, bands, and when to ignore them       | **Done** |
+| 23    | Subscriptions — entitlements, allowances, server-side gates           | **Done** |
+| 24    | Admin panel — metadata only, no impersonation, logged                 | **Done** |
+| 25    | Security hardening — CSP, origin coverage, bundle scanning            | **Done** |
+| 26    | Testing — a browser suite in the repository, coverage gaps            | **Done** |
+| 27    | Deployment — image, compose, probes, pipeline, honest limits          | **Done** |
+| 28    | Returns — credit and debit notes, contra accounts, GST reversal       | **Done** |
+| 29    | Reports — one catalogue over existing services, CSV and print         | **Done** |
+| 30    | Payroll — statutory deductions, four liabilities, no invented TDS     | **Done** |
+| 31    | Observability — structured logs, a gated scrape, honest scope         | **Done** |
+| 32    | Backups — a verified dump, and a restore with a safety catch          | **Done** |
+| 33    | Shared rate limits — one counter across instances, bounded wait       | **Done** |
+| 34    | Reports about one subject — account ledger, party statements          | **Done** |
+| 35    | Bank reconciliation — statement import, matching, the identity        | **Done** |
+| 36    | Payments — Razorpay checkout, signed webhooks, one upgrade path       | **Done** |
+| 37    | Multi-replica — two behind a balancer, draining shutdown, labels      | **Done** |
+| 38    | Off-machine backups — verified upload, retention, fetch back          | **Done** |
+| 39    | AI provider — the official SDK, refusals, truncation, caching         | **Done** |
+| 40    | Auditor — the missing GST check, true totals, honest partial runs     | **Done** |
+| 41    | Advisor — overdue payables, stock-out precision, detector isolation   | **Done** |
+| 42    | Accountant — figures checked against results, a cheaper chart, paging | **Done** |
 
 ---
 

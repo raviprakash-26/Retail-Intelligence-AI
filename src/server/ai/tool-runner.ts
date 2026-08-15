@@ -1,6 +1,9 @@
 import "server-only";
 import { TOOLS, isToolName, type ToolName } from "@/lib/ai/tools";
-import { getChartOfAccounts } from "@/server/accounting/account-service";
+import {
+  getChartOfAccounts,
+  type ChartOfAccounts,
+} from "@/server/accounting/account-service";
 import { getFinancialStatements } from "@/server/accounting/statements-service";
 import { getTrialBalance } from "@/server/accounting/trial-balance-service";
 import { getAnalytics } from "@/server/analytics/analytics-service";
@@ -109,10 +112,8 @@ async function dispatch(
     case "trial_balance":
       return getTrialBalance({ companyId, to: input.to as string });
 
-    case "chart_of_accounts": {
-      const chart = await getChartOfAccounts({ companyId });
-      return chart;
-    }
+    case "chart_of_accounts":
+      return chartForModel(await getChartOfAccounts({ companyId }));
 
     case "outstanding":
       return input.kind === "payable"
@@ -124,6 +125,10 @@ async function dispatch(
         companyId,
         query: (input.search as string | undefined) ?? "",
         filter: input.filter as "low" | "out" | undefined,
+        // Rows come back a page at a time. Without this the model could see
+        // only ever the first page — a shop with forty lines out of stock had
+        // fifteen of them permanently unreachable, and nothing said so.
+        page: input.page as number | undefined,
       });
 
     case "gst_working_paper":
@@ -156,6 +161,60 @@ async function dispatch(
     case "forecast":
       return getForecast({ companyId });
   }
+}
+
+/**
+ * The chart, in the shape the question needs.
+ *
+ * Selection, not computation: every field here is copied from what the service
+ * returned, and no figure is recalculated on the way through. That distinction
+ * is the whole rule this module is built on, and a projection does not break
+ * it — the balance beside an account is still the balance the statements read.
+ *
+ * The page's own structure was being sent whole, and it was by far the most
+ * expensive thing the assistant could ask for: 49KB on a demo shop with 57
+ * accounts, six times every other tool put together. Most of it was not usable.
+ * `tree` and `accounts` are the same accounts twice over, once nested and once
+ * flat. Every account carried a UUID, and no tool in the catalogue accepts an
+ * account id, so the model was reading two thousand characters of identifier it
+ * had nowhere to use. `sortOrder` and `isSystem` describe how the page draws
+ * itself.
+ *
+ * That cost is not paid once. A tool result stays in the conversation and is
+ * sent again with every later turn, uncached — so a shopkeeper asking three
+ * follow-up questions paid for the whole chart three times.
+ *
+ * What is kept is what answers "which account does this belong in" and "what
+ * does this account hold": the code, the name, the group it sits under, and the
+ * balance. Inactive accounts are dropped — nothing can be posted to them, so
+ * they cannot be the answer to either question.
+ */
+function chartForModel(chart: ChartOfAccounts): {
+  accounts: Array<{
+    code: string;
+    name: string;
+    group: string;
+    type: string;
+    balance: string;
+  }>;
+  note: string;
+} {
+  const groupName = new Map(
+    chart.groups.map((group) => [group.id, group.name]),
+  );
+
+  return {
+    accounts: chart.accounts
+      .filter((account) => account.isActive)
+      .map((account) => ({
+        code: account.code,
+        name: account.name,
+        group: groupName.get(account.groupId) ?? account.type,
+        type: account.type,
+        balance: account.balance,
+      })),
+    note: "Balances are signed in the direction of each account's nature, as at today.",
+  };
 }
 
 /**
