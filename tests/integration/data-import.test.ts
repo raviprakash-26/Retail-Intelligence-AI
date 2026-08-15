@@ -6,6 +6,7 @@ import {
   commitImport,
   previewImport,
   ImportError,
+  MAX_ROWS,
 } from "@/server/import/import-service";
 import {
   disconnectTestDb,
@@ -323,4 +324,55 @@ describe("one shop's file cannot reach another shop", () => {
     expect(preview.counts.create).toBe(3);
     expect(preview.counts.skip).toBe(0);
   }, 120_000);
+});
+
+describe("a file bigger than one sitting", () => {
+  it("refuses more rows than the request can finish, with the number", async () => {
+    // The failure this prevents: the reverse proxy closes the request at sixty
+    // seconds, and a file long enough to cross that leaves rows created, no
+    // report of which, and a person unable to tell what arrived. Refusing with
+    // a number is the honest answer.
+    const fixture = await createCompany();
+    const rows = ["SKU,Name,Unit"];
+    for (let i = 0; i < MAX_ROWS + 1; i += 1) {
+      rows.push(`SKU-${i},Product ${i},PCS`);
+    }
+
+    await expect(look(fixture, "products", rows.join("\n"))).rejects.toThrow(
+      new RegExp(String(MAX_ROWS)),
+    );
+  }, 60_000);
+
+  it("brings in a file of a few hundred without losing any of them", async () => {
+    // Small enough to run on every commit, large enough that a per-row mistake
+    // — a cursor that does not advance, a skip set that never fills — would
+    // show up as a wrong count rather than passing on three rows.
+    const fixture = await createCompany();
+    const N = 250;
+    const rows = ["SKU,Name,Unit,Purchase Price,Selling Price,Opening Stock"];
+    for (let i = 0; i < N; i += 1) {
+      rows.push(
+        `SKU-${i},Product number ${i},PCS,${100 + (i % 40)},${150 + (i % 40)},${i % 20}`,
+      );
+    }
+    const file = rows.join("\n");
+
+    const preview = await look(fixture, "products", file);
+    expect(preview.counts.create).toBe(N);
+
+    const result = await run(fixture, "products", file);
+    expect(result.created).toBe(N);
+    expect(result.failed).toEqual([]);
+
+    expect(
+      await prisma.product.count({ where: { companyId: fixture.companyId } }),
+    ).toBe(N);
+
+    // Every opening entry that was posted still balances against the others.
+    const trial = await getTrialBalance({
+      companyId: fixture.companyId,
+      to: "2027-03-31",
+    });
+    expect(trial.balanced).toBe(true);
+  }, 300_000);
 });

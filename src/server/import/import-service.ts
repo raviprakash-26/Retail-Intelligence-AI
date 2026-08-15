@@ -88,8 +88,23 @@ export class ImportError extends Error {
   }
 }
 
-/** More rows than this in one file and it should be split. */
-export const MAX_ROWS = 5_000;
+/**
+ * More rows than this in one file and it should be split.
+ *
+ * Chosen from a measurement rather than a round number. Each row goes through
+ * the ordinary create service, which opens a transaction and posts an opening
+ * entry, and that costs about 17ms a row on a development machine — so a
+ * thousand rows takes some seventeen seconds. The reverse proxy in front of
+ * this application closes a request at sixty (`proxy_read_timeout` in
+ * `deploy/nginx.conf`), which at that rate is around thirty-five hundred rows.
+ *
+ * A file cut off by the proxy is the worst outcome this module has: rows
+ * created, no report of which, and a person with no way to tell what arrived.
+ * So the cap sits at a thousand — well inside the budget even on a database
+ * two or three times slower than the one this was measured on — and a bigger
+ * file is refused with a number rather than truncated.
+ */
+export const MAX_ROWS = 1_000;
 
 type Prepared = {
   row: number;

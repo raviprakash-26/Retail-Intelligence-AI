@@ -1981,6 +1981,19 @@ import interrupted at row 300 can simply be run again. Nothing updates an
 existing record: quietly changing a price somebody has since corrected, because
 it was still old in a spreadsheet, is not a decision an import gets to make.
 
+**A thousand rows at a time, and the number came from a measurement.** Each row
+goes through the ordinary create service — a transaction and an opening entry —
+which costs about 17ms a row, so a thousand takes some seventeen seconds. The
+reverse proxy in front of the application closes a request at sixty
+(`proxy_read_timeout` in `deploy/nginx.conf`), which at that rate is around
+thirty-five hundred rows. A file cut off by the proxy is the worst outcome this
+module has: rows created, no report of which, and nobody able to say what
+arrived. So the cap sits well inside the budget rather than at the point it
+would break, and a longer file is refused with a number instead of truncated.
+That timing was taken once on a development machine and is not part of the
+suite; what the suite pins is that the cap is enforced and that a few hundred
+rows arrive without losing any.
+
 Sales, purchases and journal entries are deliberately not importable. A year of
 invoices would mean inventing the stock movements and tax entries behind them,
 and this product would be asserting a ledger it never posted.
