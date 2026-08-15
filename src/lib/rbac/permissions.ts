@@ -196,6 +196,13 @@ export const PERMISSIONS = {
     module: "Settings",
     description: "Download a complete copy of this business's data",
   },
+  // Creating hundreds of records in one action, opening balances included, is
+  // a different act from adding a product — and one whose mistakes are tedious
+  // to unpick. Like the export, it is granted rather than assumed.
+  "data.import": {
+    module: "Settings",
+    description: "Bring products, customers and suppliers in from a file",
+  },
   "billing.view": {
     module: "Billing",
     description: "View the subscription and invoices",

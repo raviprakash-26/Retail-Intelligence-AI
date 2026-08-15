@@ -51,6 +51,7 @@ const PAGES = [
   ["payroll", "/app/payroll"],
   ["settings", "/app/settings/business"],
   ["your data", "/app/settings/data"],
+  ["bring data in", "/app/settings/import"],
 ] as const;
 
 /**
