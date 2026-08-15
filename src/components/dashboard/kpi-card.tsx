@@ -41,7 +41,7 @@ export function KpiCard({
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  className="text-muted-foreground/60 hover:text-muted-foreground"
+                  className="text-muted-foreground hover:text-foreground"
                   aria-label={`About ${label}`}
                 >
                   <CircleHelp className="size-3" />
@@ -55,7 +55,7 @@ export function KpiCard({
         {pending ? (
           <>
             <Skeleton className="mt-2 h-6 w-24" />
-            <p className="mt-2 text-[0.6875rem] leading-relaxed text-muted-foreground/70">
+            <p className="mt-2 text-[0.6875rem] leading-relaxed text-muted-foreground">
               {pendingNote ?? "Available once this module is built."}
             </p>
           </>

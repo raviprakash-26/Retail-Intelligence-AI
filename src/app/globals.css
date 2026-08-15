@@ -51,19 +51,21 @@
   --accent-foreground: oklch(0.325 0.058 218);
 
   /* --- Semantic ------------------------------------------------------- */
-  --destructive: oklch(0.564 0.196 24.5);
+  --destructive: oklch(0.48 0.196 24.5);
   --destructive-foreground: oklch(0.985 0.004 265);
   --destructive-muted: oklch(0.958 0.026 24.5);
 
-  --success: oklch(0.567 0.128 156);
+  --success: oklch(0.48 0.128 156);
   --success-foreground: oklch(0.985 0.004 265);
   --success-muted: oklch(0.955 0.031 156);
 
   --warning: oklch(0.712 0.153 71);
   --warning-foreground: oklch(0.245 0.048 71);
   --warning-muted: oklch(0.964 0.043 84);
+  /* Text and glyphs on --warning-muted. See the note in the dark block. */
+  --warning-strong: oklch(0.48 0.153 71);
 
-  --info: oklch(0.576 0.129 236);
+  --info: oklch(0.48 0.129 236);
   --info-foreground: oklch(0.985 0.004 265);
   --info-muted: oklch(0.955 0.029 236);
 
@@ -156,6 +158,18 @@
   --warning: oklch(0.788 0.142 76);
   --warning-foreground: oklch(0.185 0.038 71);
   --warning-muted: oklch(0.302 0.058 76);
+  /*
+   * The readable warning, where it sits on --warning-muted.
+   *
+   * Amber cannot do both of its jobs from one value. As a fill it has to stay
+   * light enough for the dark --warning-foreground on top of it to clear
+   * 4.5:1; as a mark on its own muted background it has to be dark enough to
+   * clear 4.5:1 as text. No single lightness does both,
+   * so the fill keeps the amber everybody recognises and this carries the
+   * glyph. In the dark theme the muted background is dark and the same value
+   * already clears it, so the two coincide.
+   */
+  --warning-strong: oklch(0.788 0.142 76);
 
   --info: oklch(0.688 0.118 236);
   --info-foreground: oklch(0.172 0.021 265);
@@ -240,6 +254,7 @@
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
   --color-warning-muted: var(--warning-muted);
+  --color-warning-strong: var(--warning-strong);
 
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);

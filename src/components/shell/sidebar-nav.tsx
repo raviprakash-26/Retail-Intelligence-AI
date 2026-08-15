@@ -70,9 +70,14 @@ export function SidebarNav({
                         : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
                       // A muted item reads as "not yet" rather than "broken",
                       // which is what a normal-looking dead link would suggest.
+                      // Quieter than a live item but still legible: at /45 this
+                      // sat at 2.55:1 in the light theme against a 4.5
+                      // requirement, so the thing telling somebody a feature
+                      // exists was the hardest text on the page to read. The
+                      // badge beside it is what carries the meaning.
                       (notBuilt || planGated) &&
                         !isActive &&
-                        "text-sidebar-foreground/45",
+                        "text-sidebar-foreground/70",
                     )}
                   >
                     <NavIcon
