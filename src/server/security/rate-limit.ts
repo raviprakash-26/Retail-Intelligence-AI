@@ -66,6 +66,15 @@ export const RATE_LIMITS = {
   AI_MESSAGE_USER: { limit: 20, windowSeconds: 60 },
   /** Invitations sent from one company. Email sent to strangers, so capped. */
   INVITE_COMPANY: { limit: 20, windowSeconds: 3600 },
+  /**
+   * Complete data exports, per user.
+   *
+   * The most expensive thing this application can be asked to do — it reads
+   * every row of every table the business owns. Three an hour is more than
+   * anybody needs and few enough that a loop cannot use the shop's own
+   * database against it.
+   */
+  DATA_EXPORT_USER: { limit: 3, windowSeconds: 3600 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export type RateLimitName = keyof typeof RATE_LIMITS;

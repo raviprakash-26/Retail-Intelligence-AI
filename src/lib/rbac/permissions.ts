@@ -187,6 +187,15 @@ export const PERMISSIONS = {
   },
   "roles.manage": { module: "Settings", description: "Create and edit roles" },
   "branches.manage": { module: "Settings", description: "Manage branches" },
+  // Deliberately its own permission, and deliberately not in any role list
+  // below. Exporting one report is a normal day's work; taking a complete copy
+  // of the books — every customer, every price, every entry — out of the
+  // building is an owner's decision, and it should be one somebody has to be
+  // given rather than one that arrives with a job title.
+  "data.export": {
+    module: "Settings",
+    description: "Download a complete copy of this business's data",
+  },
   "billing.view": {
     module: "Billing",
     description: "View the subscription and invoices",
