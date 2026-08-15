@@ -2012,6 +2012,53 @@ confusion that ends with somebody acting on the wrong account.
 
 ---
 
+## Accessibility
+
+**Care that nothing checks is care that survives until the first hurried
+afternoon.** There was real work here before any of it was tested — forty-eight
+`aria-label`s, decorative icons hidden, every image with alt text, focus rings
+on every control — and nothing that verified any of it. So `axe` now sweeps
+every page a signed-in owner can reach, in both colour schemes, and the build
+fails on serious and critical findings. Moderate and minor are reported and do
+not fail: a gate nobody can ever get to zero is a gate everybody learns to skip.
+
+The first run failed thirty of thirty-six checks, and the good news was in the
+shape of it — **not one structural failure**. No missing label, no ARIA error,
+no keyboard trap, no unreachable control. Every one was colour, and behind them
+were four defects worth naming:
+
+- **Two alert styles were nearly invisible.** The info and success variants put
+  near-white text on a pale tint — 1.07:1, against a 4.5:1 requirement. Text
+  that is technically present and cannot be read is worse than text that is
+  missing, because nothing about the page says so.
+- **The warning badge was unreadable in the dark theme**, at 1.37:1 — dark
+  brown on dark brown. Amber turns out to be the one semantic colour that
+  cannot do both of its jobs from a single value: light enough to carry dark
+  text as a fill, dark enough to be read on its own muted background. It now
+  has a second token, and the reason is written beside it.
+- **`--success` and `--info` failed in both of their roles at once**, as text on
+  their muted backgrounds and as fills under their own foregrounds. One
+  lightness correction fixed both.
+- **The sidebar dimmed exactly the wrong thing.** Items for features not yet
+  built or not on the plan were drawn at 45% opacity — 2.55:1 — so the text
+  telling somebody a feature exists was the hardest on the page to read. The
+  badge beside it was already carrying that meaning.
+
+None of these were found by reading the stylesheet. Every one came from
+measuring rendered pixels: the candidate lightness values were chosen by
+painting each colour to a canvas, reading it back and computing the ratio,
+rather than by picking numbers that looked about right.
+
+Two keyboard paths are checked as well — that tabbing reaches the navigation
+and that the focused control has a visible ring, and that opening a form moves
+focus rather than leaving a screen-reader user reading the page behind it.
+
+What this is not is a WCAG audit. It is a gate on the failures that stop
+somebody using the product, run on every commit, in a codebase where nothing
+had ever been checked.
+
+---
+
 ## Security hardening
 
 **One origin check, in one spelling.** It existed in three — a `guardOrigin`
@@ -2526,6 +2573,7 @@ query text is the only thing the browser controls.
 | 41    | Advisor — overdue payables, stock-out precision, detector isolation   | **Done** |
 | 42    | Accountant — figures checked against results, a cheaper chart, paging | **Done** |
 | 43    | Data export — a shop's whole books as a zip, and never a credential   | **Done** |
+| 44    | Accessibility — an axe gate, and the four colour defects it found     | **Done** |
 
 ---
 

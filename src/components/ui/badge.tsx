@@ -14,7 +14,7 @@ const badgeVariants = cva(
         // Tinted variants read as status rather than as an action, which is
         // what a table cell almost always needs.
         success: "border-transparent bg-success-muted text-success",
-        warning: "border-transparent bg-warning-muted text-warning-foreground",
+        warning: "border-transparent bg-warning-muted text-warning-strong",
         danger: "border-transparent bg-destructive-muted text-destructive",
         info: "border-transparent bg-info-muted text-info",
         ai: "border-transparent bg-ai-muted text-ai",

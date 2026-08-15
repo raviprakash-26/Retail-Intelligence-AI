@@ -220,18 +220,18 @@ function ComputationPanel({ paper }: { paper: TaxWorkingPaper }) {
                 line.emphasis === "total" ? "bg-secondary/50" : ""
               }`}
             >
-              <div className="min-w-0 flex-1">
-                <dt
+              <dt className="min-w-0 flex-1">
+                <span
                   className={`text-sm ${line.emphasis === "total" ? "font-semibold" : ""}`}
                 >
                   {line.label}
-                </dt>
+                </span>
                 {line.note && (
                   <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
                     {line.note}
                   </p>
                 )}
-              </div>
+              </dt>
               <dd
                 className={`tabular-figures shrink-0 text-right ${
                   line.emphasis === "total"
@@ -1054,16 +1054,16 @@ function SummaryLine({
         emphasis ? "bg-secondary/50" : ""
       }`}
     >
-      <div className="min-w-0 flex-1">
-        <dt className={`text-sm ${emphasis ? "font-semibold" : ""}`}>
+      <dt className="min-w-0 flex-1">
+        <span className={`text-sm ${emphasis ? "font-semibold" : ""}`}>
           {label}
-        </dt>
+        </span>
         {note && (
           <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
             {note}
           </p>
         )}
-      </div>
+      </dt>
       <dd
         className={`tabular-figures shrink-0 text-right ${
           emphasis ? "text-base font-semibold" : "text-sm"
