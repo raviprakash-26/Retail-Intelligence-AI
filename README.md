@@ -474,7 +474,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1416 tests: unit + integration
+npm run test          # 1422 tests: unit + integration
 npm run test:unit     # unit only, no database required
 npm run test:e2e      # 55 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
@@ -2078,6 +2078,50 @@ DATABASE_URL=… BACKUP_DIR=./backups ./scripts/backup.sh
 `docker compose up` runs the first of those nightly into a volume, keeping
 fourteen days.
 
+**Set `BACKUP_S3_BUCKET` and the same dump goes off the machine.** Without it,
+backups sit on the same disk as the database they came from — they survive a
+dropped table and not a dead machine, and every run says so in those words
+rather than leaving somebody to assume otherwise.
+
+```bash
+BACKUP_S3_BUCKET=riai-backups \
+BACKUP_S3_ENDPOINT=https://account.r2.cloudflarestorage.com \
+AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… \
+./scripts/backup.sh
+
+./scripts/fetch-backup.sh --list      # what is up there
+./scripts/fetch-backup.sh             # bring the newest one back, verified
+```
+
+Any S3-compatible store works — S3, R2, Supabase, MinIO — because the only
+thing that differs between them is the endpoint. The upload is the AWS CLI's
+job rather than hand-rolled request signing: a backup script is the last place
+to put a correctness risk nobody would notice until a restore.
+
+**The uploaded object is read back before anything is pruned.** Same reason the
+dump is read back before it is kept: an upload that truncated is the ordinary
+way an offsite backup turns out to be worthless, and one `head-object` request
+is what turns that from a discovery during an incident into a failed nightly
+run. A failed or short upload exits non-zero and prunes nothing — local or
+remote — because at that moment the copies that already exist are the only ones
+there are.
+
+**Remote retention deletes only what it recognises.** Objects are named with a
+sortable UTC stamp, and anything under the prefix that does not parse as one of
+ours is left alone. A retention job that deletes files it cannot identify
+eventually deletes something it should not.
+
+**Fetching is half the feature.** A dump nobody has ever retrieved is a dump
+nobody knows is retrievable — the credentials may be wrong, the bucket may be in
+another account, the objects may be in a storage class that takes hours to
+thaw. `fetch-backup.sh` downloads one and verifies it with `pg_restore --list`,
+so that is discoverable in a quiet minute rather than during an incident. It is
+the same amount of work either time.
+
+Give the job a key scoped to one bucket with put, list, get and delete, and
+nothing else. A backup job holding a key that can read the rest of the account
+is a backup job worth compromising.
+
 **A `pg_dump` that exits 0 is not a backup.** It is a file. What makes it a
 backup is somebody having restored it and found the ledger intact — which is why
 the dump is written under a temporary name, read back with `pg_restore --list`,
@@ -2170,12 +2214,19 @@ avoids.
   only one driver has been written.
 - **Nothing is filed with any authority.** GST and income tax are prepared for a
   human to review and submit.
-- **Backups run, but only to the same machine.** There is a nightly dump, a
-  restore script and a test that proves the round trip — and the dump lands in a
-  volume beside the database it came from, so it survives a dropped table and
-  not a dead disk. For books somebody will need in a tax dispute three years
-  from now, use managed Postgres with point-in-time recovery and copy the dumps
-  somewhere else.
+- **Backups can go off the machine, but a nightly dump still loses a day.**
+  There is a nightly dump, verification on both sides of the upload, a fetch
+  script and a test that proves the round trip. What it is not is
+  point-in-time recovery: whatever was posted since the last run is gone. For
+  books somebody will need in a tax dispute three years from now, use managed
+  Postgres with PITR and keep these dumps as the second copy.
+- **No backup has been uploaded to a real bucket from here.** The upload
+  contract is tested against a stubbed CLI — that only a verified dump is sent,
+  that a failure fails the run, that a short object is refused, that retention
+  spares what it does not recognise — and CI builds the backup image and checks
+  it carries `pg_dump`, `pg_restore` and `aws`. What nobody has done is watch an
+  object land in a real bucket from this build. Run it once by hand and fetch it
+  back before trusting it.
 - **Two replicas run, but nobody has run them under load.** There is a compose
   overlay that starts two behind nginx, the concurrency that would break first
   is tested against separate database connections, and shutdown drains before
@@ -2301,6 +2352,7 @@ query text is the only thing the browser controls.
 | 35    | Bank reconciliation — statement import, matching, the identity    | **Done** |
 | 36    | Payments — Razorpay checkout, signed webhooks, one upgrade path   | **Done** |
 | 37    | Multi-replica — two behind a balancer, draining shutdown, labels  | **Done** |
+| 38    | Off-machine backups — verified upload, retention, fetch back      | **Done** |
 
 ---
 

@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
@@ -115,6 +124,80 @@ function registrationInput(email: string): RegisterInput {
       inventoryMethod: "WEIGHTED_AVERAGE",
       loadDemoData: false,
     },
+  };
+}
+
+/**
+ * A stand-in for the AWS CLI, on PATH.
+ *
+ * The upload itself is the CLI's job and testing it would be testing Amazon's
+ * code. What is worth testing is the contract around it: that only a verified
+ * dump is sent, that a failed upload fails the run loudly instead of leaving a
+ * cron job reporting success, that the object is checked after it lands, and
+ * that nothing is pruned when any of that goes wrong.
+ *
+ * The stub records every invocation to a file so those can be asserted, and
+ * `behaviour` chooses how it answers.
+ */
+function stubAwsCli(
+  dir: string,
+  behaviour: {
+    /** Bytes head-object should report. Defaults to the real file's size. */
+    reportedSize?: string;
+    /** Make `s3 cp` fail, as an unreachable bucket would. */
+    failUpload?: boolean;
+    /** Keys list-objects-v2 should return. */
+    listKeys?: readonly string[];
+  } = {},
+): { binDir: string; calls: () => string[][] } {
+  const binDir = join(dir, "bin");
+  mkdirSync(binDir, { recursive: true });
+  const log = join(dir, "aws-calls.log");
+  writeFileSync(log, "");
+
+  const size = behaviour.reportedSize;
+  // Written to a file the stub cats, rather than embedded in the script.
+  // Escaping newlines or tabs through a generated bash literal means `printf`
+  // emitting the two characters "\t" instead of a tab, and the script under
+  // test then sees one long key rather than several.
+  const listingPath = join(dir, "aws-listing.txt");
+  writeFileSync(listingPath, (behaviour.listKeys ?? []).join("\n") || "None");
+
+  const script = `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> ${JSON.stringify(log)}
+args="$*"
+case "$args" in
+  *"s3api head-object"*)
+    ${
+      size === undefined
+        ? // Report the real size of whatever was uploaded, which is what a
+          // healthy store does.
+          `file=$(grep -o '/[^ ]*\\.dump' ${JSON.stringify(log)} | head -n 1); wc -c < "$file" | tr -d ' '`
+        : `printf '%s\\n' ${JSON.stringify(size)}`
+    }
+    ;;
+  *"s3api list-objects-v2"*)
+    cat ${JSON.stringify(listingPath)}
+    ;;
+  *"s3 cp"*)
+    ${behaviour.failUpload ? 'echo "upload failed" >&2; exit 1' : "exit 0"}
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`;
+  const path = join(binDir, "aws");
+  writeFileSync(path, script);
+  chmodSync(path, 0o755);
+
+  return {
+    binDir,
+    calls: () =>
+      readFileSync(log, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => line.split(" ")),
   };
 }
 
@@ -273,4 +356,183 @@ describe.skipIf(!HAS_CLIENT_TOOLS)("backing the ledger up", () => {
     );
     rmSync(empty, { recursive: true, force: true });
   }, 60_000);
+});
+
+describe.skipIf(!HAS_CLIENT_TOOLS)("sending a copy off the machine", () => {
+  /** A fresh directory per case, so one run's dumps do not confuse the next. */
+  const freshDir = () => mkdtempSync(join(tmpdir(), "riai-offsite-"));
+
+  it("says plainly when there is no off-machine copy", () => {
+    // The default, and the state most installations are in. It has to be
+    // stated rather than left for somebody to assume.
+    const dir = freshDir();
+    try {
+      const output = runScript("backup.sh", [], {
+        DATABASE_URL,
+        BACKUP_DIR: dir,
+        BACKUP_RETENTION_DAYS: "0",
+      });
+      expect(output).toMatch(/same machine as the database/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("uploads a verified dump and checks what landed", () => {
+    const dir = freshDir();
+    const aws = stubAwsCli(dir);
+    try {
+      const output = runScript("backup.sh", [], {
+        DATABASE_URL,
+        BACKUP_DIR: dir,
+        BACKUP_RETENTION_DAYS: "0",
+        BACKUP_S3_BUCKET: "riai-backups",
+        BACKUP_S3_PREFIX: "ledger",
+        PATH: `${aws.binDir}:${process.env.PATH ?? ""}`,
+      });
+
+      expect(output).toMatch(/uploaded .*verified/i);
+
+      const calls = aws.calls();
+      const copy = calls.find((call) => call.join(" ").includes("s3 cp"));
+      expect(copy?.join(" ")).toContain("s3://riai-backups/ledger/riai-");
+      // The object is read back after it lands, for the same reason the dump
+      // is read back before it is kept.
+      expect(
+        calls.some((call) => call.join(" ").includes("s3api head-object")),
+      ).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("passes the endpoint through, so any S3-compatible store works", () => {
+    // R2, Supabase and MinIO differ from S3 in exactly one thing.
+    const dir = freshDir();
+    const aws = stubAwsCli(dir);
+    try {
+      runScript("backup.sh", [], {
+        DATABASE_URL,
+        BACKUP_DIR: dir,
+        BACKUP_RETENTION_DAYS: "0",
+        BACKUP_S3_BUCKET: "riai-backups",
+        BACKUP_S3_ENDPOINT: "https://account.r2.cloudflarestorage.com",
+        PATH: `${aws.binDir}:${process.env.PATH ?? ""}`,
+      });
+
+      const copy = aws
+        .calls()
+        .find((call) => call.join(" ").includes("s3 cp"))
+        ?.join(" ");
+      expect(copy).toContain(
+        "--endpoint-url https://account.r2.cloudflarestorage.com",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("fails the run when the upload fails, and prunes nothing", () => {
+    // The failure that matters most: a nightly job that reports success while
+    // nothing has gone offsite for a month.
+    const dir = freshDir();
+    const aws = stubAwsCli(dir, { failUpload: true });
+    try {
+      let failed = false;
+      let output = "";
+      try {
+        runScript("backup.sh", [], {
+          DATABASE_URL,
+          BACKUP_DIR: dir,
+          BACKUP_RETENTION_DAYS: "1",
+          BACKUP_S3_BUCKET: "riai-backups",
+          PATH: `${aws.binDir}:${process.env.PATH ?? ""}`,
+        });
+      } catch (error) {
+        failed = true;
+        output = String(
+          (error as { stderr?: Buffer; stdout?: Buffer }).stderr ?? "",
+        );
+      }
+
+      expect(failed).toBe(true);
+      expect(output).toMatch(/upload failed/i);
+      expect(output).toMatch(/nothing was pruned/i);
+
+      // The local dump is still there. It is now the only copy, which is
+      // exactly why it must not be deleted.
+      expect(readdirSync(dir).some((name) => name.endsWith(".dump"))).toBe(
+        true,
+      );
+      expect(aws.calls().some((call) => call.join(" ").includes("s3 rm"))).toBe(
+        false,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("refuses an upload that landed the wrong size", () => {
+    // A truncated object is the ordinary way an offsite backup turns out to be
+    // worthless. It costs one request to notice, and the run has to fail —
+    // otherwise the only signal is a restore that does not work.
+    const dir = freshDir();
+    const aws = stubAwsCli(dir, { reportedSize: "42" });
+    try {
+      let failed = false;
+      let output = "";
+      try {
+        runScript("backup.sh", [], {
+          DATABASE_URL,
+          BACKUP_DIR: dir,
+          BACKUP_RETENTION_DAYS: "0",
+          BACKUP_S3_BUCKET: "riai-backups",
+          PATH: `${aws.binDir}:${process.env.PATH ?? ""}`,
+        });
+      } catch (error) {
+        failed = true;
+        output = String((error as { stderr?: Buffer }).stderr ?? "");
+      }
+
+      expect(failed).toBe(true);
+      expect(output).toMatch(/42 bytes, expected/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("prunes remote copies past the retention window, and only those", () => {
+    const dir = freshDir();
+    const aws = stubAwsCli(dir, {
+      listKeys: [
+        // Well past any sane window.
+        "riai/riai-20200101T000000Z.dump",
+        // Today's — must survive.
+        `riai/riai-${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}Z.dump`,
+        // Not one of ours, and not ours to delete.
+        "riai/notes.txt",
+      ],
+    });
+    try {
+      runScript("backup.sh", [], {
+        DATABASE_URL,
+        BACKUP_DIR: dir,
+        BACKUP_RETENTION_DAYS: "14",
+        BACKUP_S3_BUCKET: "riai-backups",
+        PATH: `${aws.binDir}:${process.env.PATH ?? ""}`,
+      });
+
+      const removed = aws
+        .calls()
+        .filter((call) => call.join(" ").includes("s3 rm"))
+        .map((call) => call.join(" "));
+
+      expect(removed.join("\n")).toContain("riai-20200101T000000Z.dump");
+      // A file it does not recognise is left alone. A retention job that
+      // deletes what it cannot parse eventually deletes something it should not.
+      expect(removed.join("\n")).not.toContain("notes.txt");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
