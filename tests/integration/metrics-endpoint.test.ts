@@ -96,6 +96,28 @@ describe("with a correct token", () => {
     );
   }, 60_000);
 
+  it("says which replica answered, so several can be scraped apart", async () => {
+    // Behind more than one instance a scrape reaches whichever the balancer
+    // chose. Without an instance label two replicas each reporting forty
+    // failures is either eighty failures or one replica scraped twice, and
+    // nothing in the output distinguishes them.
+    const { GET } = await loadRoute();
+    const response = await GET(
+      request({ authorization: `Bearer ${TOKEN}` }) as never,
+    );
+    const body = await response.text();
+
+    expect(body).toMatch(/riai_instance_info\{instance="[^"]+"\} 1/);
+    expect(body).toMatch(
+      /riai_instance_started_at_seconds\{instance="[^"]+"\}/,
+    );
+    // Not draining, because this process is not shutting down.
+    expect(body).toMatch(/riai_instance_draining\{instance="[^"]+"\} 0/);
+
+    // And the header says not to sum blindly across replicas.
+    expect(body).toMatch(/group by the instance label/i);
+  }, 60_000);
+
   it("carries nothing about a tenant's business", async () => {
     // Running the platform does not require reading anybody's books, and a
     // scrape endpoint is the last place to make an exception.

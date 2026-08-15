@@ -474,7 +474,7 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1405 tests: unit + integration
+npm run test          # 1416 tests: unit + integration
 npm run test:unit     # unit only, no database required
 npm run test:e2e      # 55 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
@@ -2009,6 +2009,65 @@ here — that the counter is shared between connections, that it expires, that t
 increment and the expiry are atomic — is a property of Redis, and none of them
 survives being mocked.
 
+### Running more than one replica
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.replicas.yml up -d --build
+```
+
+Two application containers behind nginx, sharing one Postgres and one Redis.
+The overlay changes three things and deliberately nothing else: the app scales
+to two, it stops publishing a port directly, and nginx publishes instead.
+
+**No sticky sessions.** Sessions are rows in Postgres, not memory, so any
+replica can serve any request — and pinning a user to one instance would only
+make a rolling restart more disruptive than it needs to be. nginx round-robins,
+and retries the other replica on a 502 or 503 so a request landing on an
+instance that is shutting down is served rather than failed.
+
+**Redis stops being optional.** On the in-memory driver each replica keeps its
+own rate-limit counter, and a configured limit of five sign-in attempts quietly
+becomes ten. The environment validator already refuses to boot a production
+build on the memory driver unless somebody sets
+`RATE_LIMIT_ALLOW_IN_MEMORY=true` and thereby says out loud that they meant it.
+
+**Shutting down drains first.** On SIGTERM an instance stops reporting ready,
+keeps serving for `SHUTDOWN_DRAIN_MS`, then closes its database connections and
+exits. The order matters: the load balancer has to notice the 503 and stop
+routing _before_ the process goes away, or a rolling deploy severs whatever was
+in flight — which for this product means a posted sale whose response never
+arrives and a shopkeeper who does not know whether to enter it again.
+
+So the drain window must exceed the balancer's health-check interval, and the
+orchestrator's kill grace period must exceed the drain window. Both are set in
+the overlay, and both are the numbers to change first if a deploy still drops
+requests.
+
+This is not request tracking. Counting in-flight requests inside a Next.js
+server means wrapping its handler, which is a much larger thing to own; waiting
+out a stated window covers the same failure with none of that surface.
+
+**Each replica answers for itself.** Logs and the metrics scrape carry an
+instance label, defaulting to the container hostname, so two replicas are
+tellable apart. `riai_instance_info`, `riai_instance_started_at_seconds` and
+`riai_instance_draining` are per instance, and the scrape's own header says to
+group by that label rather than sum across replicas blindly — counters are
+per-process and always were.
+
+The readiness probe deliberately does _not_ say which replica answered. It is
+unauthenticated and reachable by anyone, and a hostname handed to a stranger is
+reconnaissance. Identity goes to the logs and to the token-gated scrape, both of
+which have a reader who has already proved something.
+
+**What was already safe, and why.** Nothing in a request path keeps state in the
+process that served it: no local disk writes, no in-process cache anything
+depends on, no scheduled work that would run twice. Document numbering — the
+thing that would break first and worst, because two invoices sharing a number is
+what a tax officer asks about — is serialised by `SELECT … FOR UPDATE`, which is
+a lock held by the database rather than by a process. The integration tests
+prove that against two separate connections issuing allocations simultaneously,
+because a single client would hide exactly the bug worth finding.
+
 ### Backups, and the restore nobody rehearsed
 
 ```bash
@@ -2117,10 +2176,13 @@ avoids.
   not a dead disk. For books somebody will need in a tax dispute three years
   from now, use managed Postgres with point-in-time recovery and copy the dumps
   somewhere else.
-- **Nothing has been tested behind more than one process.** Rate limiting now
-  shares a counter through Redis, which was the structural blocker, but no part
-  of this has actually been run as two replicas — and the metrics counters are
-  still per-process.
+- **Two replicas run, but nobody has run them under load.** There is a compose
+  overlay that starts two behind nginx, the concurrency that would break first
+  is tested against separate database connections, and shutdown drains before
+  it exits. What has not happened is a real deployment with real traffic, a
+  rolling restart watched end to end, or any measurement of what a second
+  replica actually buys. The structure is there; the operational experience is
+  not.
 - **Observability stops at logs and a scrape.** Errors are structured JSON and
   there is a token-gated Prometheus endpoint, but there is no tracing, no
   alerting, and the counters are per-process — two replicas each report their
@@ -2238,6 +2300,7 @@ query text is the only thing the browser controls.
 | 34    | Reports about one subject — account ledger, party statements      | **Done** |
 | 35    | Bank reconciliation — statement import, matching, the identity    | **Done** |
 | 36    | Payments — Razorpay checkout, signed webhooks, one upgrade path   | **Done** |
+| 37    | Multi-replica — two behind a balancer, draining shutdown, labels  | **Done** |
 
 ---
 

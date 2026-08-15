@@ -87,6 +87,27 @@ const serverSchema = z
      */
     RATE_LIMIT_ALLOW_IN_MEMORY: booleanish.default(false),
 
+    /**
+     * Names this replica in logs and in the metrics scrape.
+     *
+     * Optional because the container's hostname is a good default and every
+     * orchestrator sets one. Worth overriding where the hostname is a random
+     * hash and something like "app-mumbai-2" would mean more to whoever is
+     * reading at three in the morning.
+     */
+    INSTANCE_ID: z.string().optional(),
+    /**
+     * How long to keep answering requests after a shutdown signal, before the
+     * process exits.
+     *
+     * It has to exceed the load balancer's health-check interval, or the
+     * balancer never notices the instance is draining and keeps routing to it
+     * until the moment it disappears — which is the failure the drain exists to
+     * prevent. Ten seconds suits a two-second check; the orchestrator's own
+     * grace period must be longer again.
+     */
+    SHUTDOWN_DRAIN_MS: z.coerce.number().int().min(0).default(10_000),
+
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
     /**
      * Bearer token the metrics endpoint requires. Absent means the endpoint
