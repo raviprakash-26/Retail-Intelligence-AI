@@ -7,7 +7,15 @@ import { Download, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { ReportPeriodKind } from "@/lib/reports/catalogue";
+import type { ReportEntityOption } from "@/server/reports/report-service";
 
 /**
  * Choosing the period, and taking the report away.
@@ -27,6 +35,7 @@ import type { ReportPeriodKind } from "@/lib/reports/catalogue";
 export function ReportControls({
   period,
   resolved,
+  entity,
   canExport,
 }: {
   period: ReportPeriodKind;
@@ -39,6 +48,16 @@ export function ReportControls({
    * period on it at all, which the route can only refuse.
    */
   resolved: { from: string; to: string; year: number; month: number };
+  /**
+   * The subject picker, for reports about one account or one party.
+   *
+   * Absent for the rest, which are about the whole business.
+   */
+  entity?: {
+    label: string;
+    selected: string | undefined;
+    options: readonly ReportEntityOption[];
+  };
   canExport: boolean;
 }) {
   const router = useRouter();
@@ -64,12 +83,39 @@ export function ReportControls({
     to: resolved.to,
     year: String(resolved.year),
     month: String(resolved.month),
+    ...(entity?.selected ? { entity: entity.selected } : {}),
   }).toString();
   const exportHref = `${pathname}/export?${exportQuery}`;
 
   return (
     <div className="flex flex-wrap items-end justify-between gap-4 print:hidden">
       <div className="flex flex-wrap items-end gap-3">
+        {entity && (
+          <div className="space-y-1.5">
+            <Label htmlFor="entity" className="text-xs text-muted-foreground">
+              {entity.label}
+            </Label>
+            <Select
+              value={entity.selected ?? ""}
+              onValueChange={(value) => apply({ entity: value })}
+            >
+              <SelectTrigger id="entity" className="w-72">
+                <SelectValue
+                  placeholder={`Choose a ${entity.label.toLowerCase()}`}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {entity.options.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {option.label}
+                    {option.hint ? ` · ${option.hint}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         {period === "range" && (
           <>
             <Field
@@ -121,7 +167,7 @@ export function ReportControls({
           <Printer className="size-4" />
           Print
         </Button>
-        {canExport && (
+        {canExport && !(entity && !entity.selected) && (
           <Button variant="outline" asChild>
             <a href={exportHref} download>
               <Download className="size-4" />

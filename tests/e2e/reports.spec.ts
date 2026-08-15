@@ -74,6 +74,46 @@ test.describe("running a report", () => {
     expect(csv).not.toContain("₹");
   });
 
+  test("a report about one subject asks which, before showing figures", async ({
+    page,
+  }) => {
+    await page.goto("/app/reports/account-ledger");
+    await page.waitForLoadState("networkidle");
+
+    // Nothing is auto-selected: presenting the first account's balances as an
+    // answer to a question nobody asked would be worse than asking.
+    const body = await page.locator("body").innerText();
+    expect(body).toMatch(/Choose an account/i);
+    expect(body).not.toMatch(/Opening balance/i);
+    // And nothing to export until there is something to export.
+    await expect(page.getByRole("link", { name: /Export CSV/i })).toHaveCount(
+      0,
+    );
+
+    // Pick one, and the ledger appears.
+    // By id rather than by label: the shell's user menu is also labelled
+    // "Account menu for …", and a label match finds both.
+    await page.locator("#entity").click();
+    // An account the seeded shop has actually posted to, so the ledger has
+    // something in it rather than legitimately reporting nothing.
+    await page.getByRole("option", { name: /Cash/i }).first().click();
+
+    // Choosing re-renders on the server through a client navigation, so there
+    // is no load event to wait on — these assertions retry until it lands.
+    await page.waitForURL(/entity=/);
+    // `.first()` because the Cash ledger also contains a posted line narrated
+    // "Opening balance" — the label row and a real entry both say it, which is
+    // correct and would otherwise trip strict mode.
+    await expect(page.getByText(/Opening balance/i).first()).toBeVisible();
+    await expect(page.getByText(/Closing balance/i).first()).toBeVisible();
+    await expect(
+      page.getByText(/running balance is in the account/i),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: /Export CSV/i })).toHaveCount(
+      1,
+    );
+  });
+
   test("a report with nothing in it says so rather than showing an empty grid", async ({
     page,
   }) => {

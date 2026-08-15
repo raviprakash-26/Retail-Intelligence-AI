@@ -40,7 +40,8 @@ records, works out provident fund, insurance and professional tax, and posts one
 entry that owes each authority separately. It does not compute TDS, and says so
 where somebody would otherwise assume it had.
 
-**And every figure can be taken away.** Eleven reports, each running the
+**And every figure can be taken away.** Fourteen reports — including a ledger for
+any account and a statement for any customer or supplier — each running the
 service that owns its numbers rather than recomputing them, exportable as a CSV
 that carries the same figures and the same caveats, and laid out to print.
 
@@ -458,9 +459,9 @@ through `purgeCompany()`, which sets a transaction-local flag the triggers check
 ## Testing
 
 ```bash
-npm run test          # 1291 tests: unit + integration
+npm run test          # 1296 tests: unit + integration
 npm run test:unit     # unit only, no database required
-npm run test:e2e      # 48 checks in a browser, against a production build
+npm run test:e2e      # 49 checks in a browser, against a production build
 npm run test:coverage # line and branch coverage
 ```
 
@@ -807,7 +808,7 @@ and cannot say what anybody earns.
 
 ## Reports
 
-Eleven of them, and not one adds up a column of its own.
+Fourteen of them, and not one adds up a column of its own.
 
 A report here is a _view of figures something else already computed_. The trial
 balance report runs the trial balance service. The profit and loss report runs
@@ -822,11 +823,32 @@ another, neither is usable by anybody. The integration tests run the report and
 the source and compare them, which is the only assertion about this module worth
 making.
 
-|                |                                                                                                                  |
-| -------------- | ---------------------------------------------------------------------------------------------------------------- |
-| **Accounting** | Trial balance · Profit and loss · Balance sheet · Day book                                                       |
-| **Business**   | Sales register · Purchase register · Expenses by category · Stock on hand · Receivables ageing · Payables ageing |
-| **Compliance** | GST summary                                                                                                      |
+|                |                                                                                                                                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Accounting** | Trial balance · Profit and loss · Balance sheet · Day book · Account ledger                                                                                |
+| **Business**   | Sales register · Purchase register · Expenses by category · Stock on hand · Receivables ageing · Payables ageing · Customer statement · Supplier statement |
+| **Compliance** | GST summary                                                                                                                                                |
+
+**Three of them are about a subject, not just a period.** An account ledger, a
+customer statement and a supplier statement each need to know _which one_ before
+they mean anything, so those reports ask, and until somebody answers there are no
+figures on the page and no export link beside them. Nothing is pre-selected:
+showing the first account in the chart as though it were the answer to a question
+nobody asked is worse than an empty page that says "Choose an account".
+
+The subject is checked against what this tenant owns before it is used. A
+customer id borrowed from another company is _refused_, not quietly rendered as a
+statement with no rows in it — an empty report and a report somebody was not
+allowed to run must never look the same, or the interface has taught a reader to
+read a refusal as a fact about their business.
+
+A ledger and a party statement are the same document reached two ways: opening
+balance, the movements in the window, a running balance, closing balance. So
+there is one renderer, and the customer statement is the receivables ledger for
+one customer rather than a second implementation of the idea. An account with no
+movement in the window is still not empty if it carries a balance forward —
+"nothing happened in March" and "there is nothing to say" are different
+statements, and only the second earns a "Nothing to report".
 
 **Two gates, not one.** `reports.view` opens the cabinet; each report still asks
 for its own drawer. Somebody who may read reports but not purchases does not get
@@ -1027,6 +1049,11 @@ lines rather than from separate running totals.
 Balances are shown as a positive figure with `Dr` or `Cr` beside them rather
 than as negative numbers, and the closing balance is also stated in words —
 "Sharma Provision Store owes you this much" rather than "₹1,180 Dr".
+
+The reports catalogue offers the same page as an account ledger and a party
+statement, so it can be exported and printed with the rest. It calls this
+service. There is no second query that walks the journal again and eventually
+disagrees with this one about what a customer owes.
 
 ---
 
@@ -2039,6 +2066,9 @@ query text is the only thing the browser controls.
 | 29    | Reports — one catalogue over existing services, CSV and print     | **Done** |
 | 30    | Payroll — statutory deductions, four liabilities, no invented TDS | **Done** |
 | 31    | Observability — structured logs, a gated scrape, honest scope     | **Done** |
+| 32    | Backups — a verified dump, and a restore with a safety catch      | **Done** |
+| 33    | Shared rate limits — one counter across instances, bounded wait   | **Done** |
+| 34    | Reports about one subject — account ledger, party statements      | **Done** |
 
 ---
 

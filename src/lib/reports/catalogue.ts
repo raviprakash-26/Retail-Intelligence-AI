@@ -37,6 +37,22 @@ export type ReportCategory = "Accounting" | "Business" | "Compliance";
  */
 export type ReportPeriodKind = "range" | "asAt" | "month" | "today";
 
+/**
+ * What a report reports *on*, when it is not the whole business.
+ *
+ * Most reports here take a period and nothing else: a trial balance is the
+ * trial balance. A ledger is not — it is the ledger *of an account*, and a
+ * statement is the statement *of a customer*. Those need a second parameter,
+ * and it is a different kind of thing from a date: it is chosen from what the
+ * tenant actually has, and the choice is checked against the tenant's own
+ * records rather than trusted from the URL.
+ *
+ * Customers and suppliers are separate kinds rather than one "party", because
+ * the two are drawn from different tables, sit behind different permissions,
+ * and settle against opposite sides of the ledger.
+ */
+export type ReportEntityKind = "account" | "customer" | "supplier";
+
 export type ReportDefinition = {
   key: string;
   title: string;
@@ -47,6 +63,8 @@ export type ReportDefinition = {
   /** Held in addition to `reports.view`. */
   permission: PermissionKey;
   feature?: FeatureKey;
+  /** Set when the report is about one account or one party, not everything. */
+  entity?: ReportEntityKind;
   /** What the report reads, named so the answer can be checked at its source. */
   source: string;
 };
@@ -81,6 +99,17 @@ export const REPORTS = [
     period: "asAt",
     permission: "accounting.statements.view",
     source: "Financial statements",
+  },
+  {
+    key: "account-ledger",
+    title: "Account ledger",
+    description:
+      "Every posting to one account in date order, with the balance after each.",
+    category: "Accounting",
+    period: "range",
+    permission: "accounting.view",
+    entity: "account",
+    source: "Ledger",
   },
   {
     key: "day-book",
@@ -119,6 +148,28 @@ export const REPORTS = [
     period: "range",
     permission: "expenses.view",
     source: "Expenses",
+  },
+  {
+    key: "customer-statement",
+    title: "Customer statement",
+    description:
+      "What one customer was invoiced, what they paid and what is still open.",
+    category: "Business",
+    period: "range",
+    permission: "customers.view",
+    entity: "customer",
+    source: "Ledger",
+  },
+  {
+    key: "supplier-statement",
+    title: "Supplier statement",
+    description:
+      "What one supplier billed, what was paid and what is still owed.",
+    category: "Business",
+    period: "range",
+    permission: "suppliers.view",
+    entity: "supplier",
+    source: "Ledger",
   },
   {
     key: "stock-on-hand",

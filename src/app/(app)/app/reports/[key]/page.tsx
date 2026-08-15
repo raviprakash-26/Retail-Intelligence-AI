@@ -9,7 +9,11 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { requireCompanyContext } from "@/server/auth/context";
 import { authorizeReport } from "@/server/reports/access";
 import { resolveFiscalYear } from "@/server/fiscal/fiscal-service";
-import { runReport, ReportError } from "@/server/reports/report-service";
+import {
+  reportEntityOptions,
+  runReport,
+  ReportError,
+} from "@/server/reports/report-service";
 
 export const metadata: Metadata = {
   title: "Report",
@@ -57,6 +61,24 @@ export default async function ReportPage({
   const to = single("to") ?? (year ? isoDay(year.endDate) : isoDay(today));
   const periodYear = Number(single("year") ?? today.getUTCFullYear());
   const periodMonth = Number(single("month") ?? today.getUTCMonth() + 1);
+  const entityId = single("entity");
+
+  // A ledger is the ledger *of* something, so the subject is offered before
+  // the report is. Nothing is auto-selected: picking the first account
+  // alphabetically and presenting its balances as an answer would be worse
+  // than asking.
+  const entityOptions = definition.entity
+    ? await reportEntityOptions(context.company.id, definition.entity)
+    : [];
+  const entityLabel =
+    definition.entity === "account"
+      ? "Account"
+      : definition.entity === "customer"
+        ? "Customer"
+        : "Supplier";
+  const chosen = entityOptions.some((option) => option.id === entityId)
+    ? entityId
+    : undefined;
 
   const header = (
     <>
@@ -95,12 +117,52 @@ export default async function ReportPage({
     );
   }
 
+  if (definition.entity && !chosen) {
+    return (
+      <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+        {header}
+        <p className="mt-1 mb-6 text-sm text-muted-foreground">
+          {definition.description}
+        </p>
+        <ReportControls
+          period={definition.period}
+          resolved={{ from, to, year: periodYear, month: periodMonth }}
+          entity={{
+            label: entityLabel,
+            selected: undefined,
+            options: entityOptions,
+          }}
+          canExport={context.permissions.has("reports.export")}
+        />
+        <div className="mt-6 rounded-xl border border-dashed px-6 py-14 text-center">
+          <h2 className="text-base font-semibold">
+            Choose{" "}
+            {entityLabel === "Account"
+              ? "an account"
+              : `a ${entityLabel.toLowerCase()}`}
+          </h2>
+          <p className="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-muted-foreground">
+            {entityOptions.length === 0
+              ? `There are no ${entityLabel.toLowerCase()}s on record yet.`
+              : "This report is about one subject rather than the whole business, so there is nothing to show until you pick one."}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   let report;
   try {
     report = await runReport({
       companyId: context.company.id,
       key: definition.key,
-      period: { from, to, year: periodYear, month: periodMonth },
+      period: {
+        from,
+        to,
+        year: periodYear,
+        month: periodMonth,
+        entityId: chosen,
+      },
     });
   } catch (error) {
     if (!(error instanceof ReportError)) throw error;
@@ -128,6 +190,15 @@ export default async function ReportPage({
         <ReportControls
           period={definition.period}
           resolved={{ from, to, year: periodYear, month: periodMonth }}
+          entity={
+            definition.entity
+              ? {
+                  label: entityLabel,
+                  selected: chosen,
+                  options: entityOptions,
+                }
+              : undefined
+          }
           canExport={context.permissions.has("reports.export")}
         />
         <ReportView report={report} />

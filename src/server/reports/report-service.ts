@@ -1,6 +1,10 @@
 import "server-only";
 import { formatDate } from "@/lib/format";
-import { findReport, type ReportKey } from "@/lib/reports/catalogue";
+import {
+  findReport,
+  type ReportEntityKind,
+  type ReportKey,
+} from "@/lib/reports/catalogue";
 import {
   row,
   type ReportColumn,
@@ -18,6 +22,13 @@ import { getGstWorkingPaper } from "@/server/gst/gst-return-service";
 import { stockRows } from "@/server/inventory/inventory-report";
 import { listPurchases } from "@/server/purchases/purchase-service";
 import { listSales } from "@/server/sales/sale-service";
+import {
+  getAccountLedger,
+  ledgerAccounts,
+  ledgerParties,
+  partyStatement,
+  type AccountLedger,
+} from "@/server/accounting/ledger-service";
 import {
   payablesAgeing,
   receivablesAgeing,
@@ -44,12 +55,14 @@ export type ReportParams = {
   to?: string;
   year?: number;
   month?: number;
+  /** The account or party a single-subject report is about. */
+  entityId?: string;
 };
 
 export class ReportError extends Error {
   constructor(
     message: string,
-    readonly code: "UNKNOWN_REPORT" | "BAD_PERIOD",
+    readonly code: "UNKNOWN_REPORT" | "BAD_PERIOD" | "MISSING_ENTITY",
   ) {
     super(message);
     this.name = "ReportError";
@@ -308,6 +321,129 @@ async function dayBookReport(
     notes,
     empty: first.total === 0,
   };
+}
+
+/**
+ * A ledger, however it was reached.
+ *
+ * An account ledger and a party statement are the same document — the same
+ * rows, the same running balance, the same opening and closing figures. They
+ * differ only in how the account is chosen: directly, or via the receivables
+ * or payables control account for one party. So one renderer, and the two
+ * adapters below decide only which service call produces it.
+ */
+function ledgerRows(
+  ledger: AccountLedger,
+  from: string,
+  to: string,
+  truncated: boolean,
+): Omit<ReportResult, "key" | "title"> {
+  const rows = [
+    row(
+      { narration: "Opening balance", running: ledger.openingBalance },
+      "total",
+    ),
+    ...ledger.rows.map((entry) =>
+      row({
+        date: entry.date,
+        entry: entry.entryNumber,
+        source: entry.source ?? "Manual",
+        narration: entry.lineNarration ?? entry.narration ?? "",
+        party: entry.partyName ?? "",
+        debit: entry.debit,
+        credit: entry.credit,
+        running: entry.running,
+      }),
+    ),
+    row(
+      {
+        narration: "Movement in the period",
+        debit: ledger.periodDebit,
+        credit: ledger.periodCredit,
+      },
+      "total",
+    ),
+    row(
+      { narration: "Closing balance", running: ledger.closingBalance },
+      "total",
+    ),
+  ];
+
+  const notes = [
+    `${ledger.account.code} · ${ledger.account.name}${ledger.party ? ` — ${ledger.party.name}` : ""}.`,
+    "The running balance is in the account's own direction, so a receivable reads positive when somebody owes money rather than negative.",
+    "A reversed entry stays in the ledger beside the entry that cancelled it. Neither is hidden, because a ledger that can be edited is not a ledger.",
+  ];
+  if (truncated) {
+    notes.push(
+      `${ledger.total} lines matched; the first ${MAX_DOCUMENT_ROWS} are shown. Narrow the dates to see the rest.`,
+    );
+  }
+
+  return {
+    period: rangeLabel(from, to),
+    columns: [
+      DATE("date", "Date"),
+      TEXT("entry", "Entry"),
+      TEXT("source", "Source"),
+      TEXT("narration", "Narration"),
+      TEXT("party", "Party"),
+      MONEY("debit", "Debit"),
+      MONEY("credit", "Credit"),
+      MONEY("running", "Balance"),
+    ],
+    rows,
+    notes,
+    // A ledger is empty only when there is nothing to say at all. No movement
+    // in the window is not the same thing: an account carrying a brought-
+    // forward balance and no activity this month still has an opening and a
+    // closing figure, and that is precisely what somebody opening a dormant
+    // account wants to see.
+    empty: ledger.total === 0 && Number(ledger.openingBalance) === 0,
+  };
+}
+
+/** Walks the ledger's pages up to the cap, so a report is the whole window. */
+async function wholeLedger(
+  load: (page: number) => Promise<AccountLedger>,
+): Promise<{ ledger: AccountLedger; truncated: boolean }> {
+  const first = await load(1);
+  const rows = [...first.rows];
+
+  for (let page = 2; page <= first.pageCount; page += 1) {
+    if (rows.length >= MAX_DOCUMENT_ROWS) break;
+    rows.push(...(await load(page)).rows);
+  }
+
+  return {
+    ledger: { ...first, rows: rows.slice(0, MAX_DOCUMENT_ROWS) },
+    truncated: first.total > rows.length,
+  };
+}
+
+async function accountLedgerReport(
+  companyId: string,
+  accountId: string,
+  from: string,
+  to: string,
+): Promise<Omit<ReportResult, "key" | "title">> {
+  const { ledger, truncated } = await wholeLedger((page) =>
+    getAccountLedger({ companyId, accountId, from, to, page }),
+  );
+  return ledgerRows(ledger, from, to, truncated);
+}
+
+async function partyStatementReport(
+  companyId: string,
+  partyId: string,
+  partyType: "CUSTOMER" | "SUPPLIER",
+  from: string,
+  to: string,
+): Promise<Omit<ReportResult, "key" | "title">> {
+  const { ledger, truncated } = await wholeLedger((page) =>
+    partyStatement({ companyId, partyType, partyId, from, to, page }),
+  );
+  return ledgerRows(ledger, from, to, truncated);
 }
 
 // ---------------------------------------------------------------------------
@@ -668,7 +804,7 @@ export async function runReport(params: {
   }
 
   const { companyId } = params;
-  const { from, to, year, month } = params.period;
+  const { from, to, year, month, entityId } = params.period;
 
   const needsRange = definition.period === "range";
   const needsDate = definition.period === "asAt";
@@ -690,11 +826,19 @@ export async function runReport(params: {
     throw new ReportError("This report needs a month.", "BAD_PERIOD");
   }
 
+  if (definition.entity && !params.period.entityId) {
+    throw new ReportError(
+      `Choose which ${definition.entity === "account" ? "account" : definition.entity} this report is about.`,
+      "MISSING_ENTITY",
+    );
+  }
+
   const body = await runBody(companyId, definition.key as ReportKey, {
     from,
     to,
     year,
     month,
+    entityId,
   });
 
   return { key: definition.key as ReportKey, title: definition.title, ...body };
@@ -712,6 +856,29 @@ async function runBody(
       return profitAndLossReport(companyId, period.from!, period.to!);
     case "balance-sheet":
       return balanceSheetReport(companyId, period.to!);
+    case "account-ledger":
+      return accountLedgerReport(
+        companyId,
+        period.entityId!,
+        period.from!,
+        period.to!,
+      );
+    case "customer-statement":
+      return partyStatementReport(
+        companyId,
+        period.entityId!,
+        "CUSTOMER",
+        period.from!,
+        period.to!,
+      );
+    case "supplier-statement":
+      return partyStatementReport(
+        companyId,
+        period.entityId!,
+        "SUPPLIER",
+        period.from!,
+        period.to!,
+      );
     case "day-book":
       return dayBookReport(companyId, period.from!, period.to!);
     case "sales-register":
@@ -729,4 +896,34 @@ async function runBody(
     case "gst-summary":
       return gstSummaryReport(companyId, period.year!, period.month!);
   }
+}
+
+export type ReportEntityOption = { id: string; label: string; hint?: string };
+
+/**
+ * What a single-subject report can be run against.
+ *
+ * Read from the tenant's own records, which is also what makes the chosen id
+ * safe: a report is only ever run for an entity this company actually has,
+ * because the services underneath filter by `companyId` regardless of what
+ * arrives in the URL.
+ */
+export async function reportEntityOptions(
+  companyId: string,
+  kind: ReportEntityKind,
+): Promise<ReportEntityOption[]> {
+  if (kind === "account") {
+    const accounts = await ledgerAccounts(companyId);
+    return accounts.map((account) => ({
+      id: account.id,
+      label: `${account.code} · ${account.name}`,
+      hint: account.used ? undefined : "no postings",
+    }));
+  }
+
+  const parties = await ledgerParties({
+    companyId,
+    partyType: kind === "customer" ? "CUSTOMER" : "SUPPLIER",
+  });
+  return parties.map((party) => ({ id: party.id, label: party.name }));
 }
