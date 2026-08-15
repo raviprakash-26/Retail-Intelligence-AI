@@ -14,6 +14,7 @@
 
 export const SUGGESTION_KEYS = [
   "OVERDUE_RECEIVABLES",
+  "OVERDUE_PAYABLES",
   "CASH_SHORTFALL_AHEAD",
   "SLOW_MOVING_STOCK",
   "STOCK_OUT_RISK",
@@ -96,6 +97,29 @@ export const RULES: Record<SuggestionKey, SuggestionRule> = {
     effort: "SMALL",
     urgency: "SOON",
     basis: "The receivables ageing, from each invoice's own due date.",
+    needsProfessional: false,
+  },
+
+  OVERDUE_PAYABLES: {
+    key: "OVERDUE_PAYABLES",
+    category: "CASH",
+    title: "Bills you owe are past their due date",
+    whatToDo:
+      "Go through them oldest first and decide which to pay, which to part-pay, and which to ring about. A supplier told on Monday that payment is coming Friday is a supplier who keeps supplying; the same supplier finding out by chasing is the one who asks for cash on delivery next time.",
+    whenThisDoesNotApply: [
+      "The due date in the books is the invoice's printed term, but you and this supplier have always worked to a longer one that was never written down anywhere the software can see.",
+      "The bill is in dispute — short delivery, wrong price, damaged goods — and is deliberately unpaid until it is settled.",
+      "It was paid in cash and the payment was never recorded against the bill, so it is closed in the shop and open in the books.",
+    ],
+    effort: "SMALL",
+    // Not NOW: unlike a projected shortfall this is a position rather than an
+    // event, and a shop with an arrangement is not in trouble. It rises on its
+    // own if the amount is large against this shop's turnover.
+    urgency: "SOON",
+    basis:
+      "Supplier bills posted and unpaid, aged against the due date on each one.",
+    // Which bills to pay first when there is not enough for all of them is a
+    // question with consequences this software cannot weigh.
     needsProfessional: false,
   },
 

@@ -21,6 +21,7 @@ import type { AnalyticsReport } from "@/server/analytics/analytics-service";
 import type { CashProjection } from "@/server/forecast/cash-projection";
 import type { LedgerAgeing } from "@/server/settlements/outstanding";
 import type { StockRow } from "@/server/inventory/inventory-report";
+import type { SuggestionKey } from "@/lib/advisor/catalogue";
 
 /**
  * What the books have to show before the advisor says anything.
@@ -63,6 +64,7 @@ export const CYCLE_IMPROVEMENT_DAYS = 7;
 export type AdvisorInputs = {
   analytics: AnalyticsReport;
   receivables: LedgerAgeing;
+  payables: LedgerAgeing;
   cash: CashProjection;
   stock: readonly StockRow[];
   /**
@@ -122,6 +124,36 @@ const DETECTORS: readonly Detector[] = [
         // Not an estimate of anything. This money has been earned, invoiced,
         // and is sitting somewhere other than the bank.
         impact: recorded(overdue, "already earned and invoiced"),
+      };
+    },
+  },
+
+  {
+    key: "OVERDUE_PAYABLES",
+    detect: ({ payables }) => {
+      const overdue = money(payables.summary.overdue);
+      if (compare(overdue, MINIMUM_AMOUNT) < 0) return null;
+
+      const parties = payables.parties.filter(
+        (party) => compare(party.overdue, 0) > 0,
+      );
+      const oldest = payables.summary.oldestOverdueDays;
+
+      return {
+        observation:
+          `${rupees(overdue)} is past its due date across ` +
+          `${parties.length} ${parties.length === 1 ? "supplier" : "suppliers"}` +
+          (oldest === null ? "." : `, the oldest by ${oldest} days.`),
+        evidence: {
+          overdue: toStorageString(overdue),
+          suppliers: parties.length,
+          oldestOverdueDays: oldest ?? 0,
+          totalOutstanding: payables.summary.total,
+        },
+        // Recorded, not estimated: these bills were received and posted. What
+        // is deliberately not said is anything about whether the shop can pay
+        // them — that depends on money the books cannot see.
+        impact: recorded(overdue, "already received and unpaid"),
       };
     },
   },
@@ -200,17 +232,53 @@ const DETECTORS: readonly Detector[] = [
 
   {
     key: "STOCK_OUT_RISK",
-    detect: ({ stock }) => {
-      const short = stock.filter((row) => row.status !== "OK");
+    detect: ({ stock, today }) => {
+      /**
+       * A line the shop actually stocks.
+       *
+       * An empty shelf is only worth mentioning where somebody meant to keep
+       * something on it. A product sits at "OUT" the moment its quantity
+       * reaches nil, whether or not a reorder level was ever set — so a
+       * catalogue full of lines the shop has stopped selling used to produce
+       * "twelve lines are at or below the reorder level you set", about twelve
+       * products where no level was set and none is wanted. It said that on
+       * every visit, forever, because a discontinued product stays at nil.
+       *
+       * Intent is read two ways: a reorder level the owner entered, or recent
+       * trade in the line. The second window is the same one the slow-moving
+       * check uses, so between them every held line is either moving or not.
+       */
+      const stocked = (row: StockRow): boolean => {
+        if (compare(row.minStockLevel, 0) > 0) return true;
+        return (
+          row.lastMovementAt !== null &&
+          daysBetween(row.lastMovementAt, today) < STALE_STOCK_DAYS
+        );
+      };
+
+      const short = stock.filter((row) => row.status !== "OK" && stocked(row));
       if (short.length === 0) return null;
 
+      const out = short.filter((row) => row.status === "OUT");
+      const belowLevel = short.filter((row) => row.status === "LOW");
+
+      // Said in terms of what is true of these particular lines. Claiming a
+      // reorder level for lines that have none is a small lie that costs the
+      // whole page its credibility.
+      const observation =
+        belowLevel.length > 0 && out.length > 0
+          ? `${belowLevel.length} ${belowLevel.length === 1 ? "line is" : "lines are"} at or below the reorder level you set, and ` +
+            `${out.length} ${out.length === 1 ? "line you have been selling is" : "lines you have been selling are"} out entirely.`
+          : belowLevel.length > 0
+            ? `${belowLevel.length} ${belowLevel.length === 1 ? "line is" : "lines are"} at or below the reorder level you set.`
+            : `${out.length} ${out.length === 1 ? "line you have been selling is" : "lines you have been selling are"} out of stock.`;
+
       return {
-        observation:
-          `${short.length} ${short.length === 1 ? "line is" : "lines are"} at or below the reorder level you set, ` +
-          `${short.filter((row) => row.status === "OUT").length} of them out entirely.`,
+        observation,
         evidence: {
           lines: short.length,
-          out: short.filter((row) => row.status === "OUT").length,
+          out: out.length,
+          belowReorderLevel: belowLevel.length,
           examples: short
             .slice(0, 3)
             .map((row) => row.name)
@@ -431,22 +499,36 @@ const DETECTORS: readonly Detector[] = [
  * suggestions and nothing is padded out to fill the page: a shop with nothing
  * to fix should be told that, not handed three vague ideas so the screen looks
  * busy.
+ *
+ * A detector that *throws* takes out its own suggestion and nothing else, and
+ * is named in `failed` so the page can say which. The service already goes to
+ * some trouble to survive a source it cannot read; without the same care here,
+ * one detector meeting a shape it did not expect would throw all of that away
+ * and return an error page instead of the nine suggestions that were fine.
  */
-export function detect(inputs: AdvisorInputs): Suggestion[] {
+export function detect(inputs: AdvisorInputs): {
+  suggestions: Suggestion[];
+  failed: SuggestionKey[];
+} {
   const suggestions: Suggestion[] = [];
+  const failed: SuggestionKey[] = [];
 
   for (const detector of DETECTORS) {
-    const found = detector.detect(inputs);
-    if (!found) continue;
+    try {
+      const found = detector.detect(inputs);
+      if (!found) continue;
 
-    const { urgency, escalated } = urgencyFor({
-      key: detector.key,
-      impact: found.impact,
-      periodRevenue: inputs.analytics.revenue.current,
-    });
+      const { urgency, escalated } = urgencyFor({
+        key: detector.key,
+        impact: found.impact,
+        periodRevenue: inputs.analytics.revenue.current,
+      });
 
-    suggestions.push({ key: detector.key, ...found, urgency, escalated });
+      suggestions.push({ key: detector.key, ...found, urgency, escalated });
+    } catch {
+      failed.push(detector.key);
+    }
   }
 
-  return suggestions;
+  return { suggestions, failed };
 }

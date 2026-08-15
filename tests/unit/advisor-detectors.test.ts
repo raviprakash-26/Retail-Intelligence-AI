@@ -90,6 +90,11 @@ const NO_RECEIVABLES: LedgerAgeing = {
   parties: [],
 };
 
+const NO_PAYABLES: LedgerAgeing = {
+  summary: { total: "0", overdue: "0", buckets: {}, oldestOverdueDays: null },
+  parties: [],
+};
+
 const NO_CASH_PROBLEM: CashProjection = {
   from: "2026-08-13",
   to: "2026-10-08",
@@ -129,6 +134,7 @@ function inputs(overrides: Partial<AdvisorInputs> = {}): AdvisorInputs {
   return {
     analytics: analytics(),
     receivables: NO_RECEIVABLES,
+    payables: NO_PAYABLES,
     cash: NO_CASH_PROBLEM,
     stock: [],
     booksStartedAt: daysAgo(400),
@@ -138,7 +144,10 @@ function inputs(overrides: Partial<AdvisorInputs> = {}): AdvisorInputs {
 }
 
 const keys = (found: ReturnType<typeof detect>) =>
-  found.map((entry) => entry.key);
+  found.suggestions.map((entry) => entry.key);
+
+/** The suggestions alone, for the cases that do not care about failures. */
+const only = (found: ReturnType<typeof detect>) => found.suggestions;
 
 describe("stock that is sitting still", () => {
   const stale = stockRow({ lastMovementAt: daysAgo(200) });
@@ -166,7 +175,9 @@ describe("stock that is sitting still", () => {
         booksStartedAt: daysAgo(120),
       }),
     );
-    const suggestion = found.find((entry) => entry.key === "SLOW_MOVING_STOCK");
+    const suggestion = only(found).find(
+      (entry) => entry.key === "SLOW_MOVING_STOCK",
+    );
     expect(suggestion?.evidence.longestStillDays).toBe(120);
   });
 
@@ -201,7 +212,9 @@ describe("a shelf about to be empty", () => {
     const found = detect(
       inputs({ stock: [stockRow({ status: "LOW", minStockLevel: "200" })] }),
     );
-    const suggestion = found.find((entry) => entry.key === "STOCK_OUT_RISK");
+    const suggestion = only(found).find(
+      (entry) => entry.key === "STOCK_OUT_RISK",
+    );
     expect(suggestion?.impact.kind).toBe("unquantified");
   });
 });
@@ -217,7 +230,9 @@ describe("margin", () => {
         }),
       }),
     );
-    const suggestion = found.find((entry) => entry.key === "MARGIN_SLIPPING");
+    const suggestion = only(found).find(
+      (entry) => entry.key === "MARGIN_SLIPPING",
+    );
     expect(suggestion?.evidence.dropPoints).toBe(5);
   });
 
@@ -255,7 +270,9 @@ describe("margin", () => {
         }),
       }),
     );
-    const suggestion = found.find((entry) => entry.key === "MARGIN_SLIPPING");
+    const suggestion = only(found).find(
+      (entry) => entry.key === "MARGIN_SLIPPING",
+    );
     if (suggestion?.impact.kind !== "estimated") {
       throw new Error("expected an estimate");
     }
@@ -324,7 +341,7 @@ describe("cash", () => {
         },
       }),
     );
-    const suggestion = found.find(
+    const suggestion = only(found).find(
       (entry) => entry.key === "CASH_SHORTFALL_AHEAD",
     );
     expect(suggestion?.evidence.line).toBe("on time");
@@ -344,7 +361,7 @@ describe("cash", () => {
         },
       }),
     );
-    const suggestion = found.find(
+    const suggestion = only(found).find(
       (entry) => entry.key === "CASH_SHORTFALL_AHEAD",
     );
     expect(suggestion?.observation).toMatch(/On time, it does not/);
@@ -387,7 +404,7 @@ describe("what customers owe", () => {
         },
       }),
     );
-    const suggestion = found.find(
+    const suggestion = only(found).find(
       (entry) => entry.key === "OVERDUE_RECEIVABLES",
     );
     expect(suggestion?.impact).toEqual({
@@ -418,7 +435,7 @@ describe("what customers owe", () => {
 
 describe("the list as a whole", () => {
   it("is empty when the books show nothing worth saying", () => {
-    expect(detect(inputs())).toEqual([]);
+    expect(detect(inputs())).toEqual({ suggestions: [], failed: [] });
   });
 
   it("raises urgency for an amount large against this shop's turnover", () => {
@@ -444,10 +461,201 @@ describe("the list as a whole", () => {
         },
       }),
     );
-    const suggestion = found.find(
+    const suggestion = only(found).find(
       (entry) => entry.key === "OVERDUE_RECEIVABLES",
     );
     expect(suggestion?.urgency).toBe("NOW");
     expect(suggestion?.escalated).toBe(true);
+  });
+});
+
+describe("lines the shop does not stock", () => {
+  /** A catalogue line at nil with no reorder level and no recent trade. */
+  const discontinued = (n: number) =>
+    stockRow({
+      productId: `p${n}`,
+      name: `Discontinued ${n}`,
+      quantity: "0.0000",
+      stockValue: "0.0000",
+      minStockLevel: "0.0000",
+      status: "OUT",
+      lastMovementAt: daysAgo(300),
+    });
+
+  it("are not reported as being below a reorder level nobody set", () => {
+    // A product sits at OUT the moment its quantity reaches nil, whether or
+    // not a level was ever set. The advisor used to count those and say
+    // "N lines are at or below the reorder level you set" about lines where
+    // none was set and none is wanted — on every visit, forever, because a
+    // discontinued product stays at nil.
+    const found = detect(
+      inputs({ stock: [discontinued(1), discontinued(2), discontinued(3)] }),
+    );
+    expect(keys(found)).not.toContain("STOCK_OUT_RISK");
+  });
+
+  it("still reports a line the shop has been selling that ran out", () => {
+    // The other half: an empty shelf on something actually in trade is the
+    // whole point of the check, and no reorder level is needed to see it.
+    const found = detect(
+      inputs({
+        stock: [
+          discontinued(1),
+          stockRow({
+            productId: "p9",
+            name: "Fast mover",
+            quantity: "0.0000",
+            minStockLevel: "0.0000",
+            status: "OUT",
+            lastMovementAt: daysAgo(3),
+          }),
+        ],
+      }),
+    );
+
+    const suggestion = only(found).find(
+      (entry) => entry.key === "STOCK_OUT_RISK",
+    );
+    expect(suggestion).toBeDefined();
+    // One line, not two: the discontinued one is not counted.
+    expect(suggestion?.evidence.lines).toBe(1);
+    expect(suggestion?.evidence.examples).toBe("Fast mover");
+  });
+
+  it("does not claim a reorder level in the sentence when none was set", () => {
+    const found = detect(
+      inputs({
+        stock: [
+          stockRow({
+            quantity: "0.0000",
+            minStockLevel: "0.0000",
+            status: "OUT",
+            lastMovementAt: daysAgo(3),
+          }),
+        ],
+      }),
+    );
+    const suggestion = only(found).find(
+      (entry) => entry.key === "STOCK_OUT_RISK",
+    );
+    expect(suggestion?.observation).not.toContain("reorder level");
+    expect(suggestion?.observation).toContain("out of stock");
+  });
+
+  it("still says reorder level where the owner did set one", () => {
+    const found = detect(
+      inputs({
+        stock: [stockRow({ status: "LOW", minStockLevel: "200" })],
+      }),
+    );
+    const suggestion = only(found).find(
+      (entry) => entry.key === "STOCK_OUT_RISK",
+    );
+    expect(suggestion?.observation).toContain("reorder level you set");
+  });
+});
+
+describe("bills the shop owes", () => {
+  const owing: LedgerAgeing = {
+    summary: {
+      total: "180000",
+      overdue: "120000",
+      buckets: {},
+      oldestOverdueDays: 47,
+    },
+    parties: [
+      {
+        partyId: "s1",
+        name: "Metro Wholesale",
+        total: "120000",
+        overdue: "90000",
+      },
+      {
+        partyId: "s2",
+        name: "Kumar Traders",
+        total: "60000",
+        overdue: "30000",
+      },
+    ] as unknown as LedgerAgeing["parties"],
+  };
+
+  it("says what is past due and to how many suppliers", () => {
+    // The advisor told a shop when its customers owed it money and never when
+    // it owed suppliers — the payables ageing was built and simply unread.
+    const found = detect(inputs({ payables: owing }));
+    const suggestion = only(found).find(
+      (entry) => entry.key === "OVERDUE_PAYABLES",
+    );
+
+    expect(suggestion).toBeDefined();
+    expect(suggestion?.evidence.suppliers).toBe(2);
+    expect(suggestion?.evidence.oldestOverdueDays).toBe(47);
+    expect(suggestion?.observation).toContain("2 suppliers");
+    expect(suggestion?.observation).toContain("47 days");
+  });
+
+  it("calls it recorded rather than estimated, because it is", () => {
+    const found = detect(inputs({ payables: owing }));
+    const suggestion = only(found).find(
+      (entry) => entry.key === "OVERDUE_PAYABLES",
+    );
+    expect(suggestion?.impact.kind).toBe("recorded");
+  });
+
+  it("leaves a trivial balance alone", () => {
+    const found = detect(
+      inputs({
+        payables: {
+          summary: {
+            total: "400",
+            overdue: "400",
+            buckets: {},
+            oldestOverdueDays: 5,
+          },
+          parties: [],
+        },
+      }),
+    );
+    expect(keys(found)).not.toContain("OVERDUE_PAYABLES");
+  });
+
+  it("says nothing at all when nothing is past due", () => {
+    expect(keys(detect(inputs()))).not.toContain("OVERDUE_PAYABLES");
+  });
+});
+
+describe("a detector that throws", () => {
+  it("takes out its own suggestion and nothing else", () => {
+    // The service goes to some trouble to survive a source it cannot read.
+    // Without the same care here, one detector meeting a shape it did not
+    // expect would throw all of that away and return an error page instead of
+    // the suggestions that were fine.
+    const broken = inputs({
+      payables: {
+        summary: {
+          total: "180000",
+          overdue: "120000",
+          buckets: {},
+          oldestOverdueDays: 47,
+        },
+        // `parties` is read with .filter; a shape that is not an array is the
+        // cheapest way to make exactly one detector fail.
+        parties: null as unknown as LedgerAgeing["parties"],
+      },
+      receivables: {
+        summary: {
+          total: "90000",
+          overdue: "90000",
+          buckets: {},
+          oldestOverdueDays: 12,
+        },
+        parties: [],
+      },
+    });
+
+    const found = detect(broken);
+    expect(found.failed).toContain("OVERDUE_PAYABLES");
+    // The receivables suggestion is unaffected.
+    expect(keys(found)).toContain("OVERDUE_RECEIVABLES");
   });
 });

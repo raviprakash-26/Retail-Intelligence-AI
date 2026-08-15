@@ -1,13 +1,16 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { CATALOGUE_VERSION } from "@/lib/advisor/catalogue";
+import { CATALOGUE_VERSION, RULES } from "@/lib/advisor/catalogue";
 import { rank, type Suggestion } from "@/lib/advisor/impact";
 import type { RangeKey } from "@/lib/analytics/range";
 import { getAnalytics } from "@/server/analytics/analytics-service";
 import { getCashProjection } from "@/server/forecast/cash-projection";
 import { HORIZON_WEEKS } from "@/server/forecast/forecast-service";
 import { stockRows } from "@/server/inventory/inventory-report";
-import { receivablesAgeing } from "@/server/settlements/outstanding";
+import {
+  payablesAgeing,
+  receivablesAgeing,
+} from "@/server/settlements/outstanding";
 import { detect } from "@/server/advisor/detectors";
 
 /**
@@ -76,7 +79,17 @@ export async function getAdvice(params: {
     today,
   });
 
-  const [company, receivables, cash, stock] = await Promise.all([
+  const NO_AGEING = {
+    summary: {
+      total: "0",
+      overdue: "0",
+      buckets: {},
+      oldestOverdueDays: null,
+    },
+    parties: [],
+  };
+
+  const [company, receivables, payables, cash, stock] = await Promise.all([
     prisma.company.findUnique({
       where: { id: params.companyId },
       select: { createdAt: true },
@@ -84,15 +97,13 @@ export async function getAdvice(params: {
     attempt(
       "what customers owe",
       () => receivablesAgeing(params.companyId),
-      {
-        summary: {
-          total: "0",
-          overdue: "0",
-          buckets: {},
-          oldestOverdueDays: null,
-        },
-        parties: [],
-      },
+      NO_AGEING,
+      incomplete,
+    ),
+    attempt(
+      "what you owe suppliers",
+      () => payablesAgeing(params.companyId),
+      NO_AGEING,
       incomplete,
     ),
     attempt(
@@ -114,31 +125,38 @@ export async function getAdvice(params: {
     ),
   ]);
 
-  const suggestions = rank(
-    detect({
-      analytics,
-      receivables,
-      cash: cash ?? {
-        from: "",
-        to: "",
-        openingCash: "0",
-        weeks: [],
-        firstShortfall: null,
-        firstShortfallIfLate: null,
-        weeklyRunningCost: "0",
-        runningCostBasis: "",
-        latenessDays: null,
-        latenessBasis: "",
-        overdueReceivables: "0",
-        overduePayables: "0",
-        limitations: [],
-        unavailable: "The cash projection could not be read.",
-      },
-      stock,
-      booksStartedAt: company?.createdAt ?? today,
-      today,
-    }),
-  );
+  const { suggestions: found, failed } = detect({
+    analytics,
+    receivables,
+    payables,
+    cash: cash ?? {
+      from: "",
+      to: "",
+      openingCash: "0",
+      weeks: [],
+      firstShortfall: null,
+      firstShortfallIfLate: null,
+      weeklyRunningCost: "0",
+      runningCostBasis: "",
+      latenessDays: null,
+      latenessBasis: "",
+      overdueReceivables: "0",
+      overduePayables: "0",
+      limitations: [],
+      unavailable: "The cash projection could not be read.",
+    },
+    stock,
+    booksStartedAt: company?.createdAt ?? today,
+    today,
+  });
+
+  // A detector that threw is named the same way an unreadable source is. The
+  // reader is told the list is short for a reason rather than left to read a
+  // gap as a clean bill of health.
+  for (const key of failed)
+    incomplete.push(`the ${RULES[key].category.toLowerCase()} check`);
+
+  const suggestions = rank(found);
 
   return {
     range: analytics.range,
