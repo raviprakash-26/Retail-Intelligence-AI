@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { Route } from "next";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Undo2 } from "lucide-react";
+import { ArrowLeft, FileText, Undo2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -118,6 +119,18 @@ export default async function ReturnDetailPage({
             )}
           </p>
         </div>
+
+        {/* Sales only. A purchase return produces a debit note the supplier
+            issues against us — printing one on our own letterhead would be
+            asserting something we have no standing to assert. */}
+        {kind === "sales" && (
+          <Button asChild variant="outline">
+            <Link href={`/app/returns/${kind}/${detail.id}/note`}>
+              <FileText aria-hidden="true" />
+              Credit note
+            </Link>
+          </Button>
+        )}
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_18rem]">

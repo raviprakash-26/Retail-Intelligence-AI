@@ -115,6 +115,78 @@ export const INVOICE_PARTICULARS: readonly Particular[] = [
 ];
 
 /**
+ * What a credit note has to say.
+ *
+ * A different list from an invoice's, and shorter. Rule 53 asks for the nature
+ * of the document, a serial number, the date, both parties with their GSTINs,
+ * **the serial number and date of the invoice it is against**, the taxable
+ * value and the tax credited, and a signature. It does not ask for an HSN code
+ * against each line the way Rule 46 does.
+ *
+ * The reference to the original invoice is the particular that matters most: a
+ * credit note is an adjustment to a supply already declared, and one that does
+ * not say which supply is an adjustment to nothing.
+ */
+export const CREDIT_NOTE_PARTICULARS: readonly Particular[] = [
+  {
+    key: "nature",
+    requirement: "The nature of the document, said plainly",
+    testId: "document-nature",
+  },
+  {
+    key: "supplierName",
+    requirement: "Name, address and GSTIN of the supplier",
+    testId: "supplier-block",
+  },
+  {
+    key: "noteNumber",
+    requirement: "A consecutive serial number unique for the financial year",
+    testId: "note-number",
+  },
+  {
+    key: "noteDate",
+    requirement: "Date of issue",
+    testId: "note-date",
+  },
+  {
+    key: "recipient",
+    requirement: "Name, address and GSTIN of the recipient where registered",
+    testId: "recipient-block",
+  },
+  {
+    key: "againstInvoice",
+    requirement:
+      "Serial number and date of the tax invoice this is issued against",
+    testId: "against-invoice",
+  },
+  {
+    key: "taxableValue",
+    requirement: "Value of the taxable supply credited",
+    testId: "credited-taxable",
+  },
+  {
+    key: "taxCredited",
+    requirement: "Rate of tax and the amount of tax credited",
+    testId: "credited-tax",
+  },
+  {
+    key: "total",
+    requirement: "Total amount credited",
+    testId: "credit-total",
+  },
+  {
+    key: "reason",
+    requirement: "Why the credit is being given",
+    testId: "credit-reason",
+  },
+  {
+    key: "signature",
+    requirement: "Signature of the supplier or an authorised representative",
+    testId: "signature",
+  },
+];
+
+/**
  * Which copy this is.
  *
  * An invoice for goods is issued in triplicate under Rule 48 — the recipient's
