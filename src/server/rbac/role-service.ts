@@ -25,9 +25,12 @@ import { recordAuditLog } from "@/server/audit/audit-log";
  * rule applies to editing one. An owner holds everything and is unaffected;
  * everybody else can only ever delegate downwards.
  *
- * **System roles are readable and untouchable.** They are the templates every
- * company is seeded from, shared across tenants, and a business editing one
- * would be editing every business's.
+ * **The six built-in roles are assignable and not editable.** Each company owns
+ * its own copy of them, made at signup from a shared template, so editing one
+ * would not reach another tenant — they are held fixed because a business
+ * expecting Cashier to mean what Cashier means everywhere is a reasonable
+ * thing to expect, and because a role somebody can quietly widen is a role
+ * nobody can reason about. Inventing a new one is the supported way to differ.
  */
 
 export class RoleError extends Error {
@@ -52,13 +55,20 @@ export type RoleView = {
   members: number;
 };
 
-/** Every role this company can assign: the system templates and its own. */
+/**
+ * Every role this company can assign.
+ *
+ * Its own and only its own. The shared `companyId: null` rows are the
+ * templates provisioning copies from, not roles anybody assigns: every company
+ * is given its own copy of all six at signup, so including the templates here
+ * listed each built-in role twice — six names, twelve rows. Caught by counting
+ * what the page rendered rather than by reading the query, and neither test
+ * covering this could have seen it, because "contains Owner" and "some role is
+ * a system role" are both true of a duplicate.
+ */
 export async function listRoles(companyId: string): Promise<RoleView[]> {
   const roles = await prisma.role.findMany({
-    // Both, deliberately: a business assigns from the seeded templates and
-    // from anything it has built, and a list showing only one is a list
-    // somebody has to reconcile in their head.
-    where: { OR: [{ companyId }, { companyId: null, isSystem: true }] },
+    where: { companyId },
     select: {
       id: true,
       key: true,
@@ -202,9 +212,11 @@ export async function updateRole(params: {
     where: { id: params.roleId, companyId: params.companyId },
     select: { id: true, isSystem: true, name: true },
   });
-  // A system role has `companyId: null`, so it cannot match here — which is
-  // the point. Asking for one by id finds nothing rather than editing a
-  // template every other business is seeded from.
+  // Two separate guards, and it is worth being clear about which does what.
+  // The scope clause keeps one tenant out of another's roles, and out of the
+  // shared templates. It does *not* protect the built-in roles: a company's
+  // copies carry its own `companyId`, so they match — the `isSystem` check
+  // below is the only thing standing in front of them.
   if (!role) throw new RoleError("That role could not be found.", "NOT_FOUND");
   if (role.isSystem) {
     throw new RoleError("A built-in role cannot be changed.", "SYSTEM");

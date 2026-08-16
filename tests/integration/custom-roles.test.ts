@@ -192,6 +192,36 @@ describe("the built-in roles", () => {
     expect(roles.some((role) => role.key === "owner")).toBe(true);
   }, 120_000);
 
+  it("appear once each, not once per copy", async () => {
+    // The first version of the query asked for the company's roles *or* the
+    // shared templates, on the belief that a business assigns from both. It
+    // does not: every company is given its own copy of all six at signup, so
+    // that listed each built-in role twice and the page showed twelve rows for
+    // six roles. Neither test above could see it — "some role is a system
+    // role" and "some role is owner" are both true of a duplicate.
+    const fixture = await shop();
+    const roles = await listRoles(fixture.companyId);
+
+    const keys = roles.map((role) => role.key);
+    expect(keys, `duplicated: ${keys.join(", ")}`).toEqual([...new Set(keys)]);
+  }, 120_000);
+
+  it("are the company's own rows, never the shared templates", async () => {
+    // The reason the duplicate mattered beyond the count: a template belongs
+    // to no tenant, and a list of things to assign should not contain rows
+    // from outside the business looking at it.
+    const fixture = await shop();
+    const roles = await listRoles(fixture.companyId);
+
+    const owners = await prisma.role.findMany({
+      where: { id: { in: roles.map((role) => role.id) } },
+      select: { companyId: true },
+    });
+    expect(owners.every((row) => row.companyId === fixture.companyId)).toBe(
+      true,
+    );
+  }, 120_000);
+
   it("cannot be edited, even the company's own copy of one", async () => {
     // Deliberately the company's own seeded role, not the shared template.
     // A template has no companyId and is refused by the scope check, so a

@@ -24,6 +24,18 @@ test.describe("custom roles", () => {
     expect(body).toContain("Owner");
     expect(body).toContain("Cashier");
     expect(body).toMatch(/Built in/i);
+
+    // Once each. The first version of the query returned the company's roles
+    // *and* the shared templates it was seeded from, so the page listed twelve
+    // rows for six roles — and the three assertions above were all true of
+    // that page. Counting is what caught it.
+    const names = await page
+      .locator("ul.divide-y > li p.font-medium")
+      .allInnerTexts();
+    const first = names.map((name) => name.split("\n")[0]!.trim());
+    expect(first, `duplicated: ${first.join(", ")}`).toEqual([
+      ...new Set(first),
+    ]);
   });
 
   test("says which plan building your own comes with, and offers no button that would refuse", async ({

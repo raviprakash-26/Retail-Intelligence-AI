@@ -614,19 +614,31 @@ The page offers only what the person can grant rather than showing everything
 and refusing on save. Teaching a rule by rejection leaves somebody staring at a
 checkbox wondering whether the product is broken.
 
-**Built-in roles are listed and untouchable.** They are shared templates with no
-`companyId`, so one business editing one would be editing every business's — and
-asking for one by id simply finds nothing, because the scope clause cannot match
-it. They are still shown, because somebody choosing a role wants all of them
-side by side. A role somebody holds cannot be deleted either: the people holding
-it have to be moved first, deliberately, rather than having a replacement chosen
-for them by whatever the code happens to do next.
+**The six built-in roles are assignable and not editable.** Each company owns
+its own copy, made at signup from a shared template, so editing one would not
+reach another tenant. They are held fixed anyway: a business expecting Cashier
+to mean what Cashier means everywhere is expecting something reasonable, and a
+role somebody can quietly widen is a role nobody can reason about. Inventing a
+new one is the supported way to differ. A role somebody holds cannot be deleted
+either — the people holding it have to be moved first, deliberately, rather
+than having a replacement chosen for them by whatever the code does next.
 
-Two of the integration tests here passed for the wrong reason at first. The
-system-role cases fetched the shared template, which the tenant scope rejects
-before the `isSystem` check is ever reached, so removing that check failed
-nothing; the delete case fell through to the in-use guard the same way. Both now
-fetch the company's own copy, and removing either guard fails.
+**I got the shape of that wrong three times in one change, from one wrong
+belief.** Thinking the templates were what a business assigned from, the list
+query asked for the company's roles _or_ the shared templates — so the page
+showed twelve rows for six roles, every built-in name twice. The same belief
+put a comment beside the edit guard claiming a system role "cannot match here",
+when a company's own copy carries its own `companyId` and matches perfectly;
+the `isSystem` check is the only thing in front of it. And two integration
+tests passed for the wrong reason, reaching for the shared template so the
+tenant scope refused them before the `isSystem` check was ever reached.
+
+Fixing the tests did not lead me back to the belief that broke them, which it
+should have. The duplicate was caught by counting what the page rendered, and
+no test then covering it could have: "contains Owner" and "some role is a
+system role" are both true of a page showing everything twice. There is now a
+test on each — the list holds no duplicate key, and every row it returns
+belongs to the company asking.
 
 ## Settings that lock
 
