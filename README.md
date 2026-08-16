@@ -1938,6 +1938,44 @@ standing to assert.
 
 ---
 
+## Asking to be paid
+
+**The product could see exactly who owed what and had no way to act on it.** The
+ageing, the receivables report and the advisor all named the overdue accounts;
+the shopkeeper's collection process was remembering to telephone people. Getting
+paid is the binding constraint on a small retail business far more often than
+bookkeeping accuracy is, and this was the step missing between knowing and being
+paid.
+
+A reminder is sent from the receivables panel, one customer at a time, after
+seeing exactly what it will say: every unpaid invoice by number, what is owed on
+each, when it fell due and how many days ago. **It states facts and stops.** No
+interest, no penalty, no threat, no claim about what happens next — this product
+does not know what the shop's arrangement with that customer is, and a
+consequence invented on a shop's behalf could cost a relationship built over
+years. A test asserts the message contains none of those words, and adding one
+fails the build.
+
+**Nothing is automatic.** An automatic dunning run that goes out on a wrong
+figure is not a mistake that can be apologised away by email, so sending stays a
+decision somebody makes. When the customer was last reminded is shown before
+sending, read off the append-only activity log rather than a second column that
+could drift from it — a customer who gets three reminders in a week stops
+reading them, and the person clicking has no other way to know a colleague
+already did it this morning.
+
+**Where nothing is overdue it is not a reminder at all.** The subject becomes a
+statement of account, the opening sentence changes, and the past-due line is
+omitted rather than printed as zero. Chasing somebody who has done nothing wrong
+is how a shop loses a customer.
+
+Every figure comes from the posted documents — the same amounts the invoice
+carries, not a separate tally kept for chasing. A reminder quoting a figure the
+books do not hold is the fastest way to lose an argument with a customer who has
+kept their own records.
+
+---
+
 ## Taking your data with you
 
 **A business's books belong to the business.** One click on Settings → Your

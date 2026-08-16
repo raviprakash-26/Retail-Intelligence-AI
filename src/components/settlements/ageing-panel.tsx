@@ -1,5 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PaymentReminderDialog } from "@/components/settlements/payment-reminder-dialog";
 import { formatCurrency } from "@/lib/format";
 import { AGEING_BUCKETS } from "@/lib/settlements/ageing";
 import type { LedgerAgeing } from "@/server/settlements/outstanding";
@@ -20,11 +21,19 @@ export function AgeingPanel({
   title,
   emptyNote,
   partyNoun,
+  remindable = false,
 }: {
   ageing: LedgerAgeing;
   title: string;
   emptyNote: string;
   partyNoun: string;
+  /**
+   * Offer a reminder beside each party.
+   *
+   * Receivables only. A supplier we owe is not somebody this shop writes to
+   * asking for money, and the same panel renders both sides.
+   */
+  remindable?: boolean;
 }) {
   const total = Number(ageing.summary.total);
 
@@ -113,10 +122,18 @@ export function AgeingPanel({
                   </Badge>
                 )}
               </span>
-              <span className="tabular-figures">
-                {formatCurrency(party.outstanding, {
-                  compactZeroDecimals: true,
-                })}
+              <span className="flex items-center gap-1">
+                <span className="tabular-figures">
+                  {formatCurrency(party.outstanding, {
+                    compactZeroDecimals: true,
+                  })}
+                </span>
+                {remindable && (
+                  <PaymentReminderDialog
+                    customerId={party.id}
+                    customerName={party.name}
+                  />
+                )}
               </span>
             </li>
           ))}
