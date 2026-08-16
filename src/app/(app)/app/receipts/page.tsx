@@ -55,6 +55,7 @@ export default async function ReceiptsPage({
       />
 
       <AgeingPanel
+        remindable
         ageing={ageing}
         title="Owed to you"
         partyNoun="customer"

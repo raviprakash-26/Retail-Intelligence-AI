@@ -149,3 +149,53 @@ test.describe("what a cashier may not do with returns", () => {
     ).toHaveCount(0);
   });
 });
+
+test.describe("chasing a customer who owes money", () => {
+  test.use({ storageState: STATE.owner });
+
+  test("shows exactly what would be sent before sending it", async ({
+    page,
+  }) => {
+    // A reminder is the shop speaking in its own name. Everything it will say
+    // is on screen first — which invoices, how much, how late.
+    //
+    // On credit, deliberately. A cash sale settles as it is raised, leaves
+    // nothing outstanding, and gives the ageing panel no party to offer a
+    // reminder for. The first version of this test raised a cash sale and
+    // skipped itself, which proves nothing.
+    await page.goto("/app/sales/new");
+    await page.waitForSelector('button:has-text("Choose a product")');
+
+    const selects = page.locator('button[role="combobox"]');
+    await selects.first().click();
+    await page.locator('[role="option"]:has-text("Sharma Provision")').click();
+    await selects.nth(1).click();
+    await page.locator('[role="option"]:has-text("On credit")').first().click();
+
+    await page.locator('button:has-text("Choose a product")').first().click();
+    await page.locator('input[placeholder*="Search by name"]').fill("Sugar");
+    await page.waitForTimeout(1200);
+    await page.locator("[cmdk-item]").first().click();
+
+    await fill(page, 'input[name="lines.0.quantity"]', "3");
+    await fill(page, 'input[name="lines.0.rate"]', "400");
+    await page.locator('button[type="submit"]').first().click();
+    await page.waitForURL(/\/app\/sales\/[0-9a-f-]{8}/);
+    await page.waitForLoadState("networkidle");
+
+    await page.goto("/app/receipts");
+    await page.waitForLoadState("networkidle");
+
+    const remind = page
+      .getByRole("button", { name: /payment reminder/i })
+      .first();
+    await expect(remind).toBeVisible();
+    await remind.click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    // The restraint is the point, and it is stated where somebody will read it.
+    await expect(dialog).toContainText(/no interest, no penalty/i);
+    await expect(dialog).toContainText(/Total outstanding/i);
+  });
+});
