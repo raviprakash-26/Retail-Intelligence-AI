@@ -1938,6 +1938,52 @@ standing to assert.
 
 ---
 
+## Closing the books
+
+**The guard existed and could never fire.** `postJournalEntry` has always
+refused an entry whose accounting period is not open — and nothing in the
+application could close one. `FiscalPeriodStatus` was set to `OPEN` at
+provisioning and never touched again. The only test of that refusal reached it
+by writing `status: 'CLOSED'` into the database by hand, which is the tell: the
+test had to do what no user could. Meanwhile `accounting.period.close` sat in
+the permission catalogue, granted to the accountant role, conferring nothing.
+
+**What it is for.** Once a month's GST return has been filed, or a year has been
+finalised with an accountant, the figures behind it have to stop moving. Without
+a close, nothing prevents a backdated invoice landing in a month whose return
+went in weeks ago — and the return and the ledger then disagree permanently,
+with the GST module rebuilding a different month next time anybody looks. It is
+the other half of a principle the rest of this codebase already follows: entries
+are reversed rather than edited, the activity log is append-only, and figures do
+not quietly change after the fact.
+
+**Closing is refused while anything is unfinished**, and periods close in order.
+A draft entry inside the period is something somebody intends to post; closing
+over it would either strand it or shove it into the next period, and being told
+to deal with it first is better than either. A closed March sitting behind an
+open February says nothing useful about either.
+
+**Reopening is deliberately noisy.** It has to exist — a mistake found after
+closing must be correctable, or closing becomes something nobody dares do — but
+it means figures behind something already filed can change. So it demands a
+written reason, states plainly that anything posted now will not be in a return
+already filed, and records the reason in the append-only log beside the close it
+undoes.
+
+**Nothing produces the third state yet, and that is deliberate.** The schema has
+`LOCKED`, meaning closed and not reopenable, and the posting guard already
+treats it correctly because anything other than `OPEN` is refused. What is
+missing is a considered answer to what happens when somebody locks a year by
+mistake — and shipping an irreversible button before having that answer would
+hand a shop a way to make its own books permanently uncorrectable.
+
+The tests close periods the way a person does and then check the refusal fires,
+which is the first time that path has run end to end. One of the three guards —
+the refusal to close over a draft — turned out to be described in a comment and
+proved by nothing: removing it failed no test. It has one now.
+
+---
+
 ## Proof that money changed hands
 
 **A customer who paid got nothing.** The shop could raise an invoice and issue a
