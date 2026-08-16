@@ -154,7 +154,11 @@ jobs:
       # written because "the way a secret escapes is duller than an import" had
       # never once run in CI.
       - name: Scan the built client bundle for secrets
-        run: npx vitest run tests/unit/client-bundle-secrets.test.ts
+        run: npm run test:bundle
+        env:
+          # Says a build is expected here, so finding none fails rather than
+          # skipping. Only this job builds, so only this job may claim it.
+          EXPECT_CLIENT_BUNDLE: "1"
 
       - name: Install the browser
         run: npx playwright install --with-deps chromium
