@@ -689,6 +689,63 @@ checked them, which is the distinction this whole sweep turns on: that a role
 holds a permission and that the permission does something are separate claims,
 and only one of them was being tested.
 
+### What a company was given on the day it signed up
+
+Provisioning copies two things from a definition in code: the six system roles,
+and the chart of accounts. Neither was ever revisited. A tenant kept whatever
+those definitions said on the morning it signed up, and every release since
+changed them for new signups only.
+
+**The Owner role stopped being what it claims.** Its template carries
+`permissions: null`, documented as every permission "including ones added in
+future releases". That is true of the template row the seed maintains and false
+of every company: an owner who signed up before the data export shipped could
+not export their own books, while the role they held still read "Full access to
+every module". The same applies to every built-in role — the Owner is only the
+clearest case, because its list is the one that is meant to be open-ended.
+
+**And payroll could not run at all.** The payroll release added `PF_PAYABLE`,
+`ESI_PAYABLE`, `PROFESSIONAL_TAX_PAYABLE` and `EMPLOYER_CONTRIBUTIONS` to the
+chart. Posting a run resolves all four through `resolveSystemAccounts`, which
+throws when one is absent. So a business that signed up before that release
+could open payroll, hire employees, fill in a period, press the button and be
+told nothing useful — with no way out from inside the product. Not a silent
+wrong posting, which is the one mercy here, but a complete outage for exactly
+the tenants who had been customers longest.
+
+The two halves are fixed differently, and the difference is the point.
+
+Roles are synced **in both directions**. A company's system roles are copies
+and nothing else — `updateRole` and `deleteRole` both refuse `isSystem`, so a
+tenant cannot edit one, and any difference from the template is drift rather
+than a decision. Making them match exactly is therefore safe, and the removing
+half is what makes a permission dropped from a template actually leave the
+tenants holding it.
+
+The chart is **add-only**. An account is not a set of flags: it carries a
+balance, it may have been posted against, and businesses create their own. A
+pass that deleted whatever the template lacked is how a business loses its
+ledger. Anything unexpected is left alone. New accounts arrive with a zero
+opening balance, because they did not exist while the business was trading and
+an opening figure would be an invention.
+
+Both run on every seed, which is a documented step of the deploy, so the next
+release's additions reach existing tenants rather than stopping at the
+templates. The roles also have a migration, because that sync is expressible as
+two statements and a deploy applies migrations before it seeds; the chart is
+not, since placing an account needs the group tree and the column values that
+live in TypeScript, so its catch-up happens in the seed alone.
+
+They run **after** the seed's transaction rather than inside it, one tenant at
+a time. A company can be deleted while the sync is walking the table, and a
+statement that read a role id a moment earlier then fails on a foreign key —
+which inside the transaction is fatal rather than skippable, because Postgres
+aborts the whole thing and every later statement returns `25P02`. That is not
+theoretical: it took four unrelated test suites down, and then, once a `catch`
+was added in the wrong place, took them down more confusingly. Each company is
+independent and each sync is idempotent, so none of it needs to be atomic with
+the template maintenance — only to happen afterwards.
+
 ### A scanner that had never run
 
 The same sweep turned up a check that reported green by never executing. A test
@@ -3031,6 +3088,7 @@ query text is the only thing the browser controls.
 | 53    | Activity log — a record written from 33 places and read from none       | **Done** |
 | 54    | Custom roles — the Business feature the pricing page had always sold    | **Done** |
 | 55    | Permissions — eight that guarded nothing, and a scanner that never ran  | **Done** |
+| 56    | What a tenant was given at signup, and never given again                | **Done** |
 
 ---
 
