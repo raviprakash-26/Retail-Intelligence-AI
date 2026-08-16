@@ -99,7 +99,7 @@ async function main() {
     `  ✓ Opening entry ${demo.openingEntry} posted and balanced at ₹${demo.openingTotal}`,
   );
   console.log(
-    `  ✓ ${trading.purchases} bills, ${trading.sales} invoices, ${trading.receipts} receipts, ${trading.expenses} expenses, ${trading.returns} credit note`,
+    `  ✓ ${trading.purchases} bills, ${trading.sales} invoices, ${trading.receipts} receipts, ${trading.payments} payments, ${trading.expenses} expenses, ${trading.returns} credit note`,
   );
   console.log("");
   console.log("  Demo sign-in (development only):");
