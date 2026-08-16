@@ -134,6 +134,7 @@ const CUSTOMERS = [
   {
     name: "Sharma Provision Store",
     phone: "9845012345",
+    email: "accounts@sharmaprovision.demo",
     city: "Bengaluru",
     gstin: "29AABCS1429B1ZX",
     creditLimit: 100000,
@@ -142,6 +143,7 @@ const CUSTOMERS = [
   {
     name: "Lakshmi Kirana",
     phone: "9845023456",
+    email: null,
     city: "Bengaluru",
     gstin: null,
     creditLimit: 50000,
@@ -150,6 +152,7 @@ const CUSTOMERS = [
   {
     name: "Anand Canteen Services",
     phone: "9845034567",
+    email: "purchasing@anandcanteen.demo",
     city: "Bengaluru",
     gstin: "29AACCA9207D1ZM",
     creditLimit: 150000,
@@ -158,6 +161,7 @@ const CUSTOMERS = [
   {
     name: "Walk-in Customer",
     phone: null,
+    email: null,
     city: "Bengaluru",
     gstin: null,
     creditLimit: 0,
@@ -439,6 +443,7 @@ export async function seedDemoCompany(prisma: PrismaClient, asOf: Date) {
             }),
             name: customer.name,
             phone: customer.phone,
+            email: customer.email,
             gstin: customer.gstin,
             city: customer.city,
             state: "Karnataka",

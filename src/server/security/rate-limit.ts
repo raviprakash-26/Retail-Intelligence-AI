@@ -67,6 +67,16 @@ export const RATE_LIMITS = {
   /** Invitations sent from one company. Email sent to strangers, so capped. */
   INVITE_COMPANY: { limit: 20, windowSeconds: 3600 },
   /**
+   * Documents emailed to customers, per company.
+   *
+   * This sends mail to third parties, which is the shape of thing worth
+   * capping whatever the intent. The recipient is never taken from the
+   * request — it is the address on the customer record — so it cannot be
+   * pointed at a stranger, but a shop whose account was taken over could
+   * still bombard its own customer list.
+   */
+  DOCUMENT_EMAIL_COMPANY: { limit: 60, windowSeconds: 3600 },
+  /**
    * Complete data exports, per user.
    *
    * The most expensive thing this application can be asked to do — it reads
