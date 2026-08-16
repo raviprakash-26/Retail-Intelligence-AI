@@ -1938,6 +1938,45 @@ standing to assert.
 
 ---
 
+## The demo shop
+
+**It had never traded.** Seven products, four customers, three suppliers, an
+opening balance — and not one transaction. The dashboard was blank, the
+analytics had nothing to plot, the GST registers were empty, the ageing showed
+nobody, and all three AI modules had nothing to read. Somebody opening the demo
+would reasonably conclude the product did nothing, and every browser test that
+needed an invoice had to raise one first.
+
+It now carries about ninety days of trading: bills from suppliers, a hundred and
+fifty-odd invoices across the four customers with a realistic cash and credit
+mix, receipts settling most of the older credit invoices, monthly expenses, and
+one credit note for a damaged carton.
+
+**Everything is posted through the ordinary services.** No fixture writes a
+journal line, a stock movement or a tax entry directly. The books balance
+because the same engine balanced them; the ageing is real because those invoices
+really are unpaid; the GST register agrees with the sales because it was built
+from them. A seed that inserted rows directly would drift away from the
+application and the demo would be the place that showed it.
+
+**Deterministic, and dated relative to the run.** The same seed produces the
+same figures — checked by seeding twice and comparing — so a test can assert
+against them instead of building its own history. Dates count backwards from
+today, so a demo seeded in April and opened in September is not a shop that
+stopped trading five months ago.
+
+The tests do not pin the figures. The generator is free to produce a different
+shop; what it may not produce is an impossible one — books out of balance, a
+product at negative stock, an invoice dated tomorrow, or nothing owed by
+anybody. Selling more than was ever bought fails the suite, which was checked by
+doing it.
+
+Filling the demo immediately paid for itself: with real charts on the page, the
+accessibility sweep found an unnamed progress bar on the analytics screen that
+an empty page had been hiding.
+
+---
+
 ## Asking to be paid
 
 **The product could see exactly who owed what and had no way to act on it.** The

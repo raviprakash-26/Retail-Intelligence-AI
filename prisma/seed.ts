@@ -4,6 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import { seedPermissionsAndRoles } from "./seed/permissions";
 import { seedSubscriptionPlans } from "./seed/plans";
 import { DEMO, seedDemoCompany } from "./seed/demo-company";
+import { seedDemoTrading } from "./seed/demo-trading";
 import { PLATFORM_ADMIN, seedPlatformAdmin } from "./seed/platform-admin";
 
 /**
@@ -77,7 +78,18 @@ async function main() {
   }
 
   console.log("→ Seeding demo tenant…");
-  const demo = await seedDemoCompany(prisma, new Date());
+  const asOf = new Date();
+  const demo = await seedDemoCompany(prisma, asOf);
+
+  // A shop that has never traded shows a blank dashboard, an empty ageing and
+  // AI modules with nothing to read. The history is posted through the
+  // ordinary services, so the books balance because the engine balanced them.
+  const trading = await seedDemoTrading(
+    prisma,
+    demo.companyId,
+    demo.ownerId,
+    asOf,
+  );
 
   console.log(`  ✓ Ravi Retail Mart provisioned (${demo.companyId})`);
   console.log(
@@ -85,6 +97,9 @@ async function main() {
   );
   console.log(
     `  ✓ Opening entry ${demo.openingEntry} posted and balanced at ₹${demo.openingTotal}`,
+  );
+  console.log(
+    `  ✓ ${trading.purchases} bills, ${trading.sales} invoices, ${trading.receipts} receipts, ${trading.expenses} expenses, ${trading.returns} credit note`,
   );
   console.log("");
   console.log("  Demo sign-in (development only):");

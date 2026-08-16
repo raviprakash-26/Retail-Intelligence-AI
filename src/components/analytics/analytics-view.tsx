@@ -175,6 +175,7 @@ function OverviewPanel({ report }: { report: AnalyticsReport }) {
                 <Progress
                   value={peak > 0 ? (Number(day.revenue) / peak) * 100 : 0}
                   className="h-2"
+                  aria-label={`${day.label} revenue, ${formatCurrency(day.revenue)}`}
                 />
                 <span className="tabular-figures w-24 shrink-0 text-right text-xs">
                   {formatCurrency(day.revenue)}
@@ -200,7 +201,11 @@ function OverviewPanel({ report }: { report: AnalyticsReport }) {
                   <span className="w-28 shrink-0 truncate text-xs">
                     {category.name}
                   </span>
-                  <Progress value={category.sharePercent} className="h-2" />
+                  <Progress
+                    value={category.sharePercent}
+                    className="h-2"
+                    aria-label={`${category.name}, ${formatCurrency(category.revenue)}`}
+                  />
                   <span className="tabular-figures w-24 shrink-0 text-right text-xs">
                     {formatCurrency(category.revenue)}
                   </span>
