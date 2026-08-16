@@ -1,6 +1,5 @@
-import { existsSync } from "node:fs";
-import path from "node:path";
 import { beforeAll } from "vitest";
+import "./load-env";
 
 /**
  * Global test setup.
@@ -8,14 +7,13 @@ import { beforeAll } from "vitest";
  * Loads `.env.test` so the suite never touches the development database, and
  * asserts that fact rather than trusting it — a test run that truncates a
  * developer's working data is a very expensive way to learn about a typo.
+ *
+ * The loading lives in `./load-env` because the client-bundle scan needs the
+ * environment without this guard: it opens no database, and running it under
+ * this file fails on a `DATABASE_URL` that is perfectly correct for the job it
+ * runs in. The assertion below is what actually protects the developer's
+ * database, and it runs wherever this file is the setup.
  */
-// Only if it is there: the file is gitignored, and CI passes DATABASE_URL as
-// a real environment variable instead. The assertion below is what actually
-// protects the developer's database, and it runs either way.
-const envPath = path.join(process.cwd(), ".env.test");
-if (existsSync(envPath)) {
-  process.loadEnvFile?.(envPath);
-}
 
 beforeAll(() => {
   const url = process.env.DATABASE_URL ?? "";

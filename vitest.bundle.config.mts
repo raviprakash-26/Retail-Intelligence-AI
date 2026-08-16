@@ -17,6 +17,11 @@ export default defineConfig({
   test: {
     globals: true,
     include: ["tests/unit/client-bundle-secrets.test.ts"],
+    // The environment but not the database guard. The scan searches the bundle
+    // for the values of secret variables and fails when none is set, so
+    // without this it would only be runnable where the variables happen to be
+    // real — CI, and not a developer's machine.
+    setupFiles: ["./tests/load-env.ts"],
     environment: "node",
   },
 });
