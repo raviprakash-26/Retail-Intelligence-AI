@@ -189,3 +189,22 @@ export async function taxInvoiceDocument(params: {
     notes: sale.notes,
   };
 }
+
+/**
+ * The address a copy would be sent to, or null where there is none.
+ *
+ * Separate from the document because it is not one of its particulars — an
+ * invoice does not have to carry an email address, and printing one that did
+ * would be adding a field the rule does not ask for. This exists so the page
+ * can say who the button would send to, or say there is nobody.
+ */
+export async function customerEmailForSale(params: {
+  companyId: string;
+  saleId: string;
+}): Promise<string | null> {
+  const sale = await prisma.sale.findFirst({
+    where: { id: params.saleId, companyId: params.companyId },
+    select: { customer: { select: { email: true } } },
+  });
+  return sale?.customer?.email?.trim() || null;
+}

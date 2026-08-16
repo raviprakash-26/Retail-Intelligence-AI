@@ -3,9 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { CreditNoteSheet } from "@/components/documents/credit-note-sheet";
+import { EmailDocumentButton } from "@/components/documents/email-document-button";
 import { PrintButton } from "@/components/documents/print-button";
 import { requirePermission } from "@/server/auth/context";
-import { creditNoteDocument } from "@/server/documents/credit-note-document";
+import {
+  creditNoteDocument,
+  customerEmailForReturn,
+} from "@/server/documents/credit-note-document";
 import { MasterDataError } from "@/server/master-data/errors";
 
 export const metadata: Metadata = {
@@ -42,6 +46,11 @@ export default async function CreditNotePage({
     throw error;
   }
 
+  const recipientEmail = await customerEmailForReturn({
+    companyId: context.company.id,
+    returnId: id,
+  });
+
   return (
     <div className="space-y-4">
       <div
@@ -55,7 +64,10 @@ export default async function CreditNotePage({
           <ArrowLeft className="size-3.5" />
           Back to the credit note
         </Link>
-        <PrintButton label="Print or save as PDF" />
+        <div className="flex flex-wrap items-center gap-2">
+          <EmailDocumentButton id={id} kind="credit-note" to={recipientEmail} />
+          <PrintButton label="Print or save as PDF" />
+        </div>
       </div>
 
       <CreditNoteSheet document={document} />

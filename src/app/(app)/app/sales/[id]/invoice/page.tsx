@@ -2,10 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { EmailDocumentButton } from "@/components/documents/email-document-button";
 import { PrintButton } from "@/components/documents/print-button";
 import { TaxInvoiceSheet } from "@/components/documents/tax-invoice-sheet";
 import { requirePermission } from "@/server/auth/context";
-import { taxInvoiceDocument } from "@/server/documents/tax-invoice-document";
+import {
+  customerEmailForSale,
+  taxInvoiceDocument,
+} from "@/server/documents/tax-invoice-document";
 import { MasterDataError } from "@/server/master-data/errors";
 
 export const metadata: Metadata = {
@@ -40,6 +44,13 @@ export default async function TaxInvoicePage({
     throw error;
   }
 
+  // Read here rather than put on the document: an address is how a copy is
+  // sent, not one of the particulars the invoice has to carry.
+  const recipientEmail = await customerEmailForSale({
+    companyId: context.company.id,
+    saleId: id,
+  });
+
   return (
     <div className="space-y-4">
       <div
@@ -53,7 +64,10 @@ export default async function TaxInvoicePage({
           <ArrowLeft className="size-3.5" />
           Back to the invoice
         </Link>
-        <PrintButton label="Print or save as PDF" />
+        <div className="flex flex-wrap items-center gap-2">
+          <EmailDocumentButton id={id} kind="invoice" to={recipientEmail} />
+          <PrintButton label="Print or save as PDF" />
+        </div>
       </div>
 
       <TaxInvoiceSheet document={document} />

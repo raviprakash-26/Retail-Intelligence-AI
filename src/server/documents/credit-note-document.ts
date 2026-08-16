@@ -149,3 +149,15 @@ export async function creditNoteDocument(params: {
     },
   };
 }
+
+/** The address a copy of a credit note would go to, or null where there is none. */
+export async function customerEmailForReturn(params: {
+  companyId: string;
+  returnId: string;
+}): Promise<string | null> {
+  const note = await prisma.salesReturn.findFirst({
+    where: { id: params.returnId, companyId: params.companyId },
+    select: { customer: { select: { email: true } } },
+  });
+  return note?.customer?.email?.trim() || null;
+}
