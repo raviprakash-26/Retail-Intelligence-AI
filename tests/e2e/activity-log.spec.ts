@@ -12,16 +12,11 @@ test.describe("the activity log", () => {
   test.use({ storageState: STATE.owner });
 
   test("shows what has been done in this business", async ({ page }) => {
-    // Do something that records, then go and find it.
-    await page.goto("/app/accounting/periods");
-    await page.waitForLoadState("networkidle");
-
-    const closeButtons = page.getByRole("button", { name: /^Close$/ });
-    if ((await closeButtons.count()) > 0) {
-      await closeButtons.nth((await closeButtons.count()) - 1).click();
-      await page.waitForLoadState("networkidle");
-    }
-
+    // Deliberately asserts nothing about *which* entries are on the first
+    // page. The newest fifty depend on whatever else has run and on the order
+    // the seed inserted things, and the first version of this looked for one
+    // specific action — it passed alone and failed on a fresh database, which
+    // is a test measuring insertion order rather than the feature.
     await page.goto("/app/settings/activity");
     await page.waitForLoadState("networkidle");
 
@@ -30,9 +25,11 @@ test.describe("the activity log", () => {
     const body = await page.locator("body").innerText();
     // Why it is worth reading, said where somebody will read it.
     expect(body).toMatch(/can be edited or removed/i);
-    // And the machine names are turned into sentences.
+
+    // And that the machine names read as sentences. The demo trades, so money
+    // coming in and going out are always somewhere in the newest page.
     expect(body).toMatch(
-      /Closed an accounting period|Exported|Brought data in/i,
+      /Recorded a sale|Recorded money received|Recorded an expense|Recorded a sales return/i,
     );
   });
 

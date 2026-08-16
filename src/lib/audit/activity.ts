@@ -33,6 +33,26 @@ export type ActivityEntry = {
  * label, and worse than the machine name.
  */
 export const ACTION_LABELS: Record<string, string> = {
+  // The everyday ones, which are also the overwhelming majority. A log where
+  // ninety per cent of the rows read `sale.posted` is a log somebody skims
+  // past — the machine names were fine as a fallback and wrong as the norm.
+  "sale.posted": "Recorded a sale",
+  "purchase.posted": "Recorded a purchase bill",
+  "expense.posted": "Recorded an expense",
+  "receipt.posted": "Recorded money received",
+  "payment.posted": "Recorded money paid",
+  "sale.voided": "Voided a sale",
+  "purchase.voided": "Voided a purchase bill",
+  "expense.voided": "Voided an expense",
+  "receipt.voided": "Voided a receipt",
+  "payment.voided": "Voided a payment",
+  "auth.sign_in": "Signed in",
+  "auth.sign_in_failed": "A sign-in attempt failed",
+  "auth.sign_out": "Signed out",
+  "auth.password_changed": "Changed a password",
+  "role.created": "Created a role",
+  "role.updated": "Changed a role",
+  "role.deleted": "Removed a role",
   "company.data_exported": "Exported a complete copy of the business's data",
   "company.data_imported": "Brought data in from a file",
   "customer.payment_reminded": "Sent a payment reminder",

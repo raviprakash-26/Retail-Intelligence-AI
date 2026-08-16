@@ -51,6 +51,7 @@ const PAGES = [
   ["accountant", "/app/ai/accountant"],
   ["payroll", "/app/payroll"],
   ["settings", "/app/settings/business"],
+  ["roles", "/app/settings/roles"],
   ["activity", "/app/settings/activity"],
   ["your data", "/app/settings/data"],
   ["bring data in", "/app/settings/import"],
@@ -165,19 +166,38 @@ test.describe("without a mouse", () => {
     // The failure this catches: a dialog that opens without moving focus
     // leaves a screen-reader user reading the page behind it, with no idea
     // anything happened.
+    //
+    // This test skipped silently from the day it was written. It looked for a
+    // link named "new customer" and the control is a button labelled "Add
+    // customer", so the count was zero every time and the line read as a pass
+    // in the report. It also never checked the second half of its own name.
     await page.goto("/app/customers");
     await page.waitForLoadState("networkidle");
 
-    const add = page.getByRole("link", { name: /new customer/i }).first();
-    if ((await add.count()) === 0) test.skip();
-
+    const add = page.getByRole("button", { name: /add customer/i }).first();
+    await expect(add).toBeVisible();
     await add.click();
-    await page.waitForLoadState("networkidle");
 
-    const focusedInside = await page.evaluate(() => {
-      const active = document.activeElement;
-      return active !== document.body && active !== null;
-    });
-    expect(focusedInside).toBe(true);
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    // Inside the dialog, not merely somewhere other than the body: focus left
+    // on the page behind is exactly the defect, and it is not document.body.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const active = document.activeElement;
+          const panel = document.querySelector('[role="dialog"]');
+          return Boolean(active && panel?.contains(active));
+        }),
+      )
+      .toBe(true);
+
+    // And gives it back. Closing a dialog and dropping focus to the top of the
+    // document makes somebody tab through the whole page to get back to where
+    // they were.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(add).toBeFocused();
   });
 });
