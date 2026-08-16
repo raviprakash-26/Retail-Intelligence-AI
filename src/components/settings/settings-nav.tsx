@@ -8,6 +8,7 @@ import {
   CreditCard,
   Download,
   MapPin,
+  ScrollText,
   Upload,
   Users,
 } from "lucide-react";
@@ -50,6 +51,12 @@ const ITEMS = [
     label: "Plan",
     icon: CreditCard,
     permission: "billing.view",
+  },
+  {
+    href: "/app/settings/activity",
+    label: "Activity",
+    icon: ScrollText,
+    permission: "auditlog.view",
   },
   {
     href: "/app/settings/data",
