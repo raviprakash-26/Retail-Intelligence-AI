@@ -2,7 +2,10 @@ import type { PrismaClient } from "@prisma/client";
 import { createExpense } from "@/server/expenses/expense-service";
 import { createPurchase } from "@/server/purchases/purchase-service";
 import { createSale } from "@/server/sales/sale-service";
-import { createReceipt } from "@/server/settlements/settlement-service";
+import {
+  createPayment,
+  createReceipt,
+} from "@/server/settlements/settlement-service";
 import { createSalesReturn } from "@/server/returns/sales-return-service";
 
 /**
@@ -57,6 +60,7 @@ export type TradingSummary = {
   purchases: number;
   sales: number;
   receipts: number;
+  payments: number;
   expenses: number;
   returns: number;
 };
@@ -98,6 +102,7 @@ export async function seedDemoTrading(
     purchases: 0,
     sales: 0,
     receipts: 0,
+    payments: 0,
     expenses: 0,
     returns: 0,
   };
@@ -222,6 +227,39 @@ export async function seedDemoTrading(
       },
     });
     summary.receipts += 1;
+  }
+
+  // --- Money going out ------------------------------------------------------
+  // Suppliers get paid too. Without this the payment voucher has nothing to
+  // open, and a demo where money only ever comes in is not a shop.
+  const creditBills = await prisma.purchase.findMany({
+    where: { companyId, paymentMode: "CREDIT" },
+    select: { id: true, supplierId: true, totalAmount: true, billDate: true },
+    orderBy: { billDate: "asc" },
+  });
+
+  for (const bill of creditBills.slice(
+    0,
+    Math.max(1, creditBills.length - 1),
+  )) {
+    if (!bill.supplierId) continue;
+    const age = Math.round((asOf.getTime() - bill.billDate.getTime()) / DAY);
+    await createPayment({
+      ...actor,
+      input: {
+        kind: "SUPPLIER",
+        partyId: bill.supplierId,
+        date: daysAgo(Math.max(1, age - 15), asOf),
+        paymentMode: next() > 0.5 ? "BANK" : "CASH",
+        amount: Number(bill.totalAmount),
+        referenceNo: "",
+        notes: "",
+        allocations: [
+          { documentId: bill.id, amount: Number(bill.totalAmount) },
+        ],
+      },
+    });
+    summary.payments += 1;
   }
 
   // --- Running the shop -----------------------------------------------------

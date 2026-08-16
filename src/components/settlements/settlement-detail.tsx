@@ -1,9 +1,10 @@
 import Link from "next/link";
 import type { Route } from "next";
-import { ArrowLeft, Ban, Info } from "lucide-react";
+import { ArrowLeft, FileText, Ban, Info } from "lucide-react";
 import { VoidDocumentDialog } from "@/components/documents/void-document-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -143,23 +144,33 @@ export function SettlementDetail({
           </p>
         </div>
 
-        {!voided && canVoid && (
-          <VoidDocumentDialog
-            documentId={id}
-            documentNumber={voucherNumber}
-            noun={noun}
-            onVoid={onVoid}
-            placeholder="Recorded twice by mistake"
-            description={
-              <>
-                The {noun} and its journal entry stay exactly where they are; a
-                reversing entry is posted beside them. Anything this settled
-                becomes outstanding again, so the {documentNoun}s it cleared go
-                back into the ageing report where they belong.
-              </>
-            }
-          />
-        )}
+        <div className="flex flex-wrap gap-2">
+          {/* Proof the money moved, for the side that would otherwise have
+              only our word for it. */}
+          <Button asChild variant="outline">
+            <Link href={`${basePath}/${id}/voucher` as Route}>
+              <FileText aria-hidden="true" />
+              Voucher
+            </Link>
+          </Button>
+          {!voided && canVoid && (
+            <VoidDocumentDialog
+              documentId={id}
+              documentNumber={voucherNumber}
+              noun={noun}
+              onVoid={onVoid}
+              placeholder="Recorded twice by mistake"
+              description={
+                <>
+                  The {noun} and its journal entry stay exactly where they are;
+                  a reversing entry is posted beside them. Anything this settled
+                  becomes outstanding again, so the {documentNoun}s it cleared
+                  go back into the ageing report where they belong.
+                </>
+              }
+            />
+          )}
+        </div>
       </header>
 
       {voided && (

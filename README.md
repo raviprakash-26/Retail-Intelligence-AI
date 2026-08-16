@@ -1938,6 +1938,36 @@ standing to assert.
 
 ---
 
+## Proof that money changed hands
+
+**A customer who paid got nothing.** The shop could raise an invoice and issue a
+credit note, and when a credit customer settled several thousand rupees in cash
+they walked away with no document at all. A dispute about whether that payment
+happened had only the shop's own books to settle it — which is precisely the
+party the customer would be disputing.
+
+Both directions are covered now, because they are the same document with the
+parties swapped: a receipt voucher says _received with thanks from_, a payment
+voucher says _paid to_. Each names the parties, the amount in figures and in
+words, how it was paid, and which invoices or bills it was set against.
+
+**The signature belongs to whoever would otherwise deny it.** The shop signs a
+receipt it issues. The _supplier_ signs the payment voucher, acknowledging cash
+they took — that asymmetry is the whole reason the document is worth having,
+because a shop's own ledger is not evidence against the person disputing it.
+
+**Money paid on account is stated, not hidden.** A customer paying ₹20,000
+against ₹15,000 of invoices has ₹5,000 standing to their credit, and a voucher
+showing only the allocated part would understate what they handed over.
+
+There is no statutory particulars list here and none is invented. A tax invoice
+has Rule 46 and a credit note has Rule 53; a receipt voucher settling an
+existing invoice has no equivalent, so the checklist is what makes the document
+useful rather than what makes it compliant. Claiming otherwise would be this
+product asserting law it does not know.
+
+---
+
 ## The demo shop
 
 **It had never traded.** Seven products, four customers, three suppliers, an
