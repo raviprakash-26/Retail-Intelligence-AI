@@ -214,6 +214,13 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         status: "ready",
       },
       {
+        label: "Periods",
+        href: "/app/accounting/periods",
+        icon: "Lock",
+        permission: "accounting.view",
+        status: "ready",
+      },
+      {
         label: "GST",
         href: "/app/gst",
         icon: "Landmark",

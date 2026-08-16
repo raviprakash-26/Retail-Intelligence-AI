@@ -39,6 +39,7 @@ const PAGES = [
   ["journal", "/app/accounting/journal"],
   ["trial balance", "/app/accounting/trial-balance"],
   ["statements", "/app/accounting/statements"],
+  ["periods", "/app/accounting/periods"],
   ["banking", "/app/banking"],
   ["gst", "/app/gst"],
   ["income tax", "/app/tax"],
@@ -112,6 +113,7 @@ test.describe("the dark theme", () => {
   for (const [name, url] of [
     ["dashboard", "/app"],
     ["statements", "/app/accounting/statements"],
+    ["periods", "/app/accounting/periods"],
     ["auditor", "/app/ai/auditor"],
     ["analytics", "/app/analytics"],
   ] as const) {
