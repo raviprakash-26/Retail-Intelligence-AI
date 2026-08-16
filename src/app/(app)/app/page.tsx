@@ -21,7 +21,7 @@ import {
 } from "@/lib/accounting/double-entry";
 import { prisma } from "@/lib/db";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { requireCompanyContext } from "@/server/auth/context";
+import { requirePermission } from "@/server/auth/context";
 import {
   FISCAL_YEAR_COOKIE,
   resolveFiscalYear,
@@ -43,7 +43,13 @@ export const metadata: Metadata = {
  * that sold nothing, and on a financial dashboard that difference matters.
  */
 export default async function DashboardPage() {
-  const context = await requireCompanyContext();
+  // `dashboard.view` decided which navigation items to draw and guarded
+  // nothing, which was harmless while every role held it and nobody could
+  // build one that did not. Custom roles changed that: a business can now
+  // deliberately leave it out, and until this line that intention was ignored
+  // — the item disappeared from the sidebar and the page opened anyway to
+  // anybody who typed the address.
+  const context = await requirePermission("dashboard.view");
   const { user, company, permissions } = context;
   const cookieStore = await cookies();
 

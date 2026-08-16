@@ -567,9 +567,11 @@ from the session, never from a URL or form field, and code asks
 
 ## Team and permissions
 
-Roles are bundles of permissions, seeded per company and editable. The guards
-that matter are the ones that prevent a business locking itself out or a
-member quietly escalating:
+Roles are bundles of permissions, seeded per company and editable. **Every
+permission the catalogue offers reaches an authorization check**, which was not
+true until eight of them were removed — see [the sweep](#every-permission-does-something)
+below. The guards that matter are the ones that prevent a business locking
+itself out or a member quietly escalating:
 
 | Guard                                                      | Why                                                                                                      |
 | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
@@ -639,6 +641,70 @@ no test then covering it could have: "contains Owner" and "some role is a
 system role" are both true of a page showing everything twice. There is now a
 test on each — the list holds no duplicate key, and every row it returns
 belongs to the company asking.
+
+### Every permission does something
+
+Shipping custom roles put the permission catalogue on a screen, each
+description beside a checkbox. So I swept all sixty-seven keys against every
+authorization check in the codebase. **Eight reached none.**
+
+Granting one did nothing. Withholding one protected nothing, which is the half
+that mattered: the Accountant and Tax Consultant roles carried `gst.prepare`
+precisely to separate who may prepare a return from who may only read one, and
+that separation was fiction. A business believed it had restricted somebody and
+had not.
+
+| Removed                                         | Why it could never work                                                                                                                       |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sales.edit`, `purchases.edit`, `expenses.edit` | "Edit draft sales invoices" and its siblings. There are no drafts — documents post immediately and are corrected by voiding and reissuing.    |
+| `gst.prepare`, `tax.prepare`                    | A preparing-versus-viewing split in two modules that have no actions at all. Both are read-only working papers; filing happens on the portal. |
+| `gst.settings`                                  | "Change tax configuration". No such screen exists; rates are seeded at provisioning.                                                          |
+| `audit.view`, `audit.resolve`                   | The auditor page is gated on `ai.auditor`, and it makes observations rather than findings anybody resolves.                                   |
+
+They were harmless while nobody could see them, which is why the previous pass
+recorded five of them and moved on. That judgement stopped being right the
+moment a paying customer could read the descriptions off a checkbox list — it
+is the pricing-page defect again, one screen further in. A migration deletes
+the rows, and the grants go with them by cascade.
+
+`dashboard.view` was a ninth of a different kind. It decided whether to draw a
+navigation item and guarded nothing, so the link vanished and the page opened
+to anybody who typed `/app`. Harmless while every role held it and nobody could
+build one that did not — and custom roles made exactly that possible, so the
+dashboard now asks for it.
+
+**Two things this leaves behind.** A test fails if a key is added to the
+catalogue and checked nowhere, counting checks read from a table — the report
+catalogue, the navigation, the onboarding checklist — as checks, because
+demanding a literal call for those would be demanding something wrong. And a
+second one fails if a key exists in the catalogue with no row in the database,
+or a row with no key: a permission with no row is one nobody can hold, so every
+guard on it refuses forever and the module behind it is unreachable rather than
+protected. Keeping them in step is a documented step of the deploy, and until
+now nothing checked that it had happened.
+
+Two existing unit tests asserted `audit.resolve` and `gst.prepare` were granted
+and had passed since they were written. Neither ever asked whether anything
+checked them, which is the distinction this whole sweep turns on: that a role
+holds a permission and that the permission does something are separate claims,
+and only one of them was being tested.
+
+### A scanner that had never run
+
+The same sweep turned up a check that reported green by never executing. A test
+reads the built client bundle looking for connection strings and key material —
+written because the way a secret really escapes is duller than a bad import:
+somebody interpolates a value into a prop and it is serialised into the page.
+
+It skips when there is no build. The verify job in CI does not build — it
+installs, typechecks, lints and runs the suite — so `.next` was never there,
+both cases skipped on every run since they were written, and the report showed
+green. The comment above them claimed `npm run verify` runs them after a build;
+`verify` is typecheck, lint and test, and builds nothing.
+
+It is now a step of its own in the job that does build, immediately after the
+build. The local skip stays, because running the suite without a build is
+normal and failing there would be noise.
 
 ## Settings that lock
 
@@ -2964,6 +3030,7 @@ query text is the only thing the browser controls.
 | 52    | Period close — arming a guard that could never fire                     | **Done** |
 | 53    | Activity log — a record written from 33 places and read from none       | **Done** |
 | 54    | Custom roles — the Business feature the pricing page had always sold    | **Done** |
+| 55    | Permissions — eight that guarded nothing, and a scanner that never ran  | **Done** |
 
 ---
 

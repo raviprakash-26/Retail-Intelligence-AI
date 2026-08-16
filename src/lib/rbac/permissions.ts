@@ -6,6 +6,20 @@
  * named bundles, which means a tenant can create a custom role without any
  * code change and a permission can be re-bundled without hunting for role
  * checks scattered across modules.
+ *
+ * **Every key here reaches an authorization check.** That was not true until
+ * eight of them were removed: they described drafts the product does not keep,
+ * a tax configuration screen that does not exist, an audit workflow the
+ * auditor deliberately does not have, and a preparing-versus-viewing split in
+ * modules that are read-only working papers with no actions at all. Granting
+ * one did nothing and withholding one protected nothing, which is the worse
+ * half — a business separating who may prepare GST from who may only read it
+ * was being told it had done something it had not.
+ *
+ * Harmless while nobody could see them. Custom roles put the catalogue on a
+ * screen, with each description beside a checkbox, so they became a list of
+ * capabilities offered to a paying customer and not delivered. A test now
+ * fails if a key is added here and checked nowhere.
  */
 
 export const PERMISSIONS = {
@@ -22,7 +36,6 @@ export const PERMISSIONS = {
   // Sales
   "sales.view": { module: "Sales", description: "View sales invoices" },
   "sales.create": { module: "Sales", description: "Create sales invoices" },
-  "sales.edit": { module: "Sales", description: "Edit draft sales invoices" },
   "sales.void": { module: "Sales", description: "Void a posted sales invoice" },
   "sales.return": { module: "Sales", description: "Record sales returns" },
 
@@ -31,10 +44,6 @@ export const PERMISSIONS = {
   "purchases.create": {
     module: "Purchases",
     description: "Create purchase bills",
-  },
-  "purchases.edit": {
-    module: "Purchases",
-    description: "Edit draft purchase bills",
   },
   "purchases.void": {
     module: "Purchases",
@@ -48,7 +57,6 @@ export const PERMISSIONS = {
   // Expenses
   "expenses.view": { module: "Expenses", description: "View expenses" },
   "expenses.create": { module: "Expenses", description: "Record expenses" },
-  "expenses.edit": { module: "Expenses", description: "Edit draft expenses" },
   "expenses.void": { module: "Expenses", description: "Void a posted expense" },
 
   // Money movement
@@ -135,13 +143,7 @@ export const PERMISSIONS = {
     module: "GST",
     description: "View GST registers and summaries",
   },
-  "gst.prepare": {
-    module: "GST",
-    description: "Prepare GST returns for review",
-  },
-  "gst.settings": { module: "GST", description: "Change tax configuration" },
   "tax.view": { module: "Tax", description: "View tax preparation workspace" },
-  "tax.prepare": { module: "Tax", description: "Prepare tax estimates" },
 
   // AI
   "ai.accountant": { module: "AI", description: "Use the AI Accountant" },
@@ -153,15 +155,7 @@ export const PERMISSIONS = {
   },
 
   // Audit
-  "audit.view": {
-    module: "Audit",
-    description: "View audit findings and scores",
-  },
   "audit.run": { module: "Audit", description: "Run the audit rule set" },
-  "audit.resolve": {
-    module: "Audit",
-    description: "Resolve or dismiss audit findings",
-  },
   "auditlog.view": { module: "Audit", description: "View the activity log" },
 
   // Reports
@@ -233,15 +227,12 @@ const MANAGER_PERMISSIONS: readonly PermissionKey[] = [
   "analytics.view",
   "sales.view",
   "sales.create",
-  "sales.edit",
   "sales.return",
   "purchases.view",
   "purchases.create",
-  "purchases.edit",
   "purchases.return",
   "expenses.view",
   "expenses.create",
-  "expenses.edit",
   "receipts.view",
   "receipts.create",
   "payments.view",
@@ -265,7 +256,6 @@ const MANAGER_PERMISSIONS: readonly PermissionKey[] = [
   "ai.accountant",
   "ai.advisor",
   "forecasting.view",
-  "audit.view",
   "reports.view",
   "reports.export",
   "settings.view",
@@ -277,17 +267,14 @@ const ACCOUNTANT_PERMISSIONS: readonly PermissionKey[] = [
   "analytics.view",
   "sales.view",
   "sales.create",
-  "sales.edit",
   "sales.void",
   "sales.return",
   "purchases.view",
   "purchases.create",
-  "purchases.edit",
   "purchases.void",
   "purchases.return",
   "expenses.view",
   "expenses.create",
-  "expenses.edit",
   "expenses.void",
   "receipts.view",
   "receipts.create",
@@ -315,12 +302,9 @@ const ACCOUNTANT_PERMISSIONS: readonly PermissionKey[] = [
   "banking.view",
   "banking.reconcile",
   "gst.view",
-  "gst.prepare",
   "tax.view",
-  "tax.prepare",
   "ai.accountant",
   "forecasting.view",
-  "audit.view",
   "reports.view",
   "reports.export",
   "settings.view",
@@ -367,9 +351,7 @@ const AUDITOR_PERMISSIONS: readonly PermissionKey[] = [
   "gst.view",
   "tax.view",
   "ai.auditor",
-  "audit.view",
   "audit.run",
-  "audit.resolve",
   "auditlog.view",
   "reports.view",
   "reports.export",
@@ -386,10 +368,7 @@ const TAX_CONSULTANT_PERMISSIONS: readonly PermissionKey[] = [
   "accounting.statements.view",
   "banking.view",
   "gst.view",
-  "gst.prepare",
-  "gst.settings",
   "tax.view",
-  "tax.prepare",
   "reports.view",
   "reports.export",
 ];

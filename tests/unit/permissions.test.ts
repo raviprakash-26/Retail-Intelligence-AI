@@ -84,20 +84,17 @@ describe("system role templates", () => {
 });
 
 describe("least privilege", () => {
-  it("keeps the auditor read-only apart from resolving findings", () => {
+  it("keeps the auditor read-only", () => {
     const auditor = new Set<string>(permissionsOf(SYSTEM_ROLE.AUDITOR));
 
     // Every write permission the auditor must not hold.
     const forbidden = [
       "sales.create",
-      "sales.edit",
       "sales.void",
       "sales.return",
       "purchases.create",
-      "purchases.edit",
       "purchases.void",
       "expenses.create",
-      "expenses.edit",
       "expenses.void",
       "receipts.create",
       "payments.create",
@@ -111,9 +108,6 @@ describe("least privilege", () => {
       "accounting.journal.void",
       "accounting.accounts.manage",
       "accounting.period.close",
-      "gst.prepare",
-      "gst.settings",
-      "tax.prepare",
       "settings.manage",
       "users.manage",
       "roles.manage",
@@ -125,8 +119,13 @@ describe("least privilege", () => {
       expect(auditor.has(key), `Auditor must not hold ${key}`).toBe(false);
     }
 
-    // The one write it does hold, so findings can be triaged.
-    expect(auditor.has("audit.resolve")).toBe(true);
+    // The title used to end "apart from resolving findings", and the line
+    // here asserted `audit.resolve`. Nothing ever checked it: the auditor
+    // makes observations rather than findings anybody triages, and the page
+    // is gated on `ai.auditor`. What the role really holds is the ability to
+    // run the rule set and read what it produced.
+    expect(auditor.has("audit.run")).toBe(true);
+    expect(auditor.has("ai.auditor")).toBe(true);
   });
 
   it("keeps the cashier to counter operations", () => {
@@ -178,8 +177,14 @@ describe("least privilege", () => {
       permissionsOf(SYSTEM_ROLE.TAX_CONSULTANT),
     );
 
-    expect(consultant.has("gst.prepare")).toBe(true);
-    expect(consultant.has("tax.prepare")).toBe(true);
+    // This asserted `gst.prepare` and `tax.prepare` and passed for as long as
+    // they were in the template — which was the whole of the problem. Neither
+    // was ever checked anywhere, so the test proved the catalogue said
+    // something rather than that the product did it. Both modules are
+    // read-only working papers with no actions at all, so the reachable thing
+    // is the view permission, and that is what is asserted now.
+    expect(consultant.has("gst.view")).toBe(true);
+    expect(consultant.has("tax.view")).toBe(true);
 
     for (const key of [
       "sales.create",

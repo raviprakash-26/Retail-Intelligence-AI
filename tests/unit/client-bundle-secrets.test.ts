@@ -13,9 +13,18 @@ import { describe, expect, it } from "vitest";
  * serialised into the page as flight data.
  *
  * So this reads what the build actually produced and looks for the values
- * themselves. It runs only when a build exists — `npm run verify` runs it after
- * one, and it says so rather than passing quietly when there is nothing to
- * check.
+ * themselves. It runs only when a build exists, and skips when there is none.
+ *
+ * **That skip meant it had never run in CI.** The claim here used to be that
+ * `npm run verify` runs it after a build; `verify` is typecheck, lint and the
+ * test suite, and none of those builds anything. The verify job in CI does not
+ * build either, so `.next` was always absent, both cases skipped on every run,
+ * and the report showed green. It is now a step of its own in the job that
+ * does build, right after the build — so a leak fails a pipeline rather than
+ * being reported as two tests nobody notices are grey.
+ *
+ * The skip stays for the local case, where running the suite without a build
+ * is normal and failing would be noise.
  */
 
 const BUILD_DIR = ".next";

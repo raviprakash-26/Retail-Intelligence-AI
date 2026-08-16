@@ -202,8 +202,12 @@ export const PERMISSION_FEATURE_REQUIREMENTS: Partial<
   "audit.run": FEATURE.AI_AUDITOR,
   "forecasting.view": FEATURE.FORECASTING,
   "analytics.view": FEATURE.ANALYTICS,
-  "gst.prepare": FEATURE.GST_PREPARATION,
-  "tax.prepare": FEATURE.TAX_PREPARATION,
+  // GST and tax preparation are gated on the page's view permission, because
+  // the modules are read-only working papers with no separate act of
+  // preparing. `gst.prepare` and `tax.prepare` sat here and in two role
+  // templates and were checked by nothing.
+  "gst.view": FEATURE.GST_PREPARATION,
+  "tax.view": FEATURE.TAX_PREPARATION,
   "inventory.adjust": FEATURE.INVENTORY,
   "branches.manage": FEATURE.MULTI_BRANCH,
   "roles.manage": FEATURE.ADVANCED_PERMISSIONS,
