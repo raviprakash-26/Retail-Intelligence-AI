@@ -1938,6 +1938,45 @@ standing to assert.
 
 ---
 
+## Reading what has been done
+
+**Thirty-three places write to the activity log. Nothing could read it.** The
+table is append-only — a database trigger refuses updates and deletes — it
+records twenty-two distinct actions, and the only reader in the codebase was
+the platform administrator's own view. A shop owner asking who voided a
+forty-thousand-rupee invoice, who exported the entire customer list, or who
+reopened March after the return was filed had no way to look, though the answer
+was sitting there immutably by design.
+
+That mattered more than an ordinary missing screen, because the log is the
+justification for several things elsewhere in this document. The data export
+says it is recorded before the download starts. A reminder says when the
+customer was last chased. Reopening a period says the reason is kept where an
+auditor will find it. All of that was true and none of it was reachable.
+
+Settings → Activity now shows it: what was done, by whom, when, with the
+metadata each entry carries rather than a summary that drops it — the metadata
+is the part that answers the question somebody arrived with. Filtered by module,
+paged by cursor rather than offset because this is the fastest-growing table in
+the schema, and with no total, because counting the whole table on every page
+load to render a number nobody acts on is not worth it.
+
+**A platform administrator's actions are shown, but not their name.** When
+somebody here changes a shop's plan or suspends its account, the entry carries
+that shop's id and the administrator's own email. Hiding the act would be the
+product concealing what was done to a customer; showing the email would hand a
+customer an internal person's identity. So the act appears and the actor reads
+as "Platform administration".
+
+Two smaller findings came out of the same sweep and are recorded rather than
+fixed: `sales.edit`, `purchases.edit` and `expenses.edit` describe a feature
+that does not exist, because documents post immediately and there is no draft to
+edit; and `audit.view` and `audit.resolve` are redundant, because the auditor
+page is gated on `ai.auditor` instead. Neither is a hole — both are catalogue
+entries that promise something the application does not do.
+
+---
+
 ## Closing the books
 
 **The guard existed and could never fire.** `postJournalEntry` has always

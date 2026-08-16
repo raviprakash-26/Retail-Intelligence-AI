@@ -51,6 +51,7 @@ const PAGES = [
   ["accountant", "/app/ai/accountant"],
   ["payroll", "/app/payroll"],
   ["settings", "/app/settings/business"],
+  ["activity", "/app/settings/activity"],
   ["your data", "/app/settings/data"],
   ["bring data in", "/app/settings/import"],
 ] as const;
