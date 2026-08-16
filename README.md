@@ -586,6 +586,60 @@ control of the mailbox, which is exactly what a verification email establishes.
 An existing account keeps its password; the one typed at acceptance is ignored
 rather than silently overwriting a credential they already rely on.
 
+### Roles a business defines for itself
+
+**The pricing page sold "Custom roles & permissions" as a Business-plan feature
+from the first commit, and no such thing existed.** No page, no action, no
+service; `roles.manage` appeared nowhere outside the permission catalogue. Every
+company got the same six seeded roles and could never change them. This README
+was no better: the line opening this section calls roles "seeded per company and
+editable", and only half of that was true. A product whose whole character is
+refusing to overclaim was charging for something it did not do.
+
+It is built now, and the machinery was already right for it. Authorization asks
+whether a member may do `sales.create` and never whether they are an accountant,
+so a role is only a named bundle of permissions — which means a business can
+invent one without a line of code changing anywhere else.
+
+**Nobody can mint a role more powerful than themselves.** This is the entire
+risk of the feature: a manager holding `roles.manage` and `users.manage` could
+otherwise build a role carrying `billing.manage`, assign it to themselves, and
+have quietly become the owner. So a role may only contain permissions the person
+building it already holds, and the same rule applies to editing one. An owner
+holds everything and never notices; everybody else can only delegate downwards.
+The check lives in the service rather than the action, because a check that
+lives only in an action is a check the second caller skips.
+
+The page offers only what the person can grant rather than showing everything
+and refusing on save. Teaching a rule by rejection leaves somebody staring at a
+checkbox wondering whether the product is broken.
+
+**The six built-in roles are assignable and not editable.** Each company owns
+its own copy, made at signup from a shared template, so editing one would not
+reach another tenant. They are held fixed anyway: a business expecting Cashier
+to mean what Cashier means everywhere is expecting something reasonable, and a
+role somebody can quietly widen is a role nobody can reason about. Inventing a
+new one is the supported way to differ. A role somebody holds cannot be deleted
+either — the people holding it have to be moved first, deliberately, rather
+than having a replacement chosen for them by whatever the code does next.
+
+**I got the shape of that wrong three times in one change, from one wrong
+belief.** Thinking the templates were what a business assigned from, the list
+query asked for the company's roles _or_ the shared templates — so the page
+showed twelve rows for six roles, every built-in name twice. The same belief
+put a comment beside the edit guard claiming a system role "cannot match here",
+when a company's own copy carries its own `companyId` and matches perfectly;
+the `isSystem` check is the only thing in front of it. And two integration
+tests passed for the wrong reason, reaching for the shared template so the
+tenant scope refused them before the `isSystem` check was ever reached.
+
+Fixing the tests did not lead me back to the belief that broke them, which it
+should have. The duplicate was caught by counting what the page rendered, and
+no test then covering it could have: "contains Owner" and "some role is a
+system role" are both true of a page showing everything twice. There is now a
+test on each — the list holds no duplicate key, and every row it returns
+belongs to the company asking.
+
 ## Settings that lock
 
 Some accounting settings stop being editable once they have shaped recorded
@@ -1842,6 +1896,22 @@ cannot prove the gate returns the right answer — the integration tests do that
 but it catches the mistake actually worth catching, which is somebody adding the
 eleventh gated module and forgetting.
 
+**A second tripwire reads the other direction: from what is sold to whether it
+exists.** Every key in `FEATURE` must be gated somewhere in `src/`, or be named
+in a list with the reason it needs no gate — in every plan, or a commitment by
+people rather than a capability in software. A feature added to the pricing page
+and to nothing else fails the test. It was written because
+`ADVANCED_PERMISSIONS` had been sold on a public page since the first commit
+with no implementation anywhere, and nothing failed, because nothing was
+looking.
+
+The first version of that test passed while the feature it was written for still
+did not exist. It excluded the pricing page from counting as a gate by matching
+`marketing/pricing`, and the real path is `(marketing)/pricing` — so the page
+making the claim was also discharging it. That was found the only way it could
+be: by deleting the new feature and watching nothing fail. A tripwire nobody has
+tripped on purpose is a tripwire nobody knows the shape of.
+
 **A lapsed subscription stops new entries. It never seals the ledger.**
 Everything already recorded stays readable, printable and exportable for as long
 as the account exists, the modules stay on the page, and every read-only refusal
@@ -2341,9 +2411,27 @@ measuring rendered pixels: the candidate lightness values were chosen by
 painting each colour to a canvas, reading it back and computing the ratio,
 rather than by picking numbers that looked about right.
 
-Two keyboard paths are checked as well — that tabbing reaches the navigation
-and that the focused control has a visible ring, and that opening a form moves
-focus rather than leaving a screen-reader user reading the page behind it.
+Three keyboard paths are checked as well: that tabbing reaches the navigation,
+that the focused control has a visible ring, and that a dialog takes focus and
+gives it back.
+
+**The third of those had been skipping since the day it was written**, while
+this README counted it as checked. It looked for a link named "new customer";
+the control is a button labelled "Add customer", so the count was zero, the
+test called `test.skip()`, and the line read as a pass in every report since.
+It never checked the second half of its own name either.
+
+Made to run, it failed — on a defect in nearly every dialog in the product.
+Radix's modal content prevents the browser's own focus restoration and focuses
+its `DialogTrigger` instead, and fifteen of the seventeen dialogs here are
+opened from an ordinary button with controlled state, so that ref is null and
+focus lands on `<body>`. Its focus scope would have restored correctly by
+itself, but a dialog whose first field carries `autoFocus` has already moved
+focus inside by the time the scope's effect runs, so the element it records to
+return to is that field — detached a moment later. Somebody who opened "Add
+customer" from the keyboard and pressed Escape was put back at the top of the
+document, to tab past the sidebar and the search box to reach where they had
+been. Fixed once, in the shared primitive, for all seventeen.
 
 What this is not is a WCAG audit. It is a gate on the failures that stop
 somebody using the product, run on every commit, in a codebase where nothing
@@ -2868,6 +2956,14 @@ query text is the only thing the browser controls.
 | 44    | Accessibility — an axe gate, and the four colour defects it found       | **Done** |
 | 45    | Data import — a shop's spreadsheet in, previewed before anything writes | **Done** |
 | 46    | Tax invoice — the document a customer takes away, with its particulars  | **Done** |
+| 47    | Credit note — its own rule, its own particulars, its own numbering      | **Done** |
+| 48    | Email — a document to the party it was issued to, and nobody else       | **Done** |
+| 49    | Payment reminders — facts only, nothing automatic, nothing invented     | **Done** |
+| 50    | Demo shop — a tenant that has actually traded, so the screens have data | **Done** |
+| 51    | Receipt and payment vouchers — proof that money changed hands           | **Done** |
+| 52    | Period close — arming a guard that could never fire                     | **Done** |
+| 53    | Activity log — a record written from 33 places and read from none       | **Done** |
+| 54    | Custom roles — the Business feature the pricing page had always sold    | **Done** |
 
 ---
 

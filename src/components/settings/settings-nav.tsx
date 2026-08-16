@@ -7,6 +7,7 @@ import {
   Calculator,
   CreditCard,
   Download,
+  KeyRound,
   MapPin,
   ScrollText,
   Upload,
@@ -51,6 +52,12 @@ const ITEMS = [
     label: "Plan",
     icon: CreditCard,
     permission: "billing.view",
+  },
+  {
+    href: "/app/settings/roles",
+    label: "Roles",
+    icon: KeyRound,
+    permission: "roles.manage",
   },
   {
     href: "/app/settings/activity",
