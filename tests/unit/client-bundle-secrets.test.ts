@@ -13,9 +13,18 @@ import { describe, expect, it } from "vitest";
  * serialised into the page as flight data.
  *
  * So this reads what the build actually produced and looks for the values
- * themselves. It runs only when a build exists — `npm run verify` runs it after
- * one, and it says so rather than passing quietly when there is nothing to
- * check.
+ * themselves. It runs only when a build exists, and skips when there is none.
+ *
+ * **That skip meant it had never run in CI.** The claim here used to be that
+ * `npm run verify` runs it after a build; `verify` is typecheck, lint and the
+ * test suite, and none of those builds anything. The verify job in CI does not
+ * build either, so `.next` was always absent, both cases skipped on every run,
+ * and the report showed green. It is now a step of its own in the job that
+ * does build, right after the build — so a leak fails a pipeline rather than
+ * being reported as two tests nobody notices are grey.
+ *
+ * The skip stays for the local case, where running the suite without a build
+ * is normal and failing would be noise.
  */
 
 const BUILD_DIR = ".next";
@@ -50,6 +59,27 @@ function clientBundleFiles(): string[] {
 const FILES = clientBundleFiles();
 
 describe("the client bundle", () => {
+  it("was there to be read, wherever a build is expected", () => {
+    // The one case that never skips, and the reason the rest may.
+    //
+    // Skipping when there is no build is right locally and was silently wrong
+    // in CI for as long as these tests existed. Moving them into the job that
+    // builds is not enough on its own: if that job ever stops producing
+    // client chunks — a renamed output directory, a build that half-fails —
+    // the scan would go back to skipping and reporting green, which is
+    // exactly the failure being fixed.
+    //
+    // Keyed off a variable the scanning step sets rather than off `CI`. Every
+    // job on a runner has `CI` set and only one of them builds, so keying off
+    // it would fail the verify job for the correct absence of a build — which
+    // is what the first version of this line did.
+    if (!process.env.EXPECT_CLIENT_BUNDLE) return;
+    expect(
+      FILES.length,
+      `no client bundle under ${BUILD_DIR}/static, so nothing was scanned`,
+    ).toBeGreaterThan(0);
+  });
+
   it.skipIf(FILES.length === 0)(
     "contains none of the values held in secret environment variables",
     () => {

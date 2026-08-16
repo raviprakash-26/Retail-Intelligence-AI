@@ -147,6 +147,19 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Here rather than in the verify job, which is where it looks like it
+      # belongs. The scan reads what the build actually emitted, and the verify
+      # job never builds — so both of its cases skipped on every run since they
+      # were written, and a skip reads as a pass in the report. The scanner
+      # written because "the way a secret escapes is duller than an import" had
+      # never once run in CI.
+      - name: Scan the built client bundle for secrets
+        run: npm run test:bundle
+        env:
+          # Says a build is expected here, so finding none fails rather than
+          # skipping. Only this job builds, so only this job may claim it.
+          EXPECT_CLIENT_BUNDLE: "1"
+
       - name: Install the browser
         run: npx playwright install --with-deps chromium
 

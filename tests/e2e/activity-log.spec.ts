@@ -36,20 +36,35 @@ test.describe("the activity log", () => {
   test("filters to one module and starts again from the newest", async ({
     page,
   }) => {
+    // Whichever module the newest page happens to offer, not a named one.
+    // This asked for "Accounting" and skipped when it was absent, which made
+    // it a coin toss on the seed: the same commit produced a pass and a skip
+    // on two consecutive runs, and the skip reads as a pass in the report.
+    // The filters are built from the entries actually on the page, so the
+    // deterministic thing to assert is that filtering by one of them works.
     await page.goto("/app/settings/activity");
     await page.waitForLoadState("networkidle");
 
-    const accounting = page.getByRole("button", {
-      name: "Accounting",
-      exact: true,
-    });
-    if ((await accounting.count()) === 0) test.skip();
+    // The row is "Everything" followed by one button per module present in
+    // the entries on the page, so the modules are its siblings.
+    const row = page
+      .getByRole("button", { name: "Everything", exact: true })
+      .locator("xpath=..");
+    const modules = row
+      .getByRole("button")
+      .filter({ hasNotText: /^Everything$/ });
+
+    // Asserted rather than skipped past. The demo has traded, so the newest
+    // page always carries entries from at least one module; none would mean
+    // the log is empty, which is a failure worth seeing.
+    await expect(modules.first()).toBeVisible();
+    const label = (await modules.first().innerText()).trim();
 
     await Promise.all([
-      page.waitForURL(/module=Accounting/, { timeout: 20_000 }),
-      accounting.first().click(),
+      page.waitForURL(/module=/, { timeout: 20_000 }),
+      modules.first().click(),
     ]);
-    expect(page.url()).toContain("module=Accounting");
+    expect(page.url()).toContain(`module=${encodeURIComponent(label)}`);
     // A new filter must not carry an old cursor with it.
     expect(page.url()).not.toContain("cursor=");
   });

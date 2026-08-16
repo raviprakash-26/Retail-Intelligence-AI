@@ -16,6 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "npm run test:db:setup && vitest run",
+    "test:bundle": "vitest run --config vitest.bundle.config.mts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "db:generate": "prisma generate",
