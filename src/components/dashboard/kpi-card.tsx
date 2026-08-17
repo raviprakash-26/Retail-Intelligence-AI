@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 export function KpiCard({
   label,
   value,
+  note,
   hint,
   pending,
   pendingNote,
@@ -26,6 +27,8 @@ export function KpiCard({
 }: {
   label: string;
   value?: string;
+  /** A second line under the figure — what is overdue, the margin, the year. */
+  note?: string;
   hint?: string;
   pending?: boolean;
   pendingNote?: string;
@@ -60,9 +63,16 @@ export function KpiCard({
             </p>
           </>
         ) : (
-          <p className="tabular-figures mt-1.5 text-xl font-semibold tracking-tight">
-            {value}
-          </p>
+          <>
+            <p className="tabular-figures mt-1.5 text-xl font-semibold tracking-tight">
+              {value}
+            </p>
+            {note && (
+              <p className="mt-1 text-[0.6875rem] leading-relaxed text-muted-foreground">
+                {note}
+              </p>
+            )}
+          </>
         )}
       </CardContent>
     </Card>

@@ -13,16 +13,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
-import {
-  signedBalance,
-  trialBalanceIsBalanced,
-} from "@/lib/accounting/double-entry";
 import { prisma } from "@/lib/db";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { requirePermission } from "@/server/auth/context";
 import { selectedFiscalYear } from "@/server/fiscal/fiscal-service";
 import { getOnboardingChecklist } from "@/server/company/onboarding-service";
+import { getDashboardOverview } from "@/server/dashboard/overview";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -32,11 +28,18 @@ export const metadata: Metadata = {
 /**
  * Dashboard.
  *
- * Shows only figures that can be computed from what exists today — cash, bank
- * and capital come straight from posted journal lines. Everything that depends
- * on a module still to be built is rendered in a pending state that says so,
- * rather than as a zero. A ₹0 revenue tile is indistinguishable from a business
- * that sold nothing, and on a financial dashboard that difference matters.
+ * Every figure is read from the module that owns it, through
+ * `getDashboardOverview`, so the front page cannot disagree with the report a
+ * shopkeeper opens to check it.
+ *
+ * The pending state stays, because a ₹0 tile is indistinguishable from a
+ * business that genuinely earned nothing and on a financial dashboard that is
+ * not a cosmetic difference. What it no longer does is name a module that has
+ * shipped: eight of the twelve tiles sat blank for years behind notes like
+ * "Arrives with the Sales module", long after sales, purchases, expenses,
+ * inventory, receipts and GST had all arrived. The only thing that can make a
+ * tile pending now is a ledger that does not balance, which is a condition of
+ * the books rather than of the product.
  */
 export default async function DashboardPage() {
   // `dashboard.view` decided which navigation items to draw and guarded
@@ -50,20 +53,14 @@ export default async function DashboardPage() {
 
   const fiscalYear = await selectedFiscalYear(company.id);
 
-  const [balances, checklist, openingEntry] = await Promise.all([
-    // Grouped by account so the ledger figures below are derived, never stored.
-    prisma.journalLine.groupBy({
-      by: ["accountId"],
-      where: {
-        companyId: company.id,
-        status: "POSTED",
-        ...(fiscalYear
-          ? {
-              entryDate: { gte: fiscalYear.startDate, lte: fiscalYear.endDate },
-            }
-          : {}),
-      },
-      _sum: { debit: true, credit: true },
+  // Every figure comes from the module that owns it. The dashboard used to run
+  // its own groupBy over the journal, which is a second way of computing a
+  // balance and therefore a second answer waiting to happen.
+  const [overview, checklist, openingEntry] = await Promise.all([
+    getDashboardOverview({
+      companyId: company.id,
+      from: fiscalYear?.startDate ?? new Date(0),
+      to: fiscalYear?.endDate ?? new Date(),
     }),
     getOnboardingChecklist({
       companyId: company.id,
@@ -76,38 +73,13 @@ export default async function DashboardPage() {
     }),
   ]);
 
-  const accountIds = balances.map((balance) => balance.accountId);
-  const accounts = await prisma.account.findMany({
-    where: { companyId: company.id, id: { in: accountIds } },
-    select: { id: true, systemKey: true, nature: true },
-  });
-  const accountById = new Map(accounts.map((account) => [account.id, account]));
-
-  const balanceFor = (systemKey: string) => {
-    const account = accounts.find((entry) => entry.systemKey === systemKey);
-    if (!account) return null;
-    const row = balances.find((balance) => balance.accountId === account.id);
-    if (!row) return null;
-    return signedBalance(
-      account.nature,
-      row._sum.debit ?? 0,
-      row._sum.credit ?? 0,
-    );
-  };
-
-  const cash = balanceFor(SYSTEM_ACCOUNT.CASH);
-  const bank = balanceFor(SYSTEM_ACCOUNT.BANK);
-  const capital = balanceFor(SYSTEM_ACCOUNT.OWNER_CAPITAL);
-
-  const trialBalance = trialBalanceIsBalanced(
-    balances.map((balance) => ({
-      debit: balance._sum.debit ?? 0,
-      credit: balance._sum.credit ?? 0,
-    })),
-  );
-
-  const hasLedger = balances.length > 0;
+  const trialBalance = overview.books;
+  const hasLedger = !overview.empty;
   const currency = company.currency;
+  const inYear = fiscalYear
+    ? `In ${fiscalYear.label}`
+    : "Since the books opened";
+  const asMoney = (amount: string) => formatCurrency(amount, { currency });
 
   return (
     <TooltipProvider>
@@ -159,17 +131,17 @@ export default async function DashboardPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <KpiCard
               label="Cash in hand"
-              value={formatCurrency(cash ?? 0, { currency })}
+              value={asMoney(overview.cash)}
               hint="Balance of the cash ledger, from posted entries only."
             />
             <KpiCard
               label="Bank balance"
-              value={formatCurrency(bank ?? 0, { currency })}
+              value={asMoney(overview.bank)}
               hint="Balance of the bank ledger, from posted entries only."
             />
             <KpiCard
               label="Owner's capital"
-              value={formatCurrency(capital ?? 0, { currency })}
+              value={asMoney(overview.capital)}
               hint="What the owner has introduced, less drawings."
             />
             <KpiCard
@@ -185,51 +157,81 @@ export default async function DashboardPage() {
             <h2 id="trading-heading" className="text-sm font-semibold">
               Trading
             </h2>
-            <p className="text-xs text-muted-foreground">
-              Populated as each module is built
-            </p>
+            <p className="text-xs text-muted-foreground">{inYear}</p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <KpiCard
-              label="Sales this month"
-              pending
-              pendingNote="Arrives with the Sales module."
+              label="Sales"
+              value={
+                overview.trading ? asMoney(overview.trading.revenue) : undefined
+              }
+              pending={!overview.trading}
+              pendingNote="Needs a ledger that balances."
+              hint="Revenue from posted invoices, less credit notes, in the selected year."
             />
             <KpiCard
               label="Purchases"
-              pending
-              pendingNote="Arrives with the Purchases module."
+              value={
+                overview.trading
+                  ? asMoney(overview.trading.purchases)
+                  : undefined
+              }
+              pending={!overview.trading}
+              pendingNote="Needs a ledger that balances."
+              hint="What was bought on posted bills. Stock is held at cost, so this is not the cost of what was sold."
             />
             <KpiCard
               label="Expenses"
-              pending
-              pendingNote="Arrives with the Expenses module."
+              value={
+                overview.trading
+                  ? asMoney(overview.trading.expenses)
+                  : undefined
+              }
+              pending={!overview.trading}
+              pendingNote="Needs a ledger that balances."
+              hint="Running costs for the year, excluding the cost of goods sold."
             />
             <KpiCard
               label="Gross profit"
-              pending
-              pendingNote="Needs sales and stock valuation."
+              value={
+                overview.trading
+                  ? asMoney(overview.trading.grossProfit)
+                  : undefined
+              }
+              note={
+                overview.trading?.grossMarginPercent === null
+                  ? "Nothing sold yet, so there is no margin to read"
+                  : overview.trading
+                    ? `${overview.trading.grossMarginPercent}% margin`
+                    : undefined
+              }
+              pending={!overview.trading}
+              pendingNote="Needs a ledger that balances."
+              hint="Sales less the cost of what was sold, from the trading account."
             />
             <KpiCard
               label="Receivables"
-              pending
-              pendingNote="Arrives with Sales and Receipts."
+              value={asMoney(overview.receivables)}
+              note={`${asMoney(overview.receivablesOverdue)} overdue`}
+              hint="What customers owe on posted invoices, as things stand."
             />
             <KpiCard
               label="Payables"
-              pending
-              pendingNote="Arrives with Purchases and Payments."
+              value={asMoney(overview.payables)}
+              note={`${asMoney(overview.payablesOverdue)} overdue`}
+              hint="What the business owes suppliers on posted bills, as things stand."
             />
             <KpiCard
               label="Inventory value"
-              pending
-              pendingNote="Arrives with the Inventory module."
+              value={asMoney(overview.inventoryValue)}
+              hint="Stock on hand at cost, across every tracked product."
             />
             <KpiCard
-              label="GST payable"
-              pending
-              pendingNote="Arrives with the GST module."
+              label="GST on the books"
+              value={asMoney(overview.gstOnTheBooks)}
+              note="Ledger position, not a filed return"
+              hint="Output tax less input credit, as the ledger has it. A return is filed for one month and carries credit forward; the GST page produces that figure."
             />
           </div>
         </section>
@@ -249,7 +251,7 @@ export default async function DashboardPage() {
                 <div className="flex items-baseline justify-between gap-4 py-2.5">
                   <dt className="text-muted-foreground">Posted accounts</dt>
                   <dd className="tabular-figures font-medium">
-                    {accountById.size}
+                    {trialBalance.postedAccounts}
                   </dd>
                 </div>
                 <div className="flex items-baseline justify-between gap-4 py-2.5">
