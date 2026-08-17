@@ -53,14 +53,17 @@ export function TrialBalanceView({ trial }: { trial: TrialBalance }) {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
+          {/* Shows the window the figures were actually built for, which is
+              the financial year in the header until somebody picks another.
+              Left blank, the fields would claim there was no window at all. */}
           <DateField
             label="From"
-            value={searchParams.get("from") ?? ""}
+            value={searchParams.get("from") ?? trial.from ?? ""}
             onChange={(value) => apply({ from: value })}
           />
           <DateField
             label="As at"
-            value={searchParams.get("to") ?? ""}
+            value={searchParams.get("to") ?? trial.to}
             onChange={(value) => apply({ to: value })}
           />
         </div>

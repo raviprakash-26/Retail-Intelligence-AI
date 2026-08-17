@@ -3120,6 +3120,16 @@ statement as no sales.
 The financial year lives in a cookie so it survives navigation, and the server
 re-validates it against the company's own years on every request: a cookie is
 client data, and a year id from one tenant must never resolve inside another.
+
+**Reading it was left to each page, and most pages did not.** Four read the
+cookie; the financial statements, the whole report catalogue, the tax working
+paper, the trial balance and the ledger used whichever year was _current_
+instead — so the header could say 2025-26 above a statement of this year's
+figures, which is worse than an error because it looks like an answer. Nothing
+could see it while a tenant had only ever been given one fiscal year: the only
+id the cookie could hold was also the current one. The calendar rolling over is
+what made the two differ. One function reads the cookie now, every page that
+works a year at a time goes through it, and a test fails the day one stops.
 Global search runs entirely server-side under the session's `companyId`, so the
 query text is the only thing the browser controls.
 

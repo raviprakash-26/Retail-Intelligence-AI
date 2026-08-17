@@ -2,13 +2,13 @@ import { cookies } from "next/headers";
 import { AppSidebar } from "@/components/shell/app-sidebar";
 import { AppTopbar } from "@/components/shell/app-topbar";
 import { MobileNav } from "@/components/shell/mobile-nav";
-import { FISCAL_YEAR_COOKIE, SIDEBAR_COOKIE } from "@/lib/constants/cookies";
+import { SIDEBAR_COOKIE } from "@/lib/constants/cookies";
 import { prisma } from "@/lib/db";
 import { visibleQuickActions, visibleSections } from "@/lib/navigation";
 import { getUserCompanies, requireCompanyContext } from "@/server/auth/context";
 import {
   listFiscalYears,
-  resolveFiscalYear,
+  selectedFiscalYear,
 } from "@/server/fiscal/fiscal-service";
 import {
   countUnread,
@@ -39,10 +39,7 @@ export default async function AppShellLayout({
   ] = await Promise.all([
     getUserCompanies(),
     listFiscalYears(context.company.id),
-    resolveFiscalYear(
-      context.company.id,
-      cookieStore.get(FISCAL_YEAR_COOKIE)?.value,
-    ),
+    selectedFiscalYear(context.company.id),
     listNotifications({
       companyId: context.company.id,
       userId: context.user.id,

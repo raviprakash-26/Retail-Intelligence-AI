@@ -97,14 +97,17 @@ export function LedgerView({
           />
         </label>
 
+        {/* The window the entries below were read for — the financial year in
+            the header until somebody picks another. Blank fields would say
+            there was no window, with an opening balance sitting above them. */}
         <DateField
           label="From"
-          value={searchParams.get("from") ?? ""}
+          value={searchParams.get("from") ?? ledger?.from ?? ""}
           onChange={(value) => apply({ from: value })}
         />
         <DateField
           label="To"
-          value={searchParams.get("to") ?? ""}
+          value={searchParams.get("to") ?? ledger?.to ?? ""}
           onChange={(value) => apply({ to: value })}
         />
       </div>

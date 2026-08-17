@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { VerifyEmailBanner } from "@/components/auth/verify-email-banner";
 import { KpiCard } from "@/components/dashboard/kpi-card";
@@ -22,10 +21,7 @@ import {
 import { prisma } from "@/lib/db";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { requirePermission } from "@/server/auth/context";
-import {
-  FISCAL_YEAR_COOKIE,
-  resolveFiscalYear,
-} from "@/server/fiscal/fiscal-service";
+import { selectedFiscalYear } from "@/server/fiscal/fiscal-service";
 import { getOnboardingChecklist } from "@/server/company/onboarding-service";
 
 export const metadata: Metadata = {
@@ -51,12 +47,8 @@ export default async function DashboardPage() {
   // anybody who typed the address.
   const context = await requirePermission("dashboard.view");
   const { user, company, permissions } = context;
-  const cookieStore = await cookies();
 
-  const fiscalYear = await resolveFiscalYear(
-    company.id,
-    cookieStore.get(FISCAL_YEAR_COOKIE)?.value,
-  );
+  const fiscalYear = await selectedFiscalYear(company.id);
 
   const [balances, checklist, openingEntry] = await Promise.all([
     // Grouped by account so the ledger figures below are derived, never stored.
