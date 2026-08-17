@@ -223,7 +223,18 @@ const OPENING = {
   furnitureAndFittings: 120_000,
 } as const;
 
-export async function seedDemoCompany(prisma: PrismaClient, asOf: Date) {
+export async function seedDemoCompany(
+  prisma: PrismaClient,
+  asOf: Date,
+  /**
+   * The day the shop opened its books, which is where its fiscal calendar
+   * starts. Defaults to the run date; the seed passes the first day of the
+   * trading history, because a company whose calendar starts today cannot hold
+   * a bill from before it — and the history crosses 1 April for a quarter of
+   * the year.
+   */
+  openedOn: Date = asOf,
+) {
   // Idempotency: a re-run replaces the demo tenant wholesale rather than
   // layering a second copy on top of it.
   const existing = await prisma.company.findUnique({
@@ -267,7 +278,10 @@ export async function seedDemoCompany(prisma: PrismaClient, asOf: Date) {
         fiscalYearStartMonth: 4,
         inventoryMethod: "WEIGHTED_AVERAGE",
         isDemo: true,
+        // Created now — its trial runs from today — but trading since
+        // `openedOn`, which is where its fiscal calendar has to start.
         asOf,
+        booksOpenedOn: openedOn,
       });
 
       const {
@@ -519,11 +533,13 @@ export async function seedDemoCompany(prisma: PrismaClient, asOf: Date) {
         OPENING.furnitureAndFittings,
       );
 
+      // The start of the fiscal year the books open in — which is the one
+      // provisioning created, not necessarily the one the seed is run in.
       const openingDate = new Date(
         Date.UTC(
-          asOf.getUTCMonth() + 1 >= 4
-            ? asOf.getUTCFullYear()
-            : asOf.getUTCFullYear() - 1,
+          openedOn.getUTCMonth() + 1 >= 4
+            ? openedOn.getUTCFullYear()
+            : openedOn.getUTCFullYear() - 1,
           3,
           1,
         ),

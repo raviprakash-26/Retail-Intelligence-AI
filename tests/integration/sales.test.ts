@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import { trialBalanceIsBalanced } from "@/lib/accounting/double-entry";
 import { subtract, toStorageString } from "@/lib/money";
+import { seriesPrefix } from "@/lib/documents/sequences";
 import type { RegisterInput } from "@/lib/validation/auth";
 import type { CustomerInput, ProductInput } from "@/lib/validation/master-data";
 import type { SaleInput } from "@/lib/validation/sales";
@@ -20,6 +21,21 @@ import {
 } from "../helpers/test-db";
 
 const prisma = testDb();
+
+/**
+ * The invoice series for the company's current fiscal year, e.g. `INV-2627-`.
+ *
+ * Read from the year rather than written out, because the series carries the
+ * year it belongs to — that is what keeps a number that restarts every April
+ * unique to one document.
+ */
+async function invoicePrefix(companyId: string): Promise<string> {
+  const year = await prisma.fiscalYear.findFirstOrThrow({
+    where: { companyId, isCurrent: true },
+    select: { label: true },
+  });
+  return seriesPrefix("INV-", year.label);
+}
 const createdCompanies: string[] = [];
 const createdEmails: string[] = [];
 
@@ -835,7 +851,12 @@ describe("numbering", () => {
       numbers.push(sale.invoiceNumber);
     }
 
-    expect(numbers).toEqual(["INV-0001", "INV-0002", "INV-0003"]);
+    const series = await invoicePrefix(fixture.companyId);
+    expect(numbers).toEqual([
+      `${series}0001`,
+      `${series}0002`,
+      `${series}0003`,
+    ]);
   });
 
   it("does not burn a number on a sale that fails", async () => {
@@ -887,7 +908,9 @@ describe("numbering", () => {
 
     // A gap in an invoice series is exactly what a tax officer asks about, so
     // the rolled-back attempt must release its number.
-    expect(sale.invoiceNumber).toBe("INV-0001");
+    expect(sale.invoiceNumber).toBe(
+      `${await invoicePrefix(fixture.companyId)}0001`,
+    );
   });
 });
 

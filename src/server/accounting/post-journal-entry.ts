@@ -8,6 +8,13 @@ import {
 } from "@/lib/accounting/double-entry";
 import { toStorageString } from "@/lib/money";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
+import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
+import { NoFiscalPeriodError, PeriodClosedError } from "@/server/fiscal/errors";
+
+// Raised here since the first entry was posted, and imported from here by every
+// action that reports them. They moved next to the calendar that now also
+// raises them; this keeps the existing import path working.
+export { NoFiscalPeriodError, PeriodClosedError };
 
 /**
  * The only way a journal entry enters the system.
@@ -57,24 +64,6 @@ export type PostedJournalEntry = {
   totalCredit: string;
 };
 
-export class PeriodClosedError extends Error {
-  constructor(date: Date) {
-    super(
-      `The accounting period containing ${date.toISOString().slice(0, 10)} is closed. Post to an open period, or reopen it first.`,
-    );
-    this.name = "PeriodClosedError";
-  }
-}
-
-export class NoFiscalPeriodError extends Error {
-  constructor(date: Date) {
-    super(
-      `No fiscal period covers ${date.toISOString().slice(0, 10)}. Create the fiscal year before posting to it.`,
-    );
-    this.name = "NoFiscalPeriodError";
-  }
-}
-
 export async function postJournalEntry(
   tx: DbClient,
   input: PostJournalEntryInput,
@@ -96,6 +85,14 @@ export async function postJournalEntry(
   });
 
   // --- Resolve the period the entry falls in ------------------------------
+  // Opens the fiscal year first where time has moved past the calendar. It
+  // refuses a date no year should exist for, so a typed-in 2035 still lands on
+  // `NoFiscalPeriodError` rather than quietly creating a year to hold it.
+  await ensureFiscalYearFor(tx, {
+    companyId: input.companyId,
+    date: input.entryDate,
+  });
+
   const period = await tx.fiscalPeriod.findFirst({
     where: {
       companyId: input.companyId,

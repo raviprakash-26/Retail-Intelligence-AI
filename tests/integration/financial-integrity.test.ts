@@ -531,6 +531,8 @@ describe("posting engine", () => {
   });
 
   it("refuses to post to a date outside any fiscal period", async () => {
+    // The calendar opens a year that time has moved into, so a date it refuses
+    // is one no year should exist for — here, years before the business did.
     await expect(
       postJournalEntry(prisma, {
         companyId,
@@ -541,7 +543,7 @@ describe("posting engine", () => {
           { accountId: accountId(SYSTEM_ACCOUNT.SALES), credit: 100 },
         ],
       }),
-    ).rejects.toThrow(/No fiscal period/i);
+    ).rejects.toThrow(/before this business's first fiscal year/i);
   });
 
   it("refuses to post into a closed period", async () => {

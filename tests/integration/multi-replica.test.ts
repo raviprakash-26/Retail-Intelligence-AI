@@ -5,6 +5,7 @@ import type { RegisterInput } from "@/lib/validation/auth";
 import { registerOwner } from "@/server/auth/registration";
 import { postJournalEntry } from "@/server/accounting/post-journal-entry";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
+import type { DocumentSeriesKey } from "@/lib/documents/sequences";
 import {
   disconnectTestDb,
   ensurePlatformData,
@@ -80,10 +81,12 @@ type Fixture = { companyId: string; userId: string; email: string };
  * it is here for.
  */
 async function anySequence(companyId: string) {
-  return prisma.documentSequence.findFirstOrThrow({
+  const row = await prisma.documentSequence.findFirstOrThrow({
     where: { companyId, key: "SALE" },
     select: { key: true, fiscalYearId: true, nextValue: true },
   });
+  // The column is a plain string; the allocator takes the key as a type.
+  return { ...row, key: row.key as DocumentSeriesKey };
 }
 
 async function createCompany(): Promise<Fixture> {
