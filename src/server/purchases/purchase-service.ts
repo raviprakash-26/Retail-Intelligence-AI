@@ -36,6 +36,7 @@ import { writeGstRows } from "@/server/documents/gst-register";
 import { reversePostedEntry } from "@/server/documents/reversal";
 import { recordInward, recordOutward } from "@/server/inventory/stock-service";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
+import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 import { MasterDataError } from "@/server/master-data/errors";
 
 /**
@@ -295,19 +296,15 @@ export async function createPurchase(params: {
       }
 
       // --- Document number --------------------------------------------------
-      const fiscalYear = await tx.fiscalYear.findFirst({
-        where: {
-          companyId,
-          startDate: { lte: billDate },
-          endDate: { gte: billDate },
-        },
-        select: { id: true },
+      const fiscalYear = await ensureFiscalYearFor(tx, {
+        companyId,
+        date: billDate,
       });
 
       const billNumber = await allocateDocumentNumber(tx, {
         companyId,
         key: "PURCHASE",
-        fiscalYearId: fiscalYear?.id ?? null,
+        fiscalYearId: fiscalYear.id,
       });
 
       const settledNow = input.paymentMode !== "CREDIT";

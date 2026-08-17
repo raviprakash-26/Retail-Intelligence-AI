@@ -24,6 +24,7 @@ import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { writeGstRows } from "@/server/documents/gst-register";
 import { reversePostedEntry } from "@/server/documents/reversal";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
+import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 import { MasterDataError } from "@/server/master-data/errors";
 
 /**
@@ -203,19 +204,15 @@ export async function createExpense(params: {
         : add(computed.taxableAmount, totalTax);
 
       // --- Document number --------------------------------------------------
-      const fiscalYear = await tx.fiscalYear.findFirst({
-        where: {
-          companyId,
-          startDate: { lte: expenseDate },
-          endDate: { gte: expenseDate },
-        },
-        select: { id: true },
+      const fiscalYear = await ensureFiscalYearFor(tx, {
+        companyId,
+        date: expenseDate,
       });
 
       const voucherNumber = await allocateDocumentNumber(tx, {
         companyId,
         key: "EXPENSE",
-        fiscalYearId: fiscalYear?.id ?? null,
+        fiscalYearId: fiscalYear.id,
       });
 
       const expense = await tx.expense.create({

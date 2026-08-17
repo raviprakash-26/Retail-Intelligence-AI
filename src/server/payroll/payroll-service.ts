@@ -14,6 +14,7 @@ import { postJournalEntry } from "@/server/accounting/post-journal-entry";
 import { recordAuditLog } from "@/server/audit/audit-log";
 import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
+import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 
 /**
  * Running payroll.
@@ -314,19 +315,15 @@ export async function createPayrollRun(params: {
         );
       }
 
-      const fiscalYear = await tx.fiscalYear.findFirst({
-        where: {
-          companyId,
-          startDate: { lte: payDate },
-          endDate: { gte: payDate },
-        },
-        select: { id: true },
+      const fiscalYear = await ensureFiscalYearFor(tx, {
+        companyId,
+        date: payDate,
       });
 
       const reference = await allocateDocumentNumber(tx, {
         companyId,
         key: "PAYROLL",
-        fiscalYearId: fiscalYear?.id ?? null,
+        fiscalYearId: fiscalYear.id,
       });
 
       const run = await tx.payroll.create({

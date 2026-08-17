@@ -28,6 +28,7 @@ import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { writeGstRows } from "@/server/documents/gst-register";
 import { recordOutward } from "@/server/inventory/stock-service";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
+import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 import { ReturnError } from "@/server/returns/errors";
 import type { ReturnableLine } from "@/server/returns/return-queries";
 
@@ -204,19 +205,15 @@ export async function createPurchaseReturn(params: {
 
       const totals = totalLines(priced.map((entry) => entry.line));
 
-      const fiscalYear = await tx.fiscalYear.findFirst({
-        where: {
-          companyId,
-          startDate: { lte: returnDate },
-          endDate: { gte: returnDate },
-        },
-        select: { id: true },
+      const fiscalYear = await ensureFiscalYearFor(tx, {
+        companyId,
+        date: returnDate,
       });
 
       const returnNumber = await allocateDocumentNumber(tx, {
         companyId,
         key: "PURCHASE_RETURN",
-        fiscalYearId: fiscalYear?.id ?? null,
+        fiscalYearId: fiscalYear.id,
       });
 
       const branchId = params.branchId ?? purchase.branchId;

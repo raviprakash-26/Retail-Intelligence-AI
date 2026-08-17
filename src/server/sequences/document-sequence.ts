@@ -1,5 +1,6 @@
 import "server-only";
 import type { DbClient } from "@/lib/db";
+import type { DocumentSeriesKey } from "@/lib/documents/sequences";
 
 /**
  * Allocates the next document number for a tenant.
@@ -14,7 +15,11 @@ export async function allocateDocumentNumber(
   tx: DbClient,
   params: {
     companyId: string;
-    key: string;
+    /**
+     * Typed rather than a bare string, so a series nothing provisions cannot
+     * be asked for. See `DocumentSeriesKey`.
+     */
+    key: DocumentSeriesKey;
     fiscalYearId?: string | null;
   },
 ): Promise<string> {

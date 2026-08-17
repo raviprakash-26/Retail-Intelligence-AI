@@ -28,6 +28,7 @@ import { writeGstRows } from "@/server/documents/gst-register";
 import { reversePostedEntry } from "@/server/documents/reversal";
 import { recordInward, recordOutward } from "@/server/inventory/stock-service";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
+import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 import { MasterDataError } from "@/server/master-data/errors";
 
 /**
@@ -266,19 +267,15 @@ export async function createSale(params: {
       }
 
       // --- Document number -------------------------------------------------
-      const fiscalYear = await tx.fiscalYear.findFirst({
-        where: {
-          companyId,
-          startDate: { lte: invoiceDate },
-          endDate: { gte: invoiceDate },
-        },
-        select: { id: true },
+      const fiscalYear = await ensureFiscalYearFor(tx, {
+        companyId,
+        date: invoiceDate,
       });
 
       const invoiceNumber = await allocateDocumentNumber(tx, {
         companyId,
         key: "SALE",
-        fiscalYearId: fiscalYear?.id ?? null,
+        fiscalYearId: fiscalYear.id,
       });
 
       const dueDate =

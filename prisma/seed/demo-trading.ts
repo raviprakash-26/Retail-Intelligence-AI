@@ -37,6 +37,36 @@ import { createSalesReturn } from "@/server/returns/sales-return-service";
 
 /** Days back from today, so the demo never goes stale. */
 const DAY = 86_400_000;
+
+/** Days before the run on which the shop restocked. */
+const RESTOCK_DAYS = [96, 82, 68, 54, 40, 26, 12];
+
+/** How many days of selling the history covers. */
+const TRADING_DAYS = 90;
+
+/**
+ * How far back the demo shop's history reaches.
+ *
+ * Exported because the company has to have been provisioned by then: a fiscal
+ * calendar that starts after its own earliest invoice has nowhere to put it.
+ * Seeded in, say, May, ninety-six days of history reach back over 1 April into
+ * the previous fiscal year, and the seed failed outright — for roughly the
+ * first three months of every year.
+ */
+export const DEMO_HISTORY_DAYS = Math.max(...RESTOCK_DAYS, TRADING_DAYS);
+
+/**
+ * The day the demo shop opened its books, given the day the seed runs.
+ *
+ * Provisioning starts a company's fiscal calendar on the day it is created, so
+ * a demo provisioned today cannot hold an invoice from ninety-six days ago
+ * once those ninety-six days cross 1 April. It opened before it started
+ * trading, like any shop.
+ */
+export function demoOpenedOn(asOf: Date): Date {
+  return new Date(asOf.getTime() - DEMO_HISTORY_DAYS * DAY);
+}
+
 const daysAgo = (days: number, from: Date) =>
   new Date(from.getTime() - days * DAY).toISOString().slice(0, 10);
 
@@ -112,7 +142,7 @@ export async function seedDemoTrading(
   // actually incurred rather than an opening estimate. Quantities are generous
   // on purpose: a demo that runs a product into negative stock is showing a
   // bug that is not there.
-  for (const [index, days] of [96, 82, 68, 54, 40, 26, 12].entries()) {
+  for (const [index, days] of RESTOCK_DAYS.entries()) {
     await createPurchase({
       ...actor,
       branchId: null,
@@ -148,7 +178,7 @@ export async function seedDemoTrading(
   const next = sequence(20_260_816);
   const posted: Array<{ id: string; customerId: string; days: number }> = [];
 
-  for (let days = 90; days >= 1; days -= 1) {
+  for (let days = TRADING_DAYS; days >= 1; days -= 1) {
     // Two or three invoices most days, occasionally none — a closed day.
     const perDay = Math.floor(next() * 3) + (next() > 0.15 ? 1 : 0);
 

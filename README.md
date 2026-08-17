@@ -746,6 +746,65 @@ was added in the wrong place, took them down more confusingly. Each company is
 independent and each sync is idempotent, so none of it needs to be atomic with
 the template maintenance — only to happen afterwards.
 
+### The calendar that ran out
+
+Provisioning also gave a company one fiscal year and its twelve monthly
+periods, and nothing ever gave it another: `fiscalYear.create` appeared in
+exactly one file in the codebase. Every tenant was trading on a calendar with an
+end date.
+
+From the first day of the next year, no period covers today — and a shop cannot
+raise an invoice, record a bill, log an expense, take a receipt, pay a supplier
+or run payroll, because every one of those posts an entry and every entry needs
+a period. The failure was not even legible. A document number is allocated
+before the entry is posted, so the first thing to break was the numbering, and
+the shop was told `No document sequence "SALE" configured for company …`.
+
+**The calendar now extends itself.** A fiscal year is not a decision anybody
+makes: given the start month the business chose at signup, next year's dates and
+its twelve periods follow from the calendar, so there is nothing to ask and
+nothing to fill in. `ensureFiscalYearFor` opens the year a document falls in —
+and any year between, so a business dormant for two years comes back to a
+calendar with no holes, since periods close in order and ordering cannot step
+over a hole. Provisioning uses the same function for a company's first year as
+the rollover uses for its tenth.
+
+**It will not open a year for any date at all.** A mistyped `2035` would
+otherwise create a fiscal year, twelve periods and a set of document series
+nobody asked for, with the invoice that caused it nine years out where no report
+will show it. A year that has not started is refused, and so is a date before
+the business's first year — the books start when the business did. Both refusals
+are reported as "no period covers this date", which every action already turns
+into a message a shopkeeper can act on.
+
+**Only write paths open years.** A report that resolved a year must not create
+one: reading the books should not change them, and a dashboard opened on 1 April
+would otherwise start the year before anybody had recorded anything in it.
+
+**Two rules were quietly incompatible.** Document series restart each April —
+that is what `DocumentSequence.fiscalYearId` is for — while every document
+number is unique per _company_: `@@unique([companyId, invoiceNumber])`, and the
+same on bills, returns, vouchers and journal entries. The first invoice of a
+tenant's second year would have been `INV-0001` for the second time, and the
+insert would have failed on the unique index with nothing to explain it. Nothing
+could notice while every tenant had exactly one year. Both rules are worth
+keeping, so the year goes into the number — `INV-2627-0001`, which is how most
+shops write it anyway, and inside Rule 46(b)'s sixteen characters. Series
+already issued keep their prefix; renumbering an invoice somebody has already
+been given is not a thing software may do.
+
+**Opening a year is serialised.** Two tills selling at nine on the first of
+April both find no year and both open one, and Postgres rejects the loser on the
+label's unique index — which, inside a transaction, is the sale being posted
+rather than just the year. A transaction-scoped advisory lock per company makes
+the second caller wait and then find the year the first one opened.
+
+**The demo seed had the same shape of bug.** Its history reaches back
+ninety-six days while the company was provisioned on the day the seed ran, so a
+seed run in April, May or June started the calendar after its own earliest bill
+and died partway through. The demo shop now opens its books before it starts
+trading, like any shop.
+
 ### What was left behind when a business was erased
 
 Three places have to enumerate every tenant-scoped table: provisioning creates
@@ -826,7 +885,7 @@ transaction — all of them or none:
    ┌──────────────┬───────┴────────┬──────────────────┐
    ▼              ▼                ▼                  ▼
  Invoice     Stock ledger     Journal entry      GST register
- INV-0001    −10 PKT          Dr Cash    295     outward supply
+ INV-2627-0001  −10 PKT       Dr Cash    295     outward supply
              @ ₹18 cost       Cr Sales   250     HSN 1905, 18%
                               Cr CGST     22.50  taxable 250
                               Cr SGST     22.50  tax 45

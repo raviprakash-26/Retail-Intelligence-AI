@@ -506,7 +506,7 @@ describe("duplicate bills", () => {
           supplierBillNo: "2451",
         }),
       }),
-    ).rejects.toThrow(/already recorded as BILL-0001/);
+    ).rejects.toThrow(/already recorded as BILL-\d{4}-0001/);
   });
 
   it("allows the same reference from a different supplier", async () => {

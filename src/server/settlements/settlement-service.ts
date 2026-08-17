@@ -22,6 +22,8 @@ import { recordAuditLog } from "@/server/audit/audit-log";
 import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { reversePostedEntry } from "@/server/documents/reversal";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
+import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
+import type { DocumentSeriesKey } from "@/lib/documents/sequences";
 import { MasterDataError } from "@/server/master-data/errors";
 
 /**
@@ -166,21 +168,17 @@ function validateAllocations(
 
 async function nextVoucher(
   tx: DbClient,
-  params: { companyId: string; key: string; date: Date },
+  params: { companyId: string; key: DocumentSeriesKey; date: Date },
 ): Promise<string> {
-  const fiscalYear = await tx.fiscalYear.findFirst({
-    where: {
-      companyId: params.companyId,
-      startDate: { lte: params.date },
-      endDate: { gte: params.date },
-    },
-    select: { id: true },
+  const fiscalYear = await ensureFiscalYearFor(tx, {
+    companyId: params.companyId,
+    date: params.date,
   });
 
   return allocateDocumentNumber(tx, {
     companyId: params.companyId,
     key: params.key,
-    fiscalYearId: fiscalYear?.id ?? null,
+    fiscalYearId: fiscalYear.id,
   });
 }
 

@@ -45,9 +45,16 @@ export async function purgeTestCompany(companyId: string): Promise<void> {
   const prisma = testDb();
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET LOCAL app.allow_financial_purge = 'on'");
-    // Mirrors purgeCompany: payslips restrict their employee, and nothing
-    // orders the two cascades from company against each other.
+    // Mirrors purgeCompany, and has to keep mirroring it. Payslips restrict
+    // their employee and nothing orders the two cascades from company against
+    // each other; the rest hang off the company with ON DELETE SET NULL, so
+    // deleting it detaches them rather than removing them. A test company
+    // purged without these leaves rows behind that match no company — which is
+    // residue in a database every other test file is using at the same time.
     await tx.payroll.deleteMany({ where: { companyId } });
+    await tx.paymentEvent.deleteMany({ where: { companyId } });
+    await tx.auditLog.deleteMany({ where: { companyId } });
+    await tx.session.deleteMany({ where: { companyId } });
     await tx.company.delete({ where: { id: companyId } });
   });
 }

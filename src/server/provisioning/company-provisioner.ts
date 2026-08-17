@@ -4,7 +4,6 @@ import {
   BillingInterval,
   BusinessType,
   CompanyStatus,
-  FiscalPeriodStatus,
   GstRegistrationType,
   InventoryValuationMethod,
   SubscriptionStatus,
@@ -17,8 +16,9 @@ import {
   DEFAULT_TAX_RATES,
   DEFAULT_UNITS,
 } from "@/lib/accounting/chart-of-accounts";
-import { fiscalYearRange } from "@/lib/constants/india";
+import { COMPANY_SERIES, SEQUENCE_PADDING } from "@/lib/documents/sequences";
 import { DEFAULT_TRIAL_PLAN_KEY } from "@/lib/billing/plans";
+import { createFiscalYear } from "@/server/fiscal/fiscal-calendar";
 
 /**
  * Provisions everything a new tenant needs before it can record a transaction.
@@ -53,6 +53,15 @@ export type ProvisionCompanyInput = {
   isDemo?: boolean;
   /** Anchors the fiscal year. Defaults to now; pinned in tests and seeds. */
   asOf?: Date;
+  /**
+   * The day the books open, which is where the fiscal calendar starts.
+   *
+   * Defaults to `asOf`, which is what a real signup wants: a business that
+   * starts today starts its books today. The demo shop is the exception — it
+   * arrives with months of history, so its books open before the account does,
+   * while the trial still starts on the day the seed runs.
+   */
+  booksOpenedOn?: Date;
 };
 
 export type ProvisionedCompany = {
@@ -125,44 +134,15 @@ export async function provisionCompany(
   });
 
   // --- Fiscal calendar ----------------------------------------------------
-  const { start, end, label } = fiscalYearRange(asOf, fiscalStartMonth);
-
-  const fiscalYear = await tx.fiscalYear.create({
-    data: {
-      companyId,
-      label,
-      startDate: start,
-      endDate: end,
-      isCurrent: true,
-    },
-    select: { id: true },
+  // The first year is opened by the same function that opens every later one,
+  // so a company's first April and its tenth produce the same rows.
+  const fiscalYear = await createFiscalYear(tx, {
+    companyId,
+    anchor: input.booksOpenedOn ?? asOf,
+    startMonth: fiscalStartMonth,
+    isCurrent: true,
   });
-
-  // Twelve monthly periods. Closing a period locks its journal entries, which
-  // is what makes a month-end close meaningful.
-  const periods = Array.from({ length: 12 }, (_, index) => {
-    const periodStart = new Date(
-      Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + index, 1),
-    );
-    const periodEnd = new Date(
-      Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + index + 1, 0),
-    );
-    return {
-      companyId,
-      fiscalYearId: fiscalYear.id,
-      periodNumber: index + 1,
-      label: periodStart.toLocaleString("en-IN", {
-        month: "short",
-        year: "numeric",
-        timeZone: "UTC",
-      }),
-      startDate: periodStart,
-      endDate: periodEnd,
-      status: FiscalPeriodStatus.OPEN,
-    };
-  });
-
-  await tx.fiscalPeriod.createMany({ data: periods });
+  const start = fiscalYear.startDate;
 
   // --- Chart of accounts --------------------------------------------------
   // Groups are inserted parents-first so the self-referencing FK resolves.
@@ -355,32 +335,15 @@ export async function provisionCompany(
   }
 
   // --- Document sequences -------------------------------------------------
-  const sequenceKeys = [
-    { key: "SALE", prefix: "INV-" },
-    { key: "SALES_RETURN", prefix: "SR-" },
-    { key: "PURCHASE", prefix: "BILL-" },
-    { key: "PURCHASE_RETURN", prefix: "PR-" },
-    { key: "EXPENSE", prefix: "EXP-" },
-    { key: "RECEIPT", prefix: "RCP-" },
-    { key: "PAYMENT", prefix: "PAY-" },
-    { key: "JOURNAL", prefix: "JV-" },
-    { key: "PAYROLL", prefix: "SAL-" },
-    { key: "CUSTOMER", prefix: "CUS-" },
-    { key: "SUPPLIER", prefix: "SUP-" },
-    { key: "EMPLOYEE", prefix: "EMP-" },
-  ];
-
+  // Voucher series belong to a fiscal year and were created with it above.
+  // These are the master-record series, which run for the life of the tenant.
   await tx.documentSequence.createMany({
-    data: sequenceKeys.map((sequence) => ({
+    data: COMPANY_SERIES.map((series) => ({
       companyId,
-      // Party and voucher codes restart each fiscal year except for master
-      // records, which keep a single running series for the life of the tenant.
-      fiscalYearId: ["CUSTOMER", "SUPPLIER", "EMPLOYEE"].includes(sequence.key)
-        ? null
-        : fiscalYear.id,
-      key: sequence.key,
-      prefix: sequence.prefix,
-      padding: 4,
+      fiscalYearId: null,
+      key: series.key,
+      prefix: series.prefix,
+      padding: SEQUENCE_PADDING,
       nextValue: 1,
     })),
   });

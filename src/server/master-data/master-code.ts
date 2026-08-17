@@ -1,6 +1,7 @@
 import "server-only";
 import type { DbClient } from "@/lib/db";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
+import type { DocumentSeriesKey } from "@/lib/documents/sequences";
 import { MasterDataError } from "./errors";
 
 /**
@@ -23,7 +24,7 @@ export async function allocateMasterCode(
   params: {
     companyId: string;
     /** Document-sequence key: CUSTOMER, SUPPLIER, EMPLOYEE. */
-    key: string;
+    key: DocumentSeriesKey;
     /** True when the candidate is already used by another record. */
     isTaken: (code: string) => Promise<boolean>;
   },

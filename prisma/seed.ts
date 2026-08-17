@@ -4,7 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import { seedPermissionsAndRoles } from "./seed/permissions";
 import { seedSubscriptionPlans } from "./seed/plans";
 import { DEMO, seedDemoCompany } from "./seed/demo-company";
-import { seedDemoTrading } from "./seed/demo-trading";
+import { demoOpenedOn, seedDemoTrading } from "./seed/demo-trading";
 import { PLATFORM_ADMIN, seedPlatformAdmin } from "./seed/platform-admin";
 
 /**
@@ -79,7 +79,9 @@ async function main() {
 
   console.log("→ Seeding demo tenant…");
   const asOf = new Date();
-  const demo = await seedDemoCompany(prisma, asOf);
+  // The demo shop has been trading for months, so it opened its books before
+  // its earliest invoice — otherwise that invoice falls outside its calendar.
+  const demo = await seedDemoCompany(prisma, asOf, demoOpenedOn(asOf));
 
   // A shop that has never traded shows a blank dashboard, an empty ageing and
   // AI modules with nothing to read. The history is posted through the

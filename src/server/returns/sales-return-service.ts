@@ -28,6 +28,7 @@ import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { writeGstRows } from "@/server/documents/gst-register";
 import { recordInward } from "@/server/inventory/stock-service";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
+import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 import { ReturnError } from "@/server/returns/errors";
 import type { ReturnableLine } from "@/server/returns/return-queries";
 
@@ -227,19 +228,15 @@ export async function createSalesReturn(params: {
       // The return series restarts each financial year, like every other
       // document series except the master-record ones — so the year the return
       // falls in has to be resolved, not assumed.
-      const fiscalYear = await tx.fiscalYear.findFirst({
-        where: {
-          companyId,
-          startDate: { lte: returnDate },
-          endDate: { gte: returnDate },
-        },
-        select: { id: true },
+      const fiscalYear = await ensureFiscalYearFor(tx, {
+        companyId,
+        date: returnDate,
       });
 
       const returnNumber = await allocateDocumentNumber(tx, {
         companyId,
         key: "SALES_RETURN",
-        fiscalYearId: fiscalYear?.id ?? null,
+        fiscalYearId: fiscalYear.id,
       });
 
       const branchId = params.branchId ?? sale.branchId;
