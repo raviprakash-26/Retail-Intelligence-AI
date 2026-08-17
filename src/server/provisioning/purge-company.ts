@@ -3,6 +3,30 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
 /**
+ * Tables a company delete cannot reach on its own, and why.
+ *
+ * The purge deletes the company row and lets the database cascade. A table
+ * whose company relation is `SET NULL` is detached rather than deleted, and
+ * one with no company relation is never reached at all — either way the rows
+ * outlive the business, matching no company afterwards, so invisible to every
+ * tenant-scoped query and beyond any ordinary cleanup.
+ *
+ * A test reads this list against the schema and fails when a company-scoped
+ * table is in neither category, so a table added later cannot quietly become
+ * the next thing that survives erasure.
+ */
+export const PURGED_EXPLICITLY: Record<string, string> = {
+  Payroll:
+    "A payslip references its employee with ON DELETE RESTRICT, and nothing orders the employee cascade against the payroll one, so the runs go first to free them.",
+  PaymentEvent:
+    "No foreign key to companies at all — a webhook can name an order nobody recognises, and such a row still has to be recordable — so a cascade would never reach it.",
+  AuditLog:
+    "SET NULL, because `userId` is SET NULL for a good reason: removing a person must not destroy the record of what they did, which belongs to the business. Erasing the business is the case where the record should go.",
+  Session:
+    "SET NULL like the audit log, and a session outliving the company it acted within keeps the IP address and user agent it was opened with.",
+};
+
+/**
  * Permanently erases a tenant and every record belonging to it.
  *
  * This is the only supported way to delete financial history. Posted journal
@@ -47,6 +71,28 @@ export async function purgeCompany(companyId: string): Promise<void> {
     // The append-only trigger refuses a DELETE unless the purge flag set above
     // is on, which is the same escape hatch audit_logs uses.
     await tx.paymentEvent.deleteMany({ where: { companyId } });
+
+    // The activity log and any live sessions, explicitly.
+    //
+    // Both hang off the company with ON DELETE SET NULL, so deleting it
+    // detached them instead of removing them and every row survived the one
+    // operation this product offers for erasing a business. What survived was
+    // not bookkeeping either: an audit row carries `actorEmail`, `ipAddress`,
+    // `userAgent` and a before-and-after payload, so a data-deletion request
+    // left behind the personal data of everybody who had worked there —
+    // matching no company afterwards, so invisible to every tenant-scoped
+    // query and out of reach of any ordinary cleanup.
+    //
+    // Deleted here rather than by changing the column to CASCADE, because
+    // SET NULL is right for the other half of the same row: `userId` is
+    // SET NULL so that removing a person does not destroy the record of what
+    // they did, which belongs to the business rather than to them. Erasing the
+    // business is the case where the record should go, and saying so here
+    // keeps both rules visible next to each other.
+    //
+    // The append-only trigger refuses these deletes too, under the same flag.
+    await tx.auditLog.deleteMany({ where: { companyId } });
+    await tx.session.deleteMany({ where: { companyId } });
 
     await tx.company.delete({ where: { id: companyId } });
   });
