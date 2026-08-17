@@ -746,6 +746,43 @@ was added in the wrong place, took them down more confusingly. Each company is
 independent and each sync is idempotent, so none of it needs to be atomic with
 the template maintenance — only to happen afterwards.
 
+### What was left behind when a business was erased
+
+Three places have to enumerate every tenant-scoped table: provisioning creates
+them, the export copies them, and the purge removes them. The export was
+already guarded — a test fails if a table is in neither the exported nor the
+withheld list, so one added later cannot join or leave the archive by accident.
+The purge was not.
+
+`purgeCompany` deletes the company row and lets the database cascade, and its
+own description says it "permanently erases a tenant and every record belonging
+to it". **The activity log survived it.** `AuditLog.companyId` is
+`onDelete: SET NULL`, so deleting a company detached every row instead of
+removing it — and an audit row is not bookkeeping. It carries `actorEmail`,
+`ipAddress`, `userAgent` and a before-and-after payload of the change, so a
+data-deletion request left behind the personal data of everybody who had
+worked there. Sessions did the same thing for the same reason.
+
+Detached is worse than it sounds. Those rows then match no company, so nothing
+tenant-scoped will ever list them and no ordinary cleanup will ever reach them.
+
+They are now deleted explicitly, next to the two exceptions that were already
+handled that way, rather than by changing the column to `CASCADE`. `SET NULL`
+is right for the other half of the same row: `userId` is `SET NULL` so that
+removing a person does not destroy the record of what they did, which belongs
+to the business rather than to them. Erasing the business is the case where
+the record should go, and both rules now sit where they can be read together.
+
+Two tests, because neither is enough alone. One registers a company, notes the
+id of every row it owns across all fifty-two company-scoped tables, purges, and
+looks for those ids again — identifying rows by id rather than by `companyId`,
+since `SET NULL` empties that column and a count of the company's rows reads
+zero whether they were deleted or merely cut loose. It covers the fifteen
+tables a bare registration populates. The other reads the schema instead of the
+data and covers all fifty-two: each must either cascade from `Company` —
+transitively, since most are reached through a parent — or be named with the
+reason it cannot.
+
 ### A scanner that had never run
 
 The same sweep turned up a check that reported green by never executing. A test
@@ -3089,6 +3126,7 @@ query text is the only thing the browser controls.
 | 54    | Custom roles — the Business feature the pricing page had always sold    | **Done** |
 | 55    | Permissions — eight that guarded nothing, and a scanner that never ran  | **Done** |
 | 56    | What a tenant was given at signup, and never given again                | **Done** |
+| 57    | What was left behind when a business was erased                         | **Done** |
 
 ---
 
