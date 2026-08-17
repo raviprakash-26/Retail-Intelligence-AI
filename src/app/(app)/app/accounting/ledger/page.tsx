@@ -11,6 +11,9 @@ import {
   LedgerError,
   type AccountLedger,
 } from "@/server/accounting/ledger-service";
+import { selectedFiscalYear } from "@/server/fiscal/fiscal-service";
+
+const isoDay = (date: Date) => date.toISOString().slice(0, 10);
 
 export const metadata: Metadata = {
   title: "Ledger",
@@ -42,7 +45,14 @@ export default async function LedgerPage({
   };
 
   const accountId = single("account");
-  const accounts = await ledgerAccounts(context.company.id);
+  // Scoped to the year in the header unless the page's own date fields say
+  // otherwise. Anything from before it is carried in as the opening balance
+  // rather than dropped, so a statement of account still shows what is owed
+  // from last year.
+  const [accounts, year] = await Promise.all([
+    ledgerAccounts(context.company.id),
+    selectedFiscalYear(context.company.id),
+  ]);
 
   let ledger: AccountLedger | null = null;
   let error: string | null = null;
@@ -52,8 +62,8 @@ export default async function LedgerPage({
       ledger = await getAccountLedger({
         companyId: context.company.id,
         accountId,
-        from: single("from"),
-        to: single("to"),
+        from: single("from") ?? (year ? isoDay(year.startDate) : undefined),
+        to: single("to") ?? (year ? isoDay(year.endDate) : undefined),
         partyId: single("party"),
         page: Number(single("page") ?? 1) || 1,
       });

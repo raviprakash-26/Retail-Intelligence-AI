@@ -8,7 +8,7 @@ import { ReportView } from "@/components/reports/report-view";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { requireCompanyContext } from "@/server/auth/context";
 import { authorizeReport } from "@/server/reports/access";
-import { resolveFiscalYear } from "@/server/fiscal/fiscal-service";
+import { selectedFiscalYear } from "@/server/fiscal/fiscal-service";
 import {
   reportEntityOptions,
   runReport,
@@ -54,7 +54,7 @@ export default async function ReportPage({
   };
 
   const definition = access.definition!;
-  const year = await resolveFiscalYear(context.company.id);
+  const year = await selectedFiscalYear(context.company.id);
   const today = new Date();
 
   const from = single("from") ?? (year ? isoDay(year.startDate) : "2000-01-01");

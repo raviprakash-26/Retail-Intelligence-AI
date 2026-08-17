@@ -11,7 +11,7 @@ import { FEATURE } from "@/lib/billing/plans";
 import { billingRefusal } from "@/server/billing/guards";
 import { checkRateLimit } from "@/server/security/rate-limit";
 import { assertPermission } from "@/server/auth/context";
-import { resolveFiscalYear } from "@/server/fiscal/fiscal-service";
+import { selectedFiscalYear } from "@/server/fiscal/fiscal-service";
 import { requireSameOrigin } from "@/server/security/request-context";
 import { askAccountant } from "@/server/ai/accountant";
 
@@ -72,7 +72,10 @@ export async function askAccountantAction(
   const raw = formData.get("conversationId");
   const conversationId = typeof raw === "string" && raw ? raw : null;
 
-  const fiscalYear = await resolveFiscalYear(context.company.id);
+  // The year the person is looking at, not whichever one is current: asking
+  // the accountant a question from a screen showing last year and being
+  // answered about this one is worse than not answering.
+  const fiscalYear = await selectedFiscalYear(context.company.id);
   const isoDay = (date: Date) => date.toISOString().slice(0, 10);
 
   const result = await askAccountant({

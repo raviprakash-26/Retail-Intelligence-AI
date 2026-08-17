@@ -11,7 +11,7 @@ import {
 import { FEATURE } from "@/lib/billing/plans";
 import { billingRefusal } from "@/server/billing/guards";
 import { assertPermission } from "@/server/auth/context";
-import { resolveFiscalYear } from "@/server/fiscal/fiscal-service";
+import { selectedFiscalYear } from "@/server/fiscal/fiscal-service";
 import { requireSameOrigin } from "@/server/security/request-context";
 import { runAudit, settleFinding } from "@/server/auditor/audit-service";
 
@@ -43,9 +43,14 @@ export async function runAuditAction(): Promise<
   });
   if (refusal) return refusal;
 
-  const year = await resolveFiscalYear(context.company.id);
+  const year = await selectedFiscalYear(context.company.id);
 
-  const to = new Date();
+  // Audits the year on screen. Ending at today would run a past year's audit
+  // over months that belong to the next one, and report what it found there
+  // under the wrong year's name.
+  const now = new Date();
+  const to =
+    year && year.endDate.getTime() < now.getTime() ? year.endDate : now;
   const from = year?.startDate ?? new Date(to.getTime() - 365 * 86_400_000);
 
   const report = await runAudit({

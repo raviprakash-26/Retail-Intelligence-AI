@@ -7,7 +7,7 @@ import { featureGate } from "@/server/billing/guards";
 import { requirePermission } from "@/server/auth/context";
 import {
   listFiscalYears,
-  resolveFiscalYear,
+  selectedFiscalYear,
 } from "@/server/fiscal/fiscal-service";
 import { getTaxWorkingPaper } from "@/server/tax/income-tax-service";
 
@@ -54,9 +54,10 @@ export default async function IncomeTaxPage({
 
   const [years, year] = await Promise.all([
     listFiscalYears(context.company.id),
-    // A year id from the query string is a suggestion: `resolveFiscalYear`
-    // only honours one that belongs to this company.
-    resolveFiscalYear(context.company.id, single || null),
+    // The year in the query string wins over the header's — a link somebody
+    // followed is more specific than a cookie they set once — and either is a
+    // suggestion: only an id belonging to this company is honoured.
+    selectedFiscalYear(context.company.id, single || null),
   ]);
 
   const paper = year

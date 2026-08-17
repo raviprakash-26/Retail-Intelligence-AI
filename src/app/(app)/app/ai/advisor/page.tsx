@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
 import { AdvisorView } from "@/components/advisor/advisor-view";
 import { MasterDataHeader } from "@/components/master-data/page-header";
 import { isRangeKey, type RangeKey } from "@/lib/analytics/range";
@@ -7,10 +6,7 @@ import { FEATURE } from "@/lib/billing/plans";
 import { PlanLocked } from "@/components/billing/plan-locked";
 import { featureGate } from "@/server/billing/guards";
 import { requirePermission } from "@/server/auth/context";
-import {
-  FISCAL_YEAR_COOKIE,
-  resolveFiscalYear,
-} from "@/server/fiscal/fiscal-service";
+import { selectedFiscalYear } from "@/server/fiscal/fiscal-service";
 import { getAdvice } from "@/server/advisor/advisor-service";
 
 export const metadata: Metadata = {
@@ -48,16 +44,12 @@ export default async function AdvisorPage({
     );
   }
   const params = await searchParams;
-  const cookieStore = await cookies();
 
   const requested = params.range;
   const single = Array.isArray(requested) ? requested[0] : requested;
   const range: RangeKey = isRangeKey(single) ? single : "fy";
 
-  const fiscalYear = await resolveFiscalYear(
-    context.company.id,
-    cookieStore.get(FISCAL_YEAR_COOKIE)?.value,
-  );
+  const fiscalYear = await selectedFiscalYear(context.company.id);
 
   const report = fiscalYear
     ? await getAdvice({

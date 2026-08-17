@@ -4,7 +4,7 @@ import { AlertTriangle } from "lucide-react";
 import { StatementsView } from "@/components/accounting/statements-view";
 import { MasterDataHeader } from "@/components/master-data/page-header";
 import { requirePermission } from "@/server/auth/context";
-import { resolveFiscalYear } from "@/server/fiscal/fiscal-service";
+import { selectedFiscalYear } from "@/server/fiscal/fiscal-service";
 import {
   getFinancialStatements,
   summarise,
@@ -41,7 +41,7 @@ export default async function StatementsPage({
     return found || undefined;
   };
 
-  const year = await resolveFiscalYear(context.company.id);
+  const year = await selectedFiscalYear(context.company.id);
   const from = single("from") ?? (year ? isoDay(year.startDate) : "2000-01-01");
   const to = single("to") ?? (year ? isoDay(year.endDate) : isoDay(new Date()));
 

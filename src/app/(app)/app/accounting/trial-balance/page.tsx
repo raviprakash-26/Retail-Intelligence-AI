@@ -3,6 +3,9 @@ import { TrialBalanceView } from "@/components/accounting/trial-balance-view";
 import { MasterDataHeader } from "@/components/master-data/page-header";
 import { requirePermission } from "@/server/auth/context";
 import { getTrialBalance } from "@/server/accounting/trial-balance-service";
+import { selectedFiscalYear } from "@/server/fiscal/fiscal-service";
+
+const isoDay = (date: Date) => date.toISOString().slice(0, 10);
 
 export const metadata: Metadata = {
   title: "Trial balance",
@@ -29,10 +32,16 @@ export default async function TrialBalancePage({
     return found || undefined;
   };
 
+  // Defaulted to the year chosen in the header, which is also the shape an
+  // accountant wants: what was carried in at the start of the year, what moved
+  // during it, where each account closed. The date fields on the page still
+  // win, so any other window is a URL away.
+  const year = await selectedFiscalYear(context.company.id);
+
   const trial = await getTrialBalance({
     companyId: context.company.id,
-    from: single("from"),
-    to: single("to"),
+    from: single("from") ?? (year ? isoDay(year.startDate) : undefined),
+    to: single("to") ?? (year ? isoDay(year.endDate) : undefined),
     includeEmpty: single("empty") === "1",
   });
 
