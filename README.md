@@ -1471,11 +1471,15 @@ anyone who knows the classical form. Gross profit is revenue less the cost of
 what was actually sold, and the page says why there is no Purchases line rather
 than leaving a reader to wonder.
 
-**Profit sits inside capital on the balance sheet.** Income and expense accounts
-are not closed to retained earnings until a year-end close, which this system
-does not yet perform, so what has been earned is shown as its own line within
+**Profit sits inside capital on the balance sheet until the year is closed.**
+Income and expense accounts are not closed to retained earnings until a year-end
+close, so in an open year what has been earned is shown as its own line within
 the owner's stake. Without it the two halves would differ by exactly the profit
-— and it is the owner's, whether or not a closing entry has been written.
+— and it is the owner's, whether or not a closing entry has been written. Once
+the year is closed those accounts stand at nil, that line falls to zero of its
+own accord, and retained earnings carries the amount instead. The equity total
+is the same either way, which is what makes closing safe to do to books that
+have already been read.
 
 Period figures and position figures are read from separate windows. Income and
 expenses are measured _over_ the period; assets, liabilities and capital _at_
@@ -2339,6 +2343,49 @@ has Rule 46 and a credit note has Rule 53; a receipt voucher settling an
 existing invoice has no equivalent, so the checklist is what makes the document
 useful rather than what makes it compliant. Claiming otherwise would be this
 product asserting law it does not know.
+
+### Closing the year, which is not closing twelve months
+
+Closing a month stops entries going into it. Closing a **year** settles what was
+earned: income and expense accounts measure one year and one year only, so at
+the end of it their balances are transferred to retained earnings and they start
+the next year at nil. Nothing wrote that entry.
+
+Everything it needed was already here, unreachable, which is the tell.
+`RETAINED_EARNINGS` sits in every company's chart of accounts with nothing ever
+posted to it. `VoucherType.CLOSING_ENTRY` is in the schema, and both the auditor
+and the income-tax computation already exclude it — they were written to expect
+an entry nothing could produce. `FiscalYear.closedAt` is read by the year
+selector, which draws a padlock beside a closed year, and was written by nobody,
+so the padlock could never appear.
+
+**The balance sheet needed no special case, and that is the good news.** It adds
+everything earned up to the closing date into equity precisely because nothing
+had closed the income accounts. Once the entry zeroes them that figure becomes
+nil by itself, and retained earnings — an equity account — carries the amount.
+Both arrangements produce the same equity total, so closing a year does not
+change what the business is worth. The tests hold it to exactly that: same
+equity, same assets, trial balance still balanced.
+
+**Every month has to be shut first, and years close in order.** A year is not
+settled while one of its months still takes entries. Out of order is worse than
+untidy: the entry clears whatever is sitting in the income accounts on the
+closing date, so closing 2026-27 while 2025-26 was open would sweep the earlier
+year's earnings into the later one's result.
+
+**The closing entry is the one thing allowed into a closed period**, because it
+is what closing means — by the time it is written there is no open period left
+for it to land in. That escape is passed by the year-close service and by no
+other caller, and removing it fails the tests that prove a closed month refuses
+an ordinary entry.
+
+**A year in which nothing was earned gets no entry at all.** An empty closing
+entry would be noise in a journal that people read.
+
+**Reopening reverses rather than deletes**, like every other correction here, and
+asks for a reason that goes into the append-only log. The books then show that
+the year was closed and opened again, rather than showing that it never
+happened.
 
 ---
 
@@ -3211,6 +3258,10 @@ query text is the only thing the browser controls.
 | 55    | Permissions — eight that guarded nothing, and a scanner that never ran  | **Done** |
 | 56    | What a tenant was given at signup, and never given again                | **Done** |
 | 57    | What was left behind when a business was erased                         | **Done** |
+| 58    | A calendar with an end date, and the year nobody could open             | **Done** |
+| 59    | The year in the header was not the year on the page                     | **Done** |
+| 60    | Eight of the twelve numbers on the front page were not numbers          | **Done** |
+| 61    | Closing the year — retained earnings, and a padlock that can now appear | **Done** |
 
 ---
 

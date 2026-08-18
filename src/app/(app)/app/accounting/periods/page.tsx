@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { PeriodManager } from "@/components/accounting/period-manager";
 import { requirePermission } from "@/server/auth/context";
 import { listPeriods } from "@/server/accounting/period-service";
+import { YearCloseManager } from "@/components/accounting/year-close-manager";
+import { listYearsForClosing } from "@/server/accounting/year-close-service";
 
 export const metadata: Metadata = {
   title: "Periods",
@@ -16,7 +18,11 @@ export const metadata: Metadata = {
  */
 export default async function PeriodsPage() {
   const context = await requirePermission("accounting.view");
-  const periods = await listPeriods(context.company.id);
+  const [periods, years] = await Promise.all([
+    listPeriods(context.company.id),
+    listYearsForClosing(context.company.id),
+  ]);
+  const canClose = context.permissions.has("accounting.period.close");
 
   return (
     <div className="space-y-6">
@@ -35,10 +41,7 @@ export default async function PeriodsPage() {
           No periods yet.
         </p>
       ) : (
-        <PeriodManager
-          periods={periods}
-          canClose={context.permissions.has("accounting.period.close")}
-        />
+        <PeriodManager periods={periods} canClose={canClose} />
       )}
 
       <p className="text-xs leading-relaxed text-muted-foreground">
@@ -46,6 +49,30 @@ export default async function PeriodsPage() {
         until the draft is posted or discarded — closing over one would strand
         it. Reopening asks for a reason and records it in the activity log.
       </p>
+
+      {years.length > 0 && (
+        <div className="space-y-3 border-t pt-6">
+          <div>
+            <h2 className="text-base font-semibold">Financial years</h2>
+            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              Closing a year is not the same as closing its twelve months.
+              Income and expense accounts measure one year only, so closing the
+              year transfers what it earned to retained earnings and starts the
+              next one at nil. Until that is done, a profit figure read from the
+              books includes every year the business has traded.
+            </p>
+          </div>
+
+          <YearCloseManager years={years} canClose={canClose} />
+
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Every month of a year has to be closed before the year itself can
+            be, and years close in order. Reopening reverses the closing entry
+            rather than deleting it, so the books show that the year was closed
+            and then opened again.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
