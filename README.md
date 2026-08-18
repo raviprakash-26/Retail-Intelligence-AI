@@ -3111,11 +3111,26 @@ Hiding is a presentation decision, never a security one — every page behind
 those links calls `requirePermission()` on the server regardless of what the
 navigation chose to show.
 
-The dashboard reads real balances from posted journal lines. A figure it cannot
-compute yet — sales this month, gross profit — is shown as **pending, with the
-module it waits on named**. It is never shown as `₹0.00`, because zero is a
-factual claim about a business's trading, and an empty ledger is not the same
-statement as no sales.
+The dashboard reads every figure from the module that owns it — the balance
+engine for cash and capital, the trading account for sales and gross profit, the
+ageing for what is owed, the stock report for what is on the shelves. None of
+them is computed a second way here, because the screen everybody opens first is
+where a disagreement with a report would be noticed and least explicable.
+
+**Eight of its twelve tiles used to be blank.** Each carried a note naming the
+module it waited for — "Arrives with the Sales module", "Arrives with the
+Inventory module", "Arrives with the GST module" — and every one of those
+modules shipped without anybody revisiting the note. So a shop that had been
+trading for months opened the product to a front page saying most of its numbers
+were not built yet, with the ageing report and the stock valuation one click away
+holding exactly those numbers. Nothing failed, because nothing was looking.
+
+The pending state itself is worth keeping: `₹0.00` is a factual claim about a
+business's trading, and an empty ledger is not the same statement as no sales.
+What it may no longer do is wait on something that exists. The only thing that
+blanks a tile now is a ledger that does not balance — a condition of the books
+rather than of the product — and a test fails on any pending note phrased as
+waiting for a feature to arrive.
 
 The financial year lives in a cookie so it survives navigation, and the server
 re-validates it against the company's own years on every request: a cookie is
