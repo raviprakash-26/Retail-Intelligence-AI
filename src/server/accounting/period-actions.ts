@@ -11,6 +11,12 @@ import {
   PeriodError,
   type PeriodView,
 } from "./period-service";
+import {
+  closeFiscalYear,
+  reopenFiscalYear,
+  YearCloseError,
+  type YearCloseView,
+} from "./year-close-service";
 
 /**
  * Closing and reopening a period.
@@ -98,6 +104,91 @@ export async function reopenPeriodAction(
     return ok(period);
   } catch (error) {
     if (error instanceof PeriodError) return fail(error.message);
+    throw error;
+  }
+}
+
+/**
+ * Closing and reopening a year.
+ *
+ * The same permission as closing a month, for the same reason: it is the same
+ * person's judgement about the same books. What differs is what the act does —
+ * closing a month freezes it, closing a year settles what was earned and moves
+ * it to retained earnings.
+ */
+
+const closeYearSchema = z.object({
+  fiscalYearId: z.string().min(1),
+  note: z.string().trim().max(300).optional().or(z.literal("")),
+});
+
+const reopenYearSchema = z.object({
+  fiscalYearId: z.string().min(1),
+  reason: z
+    .string()
+    .trim()
+    .min(4, "Say why this year is being reopened.")
+    .max(300, "Keep it to 300 characters."),
+});
+
+export async function closeFiscalYearAction(
+  input: unknown,
+): Promise<ActionResult<YearCloseView>> {
+  const originError = await requireSameOrigin();
+  if (originError) return originError;
+
+  const context = await assertPermission("accounting.period.close");
+
+  const parsed = closeYearSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail(
+      parsed.error.issues[0]?.message ?? "That year could not be closed.",
+    );
+  }
+
+  try {
+    const year = await closeFiscalYear({
+      companyId: context.company.id,
+      userId: context.user.id,
+      actorEmail: context.user.email,
+      fiscalYearId: parsed.data.fiscalYearId,
+      note: parsed.data.note || undefined,
+    });
+    revalidatePath("/app/accounting/periods");
+    return ok(year);
+  } catch (error) {
+    if (error instanceof YearCloseError) return fail(error.message);
+    throw error;
+  }
+}
+
+export async function reopenFiscalYearAction(
+  input: unknown,
+): Promise<ActionResult<YearCloseView>> {
+  const originError = await requireSameOrigin();
+  if (originError) return originError;
+
+  const context = await assertPermission("accounting.period.close");
+
+  const parsed = reopenYearSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail(
+      parsed.error.issues[0]?.message ?? "That year could not be reopened.",
+    );
+  }
+
+  try {
+    const year = await reopenFiscalYear({
+      companyId: context.company.id,
+      userId: context.user.id,
+      actorEmail: context.user.email,
+      fiscalYearId: parsed.data.fiscalYearId,
+      reason: parsed.data.reason,
+    });
+    revalidatePath("/app/accounting/periods");
+    return ok(year);
+  } catch (error) {
+    if (error instanceof YearCloseError) return fail(error.message);
     throw error;
   }
 }

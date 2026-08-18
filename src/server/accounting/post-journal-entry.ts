@@ -55,6 +55,17 @@ export type PostJournalEntryInput = {
   reversesId?: string | null;
   /** Post immediately, or leave as an editable draft. */
   status?: Extract<JournalStatus, "DRAFT" | "POSTED">;
+  /**
+   * Lets this entry land in a period that is closed.
+   *
+   * For the year-end closing entry and its reversal, and nothing else. Closing
+   * a year requires every month of it to be shut first, so by the time the
+   * entry that *performs* the close is written there is no open period left for
+   * it to go in. The guard below is otherwise the whole point of closing a
+   * period, so this is deliberately not a general escape: it is passed by
+   * `year-close-service` and by no other caller.
+   */
+  intoClosedPeriod?: boolean;
 };
 
 export type PostedJournalEntry = {
@@ -105,7 +116,11 @@ export async function postJournalEntry(
   if (!period) {
     throw new NoFiscalPeriodError(input.entryDate);
   }
-  if (status === JournalStatus.POSTED && period.status !== "OPEN") {
+  if (
+    status === JournalStatus.POSTED &&
+    period.status !== "OPEN" &&
+    !input.intoClosedPeriod
+  ) {
     throw new PeriodClosedError(input.entryDate);
   }
 
