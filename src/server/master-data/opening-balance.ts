@@ -1,5 +1,10 @@
 import "server-only";
-import { AccountNature, VoucherType, type PartyType } from "@prisma/client";
+import {
+  AccountNature,
+  FiscalPeriodStatus,
+  VoucherType,
+  type PartyType,
+} from "@prisma/client";
 import type { DbClient } from "@/lib/db";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import {
@@ -80,8 +85,15 @@ export function openingStockValue(
 }
 
 export type OpeningContext = {
-  /** First day of the current financial year — where opening positions sit. */
+  /** Where the opening position is dated. Usually the first day of the year. */
   date: Date;
+  /** The first day of the year, whether or not the entry could go there. */
+  yearStart: Date;
+  /**
+   * True when the year's first day is in a closed month and the entry had to be
+   * dated later. The caller says so; it is not something to do quietly.
+   */
+  deferred: boolean;
   fiscalYearLabel: string;
   branchId: string | null;
   capitalAccountId: string;
@@ -92,6 +104,20 @@ export type OpeningContext = {
  *
  * Called before any master record is written so a company with no financial
  * year is refused before it has half-created a customer.
+ *
+ * **An opening balance belongs at the start of the year, and cannot always go
+ * there.** Once a shop closes April — which closing the year requires, twelve
+ * times over — the period holding that date stops accepting entries, and adding
+ * a customer who already owes money failed with "The accounting period
+ * containing 2026-04-01 is closed", naming a date the person never chose and
+ * advising them to undo their own month-end close.
+ *
+ * So the entry falls forward to the start of the earliest month still open.
+ * Nothing is posted into a closed period — the whole point of closing one — and
+ * the balance is carried at the earliest date the books can honestly hold it.
+ * It does mean the debt reads as newer than it is, which is why `deferred` goes
+ * back to the caller rather than the date quietly differing from what the
+ * screen promised.
  */
 export async function resolveOpeningContext(
   tx: DbClient,
@@ -125,8 +151,43 @@ export async function resolveOpeningContext(
     );
   }
 
+  // The month holding the year's first day, and — if it will not take an entry
+  // — the earliest one that will.
+  const [atYearStart, earliestOpen] = await Promise.all([
+    tx.fiscalPeriod.findFirst({
+      where: {
+        companyId,
+        startDate: { lte: fiscalYear.startDate },
+        endDate: { gte: fiscalYear.startDate },
+      },
+      select: { status: true },
+    }),
+    tx.fiscalPeriod.findFirst({
+      where: {
+        companyId,
+        status: FiscalPeriodStatus.OPEN,
+        startDate: { gte: fiscalYear.startDate },
+      },
+      select: { startDate: true },
+      orderBy: { startDate: "asc" },
+    }),
+  ]);
+
+  const openAtYearStart = atYearStart?.status === FiscalPeriodStatus.OPEN;
+
+  if (!openAtYearStart && !earliestOpen) {
+    throw new OpeningBalanceError(
+      `Every month of ${fiscalYear.label} is closed, so an opening balance has nowhere to go. Reopen a month, or record what is owed as an invoice in an open one.`,
+      "NO_OPEN_PERIOD",
+    );
+  }
+
+  const date = openAtYearStart ? fiscalYear.startDate : earliestOpen!.startDate;
+
   return {
-    date: fiscalYear.startDate,
+    date,
+    yearStart: fiscalYear.startDate,
+    deferred: date.getTime() !== fiscalYear.startDate.getTime(),
     fiscalYearLabel: fiscalYear.label,
     branchId: branch?.id ?? null,
     capitalAccountId: capital.id,
