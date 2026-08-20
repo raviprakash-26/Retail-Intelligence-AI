@@ -388,7 +388,12 @@ export async function createProduct(params: {
       tx,
     );
 
-    return { id: product.id, sku: product.sku, openingEntry, openingDeferredTo };
+    return {
+      id: product.id,
+      sku: product.sku,
+      openingEntry,
+      openingDeferredTo,
+    };
   });
 }
 

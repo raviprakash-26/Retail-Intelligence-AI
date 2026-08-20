@@ -105,9 +105,7 @@ function fromServiceError(error: unknown): ActionResult<never> {
 // Products
 // ---------------------------------------------------------------------------
 
-export async function createProductAction(
-  input: ProductInput,
-): Promise<
+export async function createProductAction(input: ProductInput): Promise<
   ActionResult<{
     id: string;
     sku: string;
