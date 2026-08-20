@@ -3,7 +3,7 @@ import { AccountNature, PartyType, Prisma } from "@prisma/client";
 import { prisma, type DbClient } from "@/lib/db";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import { findStateByCode, gstinStateCode } from "@/lib/constants/india";
-import { toStorageString } from "@/lib/money";
+import { isZero, toStorageString } from "@/lib/money";
 import type {
   CustomerInput,
   SupplierInput,
@@ -322,7 +322,18 @@ export async function createParty(params: {
       params.input.name,
     );
 
-    const opening = await resolveOpeningContext(tx, params.companyId);
+    // Only a party that brings a balance with it needs somewhere to post one.
+    // Resolved unconditionally, keeping an address book required an open
+    // accounting period: with every month of the year closed, a shop could add
+    // a product carrying no stock but not a customer owing nothing.
+    const target = signedOpening(
+      params.input.openingBalance,
+      params.input.openingNature,
+    );
+    const opening = isZero(target)
+      ? null
+      : await resolveOpeningContext(tx, params.companyId);
+
     const controlAccountId = await resolveSystemAccountId(
       tx,
       params.companyId,
@@ -360,22 +371,21 @@ export async function createParty(params: {
           })
         : await tx.supplier.create({ data, select: { id: true, code: true } });
 
-    const entry = await postOpeningDelta(tx, {
-      companyId: params.companyId,
-      context: opening,
-      accountId: controlAccountId,
-      partyType: config.partyType,
-      partyId: created.id,
-      source: config.source,
-      sourceId: created.id,
-      target: signedOpening(
-        params.input.openingBalance,
-        params.input.openingNature,
-      ),
-      posted: 0,
-      narration: `Opening balance — ${params.input.name}`,
-      createdById: params.userId,
-    });
+    const entry = opening
+      ? await postOpeningDelta(tx, {
+          companyId: params.companyId,
+          context: opening,
+          accountId: controlAccountId,
+          partyType: config.partyType,
+          partyId: created.id,
+          source: config.source,
+          sourceId: created.id,
+          target,
+          posted: 0,
+          narration: `Opening balance — ${params.input.name}`,
+          createdById: params.userId,
+        })
+      : null;
 
     await recordAuditLog(
       {
