@@ -108,7 +108,12 @@ function fromServiceError(error: unknown): ActionResult<never> {
 export async function createProductAction(
   input: ProductInput,
 ): Promise<
-  ActionResult<{ id: string; sku: string; openingEntry: string | null }>
+  ActionResult<{
+    id: string;
+    sku: string;
+    openingEntry: string | null;
+    openingDeferredTo: string | null;
+  }>
 > {
   const originError = await requireSameOrigin();
   if (originError) return originError;
@@ -209,7 +214,12 @@ export async function createPartyAction(
   kind: PartyKind,
   input: CustomerInput | SupplierInput,
 ): Promise<
-  ActionResult<{ id: string; code: string; openingEntry: string | null }>
+  ActionResult<{
+    id: string;
+    code: string;
+    openingEntry: string | null;
+    openingDeferredTo: string | null;
+  }>
 > {
   const originError = await requireSameOrigin();
   if (originError) return originError;

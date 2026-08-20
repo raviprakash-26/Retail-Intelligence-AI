@@ -11,7 +11,10 @@ import {
   ListPagination,
   ListToolbar,
 } from "@/components/master-data/list-toolbar";
-import { OpeningBalanceFields } from "@/components/master-data/opening-balance-fields";
+import {
+  OpeningBalanceFields,
+  announceDeferredOpening,
+} from "@/components/master-data/opening-balance-fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -407,10 +410,19 @@ function PartyDialog({
   async function onSubmit(values: PartyFormInput) {
     const payload: CustomerInput | SupplierInput =
       kind === "CUSTOMER" ? values : stripCreditLimit(values);
-    const result: ActionResult<unknown> = editing
-      ? await updatePartyAction(kind, editing.id, payload)
-      : await createPartyAction(kind, payload);
-    if (!applyResult(result)) return;
+    // The two branches are kept apart rather than merged into one `result`,
+    // because only creating a party carries an opening balance — and so only
+    // that result can report the balance having been dated forward.
+    if (editing) {
+      const result = await updatePartyAction(kind, editing.id, payload);
+      if (!applyResult(result as ActionResult<unknown>)) return;
+    } else {
+      const result = await createPartyAction(kind, payload);
+      if (!applyResult(result as ActionResult<unknown>)) return;
+      if (result.ok) {
+        announceDeferredOpening(result.data.openingDeferredTo, values.name);
+      }
+    }
     onSaved();
   }
 

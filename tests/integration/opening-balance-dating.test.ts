@@ -151,7 +151,7 @@ describe("an opening balance when the year has begun to close", () => {
       .map((period) => period.startDate)
       .sort((a, b) => a.getTime() - b.getTime())[0]!;
 
-    await createParty({
+    const customer = await createParty({
       ...actor(it),
       kind: "CUSTOMER",
       input: customerOwing(8000),
@@ -159,6 +159,9 @@ describe("an opening balance when the year has begun to close", () => {
 
     const dated = await openingEntryDate(it.companyId, "Sharma");
     expect(dated.toISOString()).toBe(yearStart.toISOString());
+    // Nothing moved, so there is nothing to tell anyone. The screen stays quiet
+    // on the ordinary path rather than explaining a decision it did not make.
+    expect(customer.openingDeferredTo).toBeNull();
   }, 90_000);
 
   it("is accepted after the first month is closed, dated to the next open one", async () => {
@@ -182,6 +185,12 @@ describe("an opening balance when the year has begun to close", () => {
 
     const dated = await openingEntryDate(it.companyId, "Sharma");
     expect(dated.toISOString()).toBe(firstOpen.startDate.toISOString());
+
+    // And says so. A date the shop did not choose is only acceptable if the
+    // shop is told about it, which means the date has to leave the service.
+    expect(customer.openingDeferredTo).toBe(
+      firstOpen.startDate.toISOString().slice(0, 10),
+    );
   }, 90_000);
 
   it("does the same for a product carrying opening stock", async () => {
@@ -220,6 +229,44 @@ describe("an opening balance when the year has begun to close", () => {
 
     const dated = await openingEntryDate(it.companyId, "Widget");
     expect(dated.toISOString()).toBe(firstOpen.startDate.toISOString());
+    expect(product.openingDeferredTo).toBe(
+      firstOpen.startDate.toISOString().slice(0, 10),
+    );
+  }, 90_000);
+
+  it("says nothing about a product that starts with no stock", async () => {
+    // A product with no opening stock writes no opening entry, so there is no
+    // date to have moved — the report is about a decision actually taken, not
+    // about the year being partly closed.
+    const it = await shop();
+    await closeMonths(it, 3);
+
+    const taxonomy = await getProductTaxonomy(it.companyId);
+    const unit = taxonomy.units.find((entry) => entry.code === "PCS")!;
+
+    const product = await createProduct({
+      ...actor(it),
+      input: {
+        sku: "SERVICE",
+        name: "Fitting service",
+        description: "",
+        barcode: "",
+        hsnCode: "",
+        categoryId: "",
+        unitId: unit.id,
+        taxRateId: "",
+        purchasePrice: 0,
+        sellingPrice: 500,
+        mrp: 0,
+        isStockTracked: false,
+        openingQuantity: 0,
+        openingRate: 0,
+        minStockLevel: 0,
+      } satisfies ProductInput,
+    });
+
+    expect(product.openingEntry).toBeNull();
+    expect(product.openingDeferredTo).toBeNull();
   }, 90_000);
 
   it("never posts into a month that has been closed", async () => {
