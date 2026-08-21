@@ -42,6 +42,10 @@ import {
   returnableBillLines,
 } from "@/server/returns/purchase-return-service";
 import {
+  ledgerParties,
+  partyStatement,
+} from "@/server/accounting/ledger-service";
+import {
   disconnectTestDb,
   ensurePlatformData,
   purgeTestCompany,
@@ -1343,5 +1347,110 @@ describe("what a credit note does to the allocation cap", () => {
         }),
       }),
     ).rejects.toMatchObject({ code: "OVER_ALLOCATED" });
+  }, 90_000);
+});
+
+/**
+ * Archiving somebody who still owes money.
+ *
+ * Archiving a customer does not settle their debt. The ageing report goes on
+ * listing it, because it is real — and the ledger's party picker dropped them,
+ * so the one document a shop sends somebody disputing a balance could not be
+ * produced for them at all. The books said chase this person and the
+ * application would not say what for.
+ *
+ * `ledgerAccounts` keeps a retired account that still carries history, and says
+ * why in its own comment. The parties beneath it were not doing the same thing.
+ */
+describe("a party archived while still carrying a balance", () => {
+  async function archivedDebtor() {
+    const fixture = await createCompany();
+    const invoice = await raiseInvoice(fixture);
+    const { setPartyArchived } =
+      await import("@/server/master-data/party-service");
+    await setPartyArchived({
+      companyId: fixture.companyId,
+      kind: "CUSTOMER",
+      partyId: fixture.customerId,
+      archived: true,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+    return { fixture, invoice };
+  }
+
+  it("is still listed on the ledger, because the ageing still chases them", async () => {
+    const { fixture } = await archivedDebtor();
+
+    const ageing = await receivablesAgeing(fixture.companyId);
+    expect(Number(ageing.summary.total)).toBeGreaterThan(0);
+
+    const parties = await ledgerParties({
+      companyId: fixture.companyId,
+      partyType: "CUSTOMER",
+    });
+    const listed = parties.find((party) => party.id === fixture.customerId);
+    expect(listed).toBeDefined();
+
+    // And the statement the shop would send them reconciles with that figure,
+    // which is the whole reason the name has to be reachable.
+    const statement = await partyStatement({
+      companyId: fixture.companyId,
+      partyType: "CUSTOMER",
+      partyId: fixture.customerId,
+    });
+    expect(Number(statement.closingBalance)).toBeCloseTo(
+      Number(ageing.summary.total),
+      2,
+    );
+  }, 90_000);
+
+  it("is marked archived, so the name is not a surprise", async () => {
+    const { fixture } = await archivedDebtor();
+
+    const parties = await ledgerParties({
+      companyId: fixture.companyId,
+      partyType: "CUSTOMER",
+    });
+    expect(
+      parties.find((party) => party.id === fixture.customerId)!.archived,
+    ).toBe(true);
+  }, 90_000);
+
+  it("drops an archived party who never traded", async () => {
+    // Archiving still does what archiving is for. It is the history keeping
+    // the name on the list, not the party.
+    const fixture = await createCompany();
+    const { setPartyArchived } =
+      await import("@/server/master-data/party-service");
+    await setPartyArchived({
+      companyId: fixture.companyId,
+      kind: "CUSTOMER",
+      partyId: fixture.customerId,
+      archived: true,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+
+    const parties = await ledgerParties({
+      companyId: fixture.companyId,
+      partyType: "CUSTOMER",
+    });
+    expect(
+      parties.find((party) => party.id === fixture.customerId),
+    ).toBeUndefined();
+  }, 90_000);
+
+  it("leaves a trading customer listed and unmarked", async () => {
+    const fixture = await createCompany();
+    await raiseInvoice(fixture);
+
+    const parties = await ledgerParties({
+      companyId: fixture.companyId,
+      partyType: "CUSTOMER",
+    });
+    const listed = parties.find((party) => party.id === fixture.customerId);
+    expect(listed).toBeDefined();
+    expect(listed!.archived).toBe(false);
   }, 90_000);
 });

@@ -49,7 +49,7 @@ export function LedgerView({
 }: {
   ledger: AccountLedger | null;
   accounts: LedgerAccountOption[];
-  parties: Array<{ id: string; name: string }>;
+  parties: Array<{ id: string; name: string; archived: boolean }>;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -132,7 +132,12 @@ export function LedgerView({
               <SelectItem value="__all__">Everybody</SelectItem>
               {parties.map((party) => (
                 <SelectItem key={party.id} value={party.id}>
-                  {party.name}
+                  {/*
+                    An archived party is here because they still have movement
+                    on the control account. Said plainly, so picking a name
+                    somebody thought they had put away is not a surprise.
+                  */}
+                  {party.archived ? `${party.name} (archived)` : party.name}
                 </SelectItem>
               ))}
             </SelectContent>
