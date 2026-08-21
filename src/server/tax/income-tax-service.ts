@@ -49,6 +49,7 @@ import {
   type AccountBalance,
 } from "@/server/accounting/balances";
 import { getFinancialStatements } from "@/server/accounting/statements-service";
+import { settledByNotes } from "@/server/settlements/outstanding";
 
 /**
  * The income tax working paper.
@@ -597,6 +598,7 @@ async function unpaidBills(params: {
       billDate: { lte: params.to },
     },
     select: {
+      id: true,
       billNumber: true,
       billDate: true,
       totalAmount: true,
@@ -606,9 +608,30 @@ async function unpaidBills(params: {
     orderBy: { billDate: "asc" },
   });
 
+  // Goods sent back are not a debt left unpaid.
+  //
+  // This read the bill as its total less what had been paid, which counts a
+  // debit note as money still owed. A bill returned in full and never paid
+  // therefore appeared here in full — and what appears here is disallowed
+  // expenditure, so the working paper raised taxable income by the value of
+  // goods the shop had sent back and did not owe a rupee for.
+  //
+  // `settledByNotes` is the same function the ageing report, the allocation cap
+  // and the cash projection use. This was the fourth place deciding on its own
+  // what a document still owes, and the only one where deciding wrongly costs
+  // the shop tax rather than a wrong figure on a screen.
+  const debited = await settledByNotes(prisma, {
+    companyId: params.companyId,
+    documentIds: purchases.map((purchase) => purchase.id),
+    side: "PAYABLE",
+  });
+
   const rows: UnpaidBill[] = [];
   for (const purchase of purchases) {
-    const outstanding = subtract(purchase.totalAmount, purchase.paidAmount);
+    const outstanding = subtract(
+      purchase.totalAmount,
+      add(purchase.paidAmount, debited.get(purchase.id) ?? money(0)),
+    );
     if (compare(outstanding, 0) <= 0) continue;
 
     const days = Math.floor(

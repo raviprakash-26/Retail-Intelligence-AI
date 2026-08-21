@@ -748,6 +748,76 @@ describe("bills left unpaid", () => {
     const paper = await paperFor(fixture);
     expect(paper.flagged.unpaidBills).toHaveLength(0);
   });
+
+  /**
+   * Goods sent back are not a debt left unpaid.
+   *
+   * What this list holds is disallowed expenditure under section 43B(h), so it
+   * raises taxable income. Reading a bill as its total less what was paid
+   * counts a debit note as money still owed, and a bill returned in full and
+   * never paid appeared here in full — the working paper adding tax on the
+   * value of goods the shop had sent back and did not owe a rupee for.
+   */
+  async function sendBack(fixture: Fixture, purchaseId: string, units: number) {
+    const { createPurchaseReturn, returnableBillLines } =
+      await import("@/server/returns/purchase-return-service");
+    const lines = await returnableBillLines({
+      companyId: fixture.companyId,
+      purchaseId,
+    });
+    await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId,
+        returnDate: "2026-04-12",
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: units }],
+      },
+    });
+  }
+
+  it("says nothing about a bill returned in full", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    const bill = await buy(fixture, 200, { date: "2026-04-10" });
+    await sendBack(fixture, bill.id, 200);
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.unpaidBills).toHaveLength(0);
+    expect(Number(paper.flagged.unpaidBillsTotal)).toBe(0);
+  });
+
+  it("counts only the part still owed on a bill returned in part", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    const bill = await buy(fixture, 200, { date: "2026-04-10" });
+
+    const before = Number(
+      (await paperFor(fixture)).flagged.unpaidBills[0]?.outstanding ?? 0,
+    );
+    await sendBack(fixture, bill.id, 50);
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.unpaidBills).toHaveLength(1);
+    const after = Number(paper.flagged.unpaidBills[0]?.outstanding ?? 0);
+    // A quarter of the goods went back, so a quarter of the debt went with it.
+    expect(after).toBeCloseTo(before * 0.75, 2);
+  });
+
+  it("still lists a bill nothing has gone back against", async () => {
+    // The ordinary path, which the netting must not quietly clear.
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await buy(fixture, 200, { date: "2026-04-10" });
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.unpaidBills).toHaveLength(1);
+    expect(Number(paper.flagged.unpaidBillsTotal)).toBeGreaterThan(0);
+  });
 });
 
 describe("advance tax", () => {
