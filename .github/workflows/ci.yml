@@ -125,6 +125,10 @@ jobs:
       # throwaway database that lives for the length of this job.
       AUTH_SECRET: 7Qx2mVnB4kRt9YpL6wZcHs3JdEaFgU8vNiObTrXyMlPq
       RATE_LIMIT_ALLOW_IN_MEMORY: "true"
+      # Same reason as the line above. This job sends no email and does not
+      # need to; saying so is what the validator asks for, rather than letting
+      # a browser suite boot on a configuration a real deployment could not.
+      EMAIL_ALLOW_CONSOLE: "true"
       # http is permitted on localhost; the validator rejects it anywhere else.
       APP_URL: http://localhost:3111
       # The browser suite signs in as the seeded demo tenant and the seeded
