@@ -568,3 +568,78 @@ describe("tenant isolation", () => {
     expect(other.revenue.unavailable).toBeNull();
   });
 });
+
+/**
+ * Money a credit note has already cancelled.
+ *
+ * The projection rolls forward commitments that already exist, and a credit
+ * note cancels one as surely as a payment settles it. Only the payments were
+ * counted, so an invoice half credited back was still expected in full and
+ * still landed in a particular week.
+ *
+ * The direction is what makes it worth a test. This figure is offered as a
+ * floor rather than a prediction — the interface says so in those words — and a
+ * floor that counts money nobody is going to send is the one a shop walks off.
+ */
+describe("the cash projection against credit notes", () => {
+  const iso = TODAY.toISOString().slice(0, 10);
+
+  async function creditBack(fixture: Fixture, saleId: string, units: number) {
+    const { createSalesReturn, returnableLines } =
+      await import("@/server/returns/sales-return-service");
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId,
+    });
+    await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId,
+        returnDate: iso,
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: units }],
+      },
+    });
+  }
+
+  const receiptsDue = (projection: { weeks: Array<{ receiptsDue: string }> }) =>
+    projection.weeks.reduce(
+      (total, week) => total + Number(week.receiptsDue),
+      0,
+    );
+
+  it("stops expecting the part that was credited back", async () => {
+    const fixture = await createCompany();
+    const sale = await sell(fixture, { date: iso, amount: 10_000 });
+
+    const before = receiptsDue(await cashFor(fixture));
+    expect(before).toBeCloseTo(10_000, 2);
+
+    await creditBack(fixture, sale.id, 50);
+
+    const after = receiptsDue(await cashFor(fixture));
+    expect(after).toBeCloseTo(5_000, 2);
+  }, 90_000);
+
+  it("drops an invoice credited back in full", async () => {
+    // Not merely reduced: there is nothing left to arrive, so it should not sit
+    // in a week at all.
+    const fixture = await createCompany();
+    const sale = await sell(fixture, { date: iso, amount: 10_000 });
+    await creditBack(fixture, sale.id, 100);
+
+    expect(receiptsDue(await cashFor(fixture))).toBeCloseTo(0, 2);
+  }, 90_000);
+
+  it("leaves an invoice nothing has come back against alone", async () => {
+    // The ordinary path, which the netting must not quietly reduce.
+    const fixture = await createCompany();
+    await sell(fixture, { date: iso, amount: 10_000 });
+
+    expect(receiptsDue(await cashFor(fixture))).toBeCloseTo(10_000, 2);
+  }, 90_000);
+});

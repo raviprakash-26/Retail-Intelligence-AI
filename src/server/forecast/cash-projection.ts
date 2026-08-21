@@ -16,6 +16,7 @@ import {
   NATURAL_SIDE_FOR_TYPE,
   type AccountBalance,
 } from "@/server/accounting/balances";
+import { settledByNotes } from "@/server/settlements/outstanding";
 
 /**
  * What the cash position looks like over the next few weeks.
@@ -143,7 +144,20 @@ async function latenessInDays(params: {
   };
 }
 
-/** Open invoices or bills, by the date they fall due. */
+/**
+ * Open invoices or bills, by the date they fall due.
+ *
+ * A credit note settles a document as surely as a payment does, and this was
+ * counting only the payments. So an invoice half credited back was still
+ * expected in full, and money the customer no longer owes was still arriving in
+ * a particular week. That is the wrong direction for this figure in particular:
+ * the projection is offered as a floor rather than a prediction, and a floor
+ * that counts money nobody is going to send is the one a shop walks off.
+ *
+ * `settledByNotes` is the same function the ageing report and the allocation
+ * cap use, for the same reason they share it — three places deciding
+ * separately what a document still owes is three chances to decide differently.
+ */
 async function dueSchedule(params: {
   companyId: string;
   kind: "receivable" | "payable";
@@ -152,16 +166,25 @@ async function dueSchedule(params: {
     const sales = await prisma.sale.findMany({
       where: { companyId: params.companyId, status: DocumentStatus.POSTED },
       select: {
+        id: true,
         invoiceDate: true,
         dueDate: true,
         totalAmount: true,
         paidAmount: true,
       },
     });
+    const credited = await settledByNotes(prisma, {
+      companyId: params.companyId,
+      documentIds: sales.map((sale) => sale.id),
+      side: "RECEIVABLE",
+    });
     return sales
       .map((sale) => ({
         dueDate: sale.dueDate ?? sale.invoiceDate,
-        outstanding: subtract(sale.totalAmount, sale.paidAmount),
+        outstanding: subtract(
+          sale.totalAmount,
+          add(sale.paidAmount, credited.get(sale.id) ?? money(0)),
+        ),
       }))
       .filter((row) => compare(row.outstanding, 0) > 0);
   }
@@ -169,16 +192,25 @@ async function dueSchedule(params: {
   const purchases = await prisma.purchase.findMany({
     where: { companyId: params.companyId, status: DocumentStatus.POSTED },
     select: {
+      id: true,
       billDate: true,
       dueDate: true,
       totalAmount: true,
       paidAmount: true,
     },
   });
+  const debited = await settledByNotes(prisma, {
+    companyId: params.companyId,
+    documentIds: purchases.map((purchase) => purchase.id),
+    side: "PAYABLE",
+  });
   return purchases
     .map((purchase) => ({
       dueDate: purchase.dueDate ?? purchase.billDate,
-      outstanding: subtract(purchase.totalAmount, purchase.paidAmount),
+      outstanding: subtract(
+        purchase.totalAmount,
+        add(purchase.paidAmount, debited.get(purchase.id) ?? money(0)),
+      ),
     }))
     .filter((row) => compare(row.outstanding, 0) > 0);
 }
