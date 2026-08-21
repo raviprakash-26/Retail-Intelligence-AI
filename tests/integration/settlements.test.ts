@@ -34,6 +34,14 @@ import {
   SettlementError,
 } from "@/server/settlements/settlement-service";
 import {
+  createSalesReturn,
+  returnableLines,
+} from "@/server/returns/sales-return-service";
+import {
+  createPurchaseReturn,
+  returnableBillLines,
+} from "@/server/returns/purchase-return-service";
+import {
   disconnectTestDb,
   ensurePlatformData,
   purgeTestCompany,
@@ -1020,4 +1028,164 @@ describe("reading settlements", () => {
       }),
     ).toHaveLength(0);
   });
+});
+
+/**
+ * Credit and debit notes, which settle a document as surely as money does.
+ *
+ * "Outstanding is total minus settled" was written when a payment was the only
+ * way an invoice got settled. Returns arrived later and nothing revisited what
+ * settled meant, so a credit note came off the receivable account and stayed on
+ * the ageing report — the subsidiary ledger and its control account disagreeing
+ * by the value of every credit note raised. What makes that worse than a wrong
+ * number on a screen is where the number goes: the reminder the shop sends its
+ * customer, and the cap on how much a receipt may be allocated to the invoice.
+ *
+ * The pair of cases per side is the point. A return credited to the account
+ * reduces what is owed; a return refunded in cash does not, because the money
+ * went back over the counter and the invoice still stands. Reading the ledger
+ * rather than the return's total is what tells those apart.
+ */
+describe("what a credit note does to the ageing", () => {
+  it("takes the credited amount off what the customer owes", async () => {
+    const fixture = await createCompany();
+    const invoice = await raiseInvoice(fixture);
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: invoice.id,
+    });
+
+    await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: invoice.id,
+        returnDate: new Date().toISOString().slice(0, 10),
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+      },
+    });
+
+    // The ageing has to agree with the account it summarises. Asserted against
+    // the control account rather than a literal, so the two cannot drift apart
+    // without this failing.
+    const receivable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+    );
+    const ageing = await receivablesAgeing(fixture.companyId);
+    expect(Number(ageing.summary.total)).toBeCloseTo(Number(receivable), 2);
+
+    // And the receipt form must not offer to collect more than that: the
+    // figure it caps an allocation with is this one.
+    const open = await openInvoices(prisma, {
+      companyId: fixture.companyId,
+      customerId: fixture.customerId,
+    });
+    expect(Number(open[0]!.outstanding)).toBeCloseTo(Number(receivable), 2);
+  }, 90_000);
+
+  it("leaves the invoice standing when the customer was refunded in cash", async () => {
+    // The other half of the rule, and the one a careless fix breaks: cash back
+    // over the counter never touched the receivable, so the invoice is still
+    // owed in full.
+    const fixture = await createCompany();
+    const invoice = await raiseInvoice(fixture);
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: invoice.id,
+    });
+
+    const before = await receivablesAgeing(fixture.companyId);
+
+    await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: invoice.id,
+        returnDate: new Date().toISOString().slice(0, 10),
+        reason: "",
+        refundMode: "CASH",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+      },
+    });
+
+    const after = await receivablesAgeing(fixture.companyId);
+    expect(Number(after.summary.total)).toBeCloseTo(
+      Number(before.summary.total),
+      2,
+    );
+
+    const receivable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+    );
+    expect(Number(after.summary.total)).toBeCloseTo(Number(receivable), 2);
+  }, 90_000);
+
+  it("takes a debit note off what the business owes its supplier", async () => {
+    const fixture = await createCompany();
+    const bill = await raiseBill(fixture);
+    const lines = await returnableBillLines({
+      companyId: fixture.companyId,
+      purchaseId: bill.id,
+    });
+
+    await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: new Date().toISOString().slice(0, 10),
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+      },
+    });
+
+    // Payables are a credit balance, so the control account is negative here.
+    const payable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_PAYABLE,
+    );
+    const ageing = await payablesAgeing(fixture.companyId);
+    expect(Number(ageing.summary.total)).toBeCloseTo(-Number(payable), 2);
+
+    const open = await openBills(prisma, {
+      companyId: fixture.companyId,
+      supplierId: fixture.supplierId,
+    });
+    expect(Number(open[0]!.outstanding)).toBeCloseTo(-Number(payable), 2);
+  }, 90_000);
+
+  it("still reports an invoice nothing has come back against", async () => {
+    // The ordinary path, which the netting must not quietly reduce.
+    const fixture = await createCompany();
+    const invoice = await raiseInvoice(fixture);
+
+    const receivable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+    );
+    const ageing = await receivablesAgeing(fixture.companyId);
+    expect(Number(ageing.summary.total)).toBeCloseTo(Number(receivable), 2);
+    expect(Number(ageing.summary.total)).toBeGreaterThan(0);
+
+    const open = await openInvoices(prisma, {
+      companyId: fixture.companyId,
+      customerId: fixture.customerId,
+    });
+    expect(open).toHaveLength(1);
+    expect(Number(open[0]!.outstanding)).toBeCloseTo(
+      Number(invoice.totalAmount),
+      2,
+    );
+  }, 90_000);
 });

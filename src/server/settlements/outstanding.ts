@@ -1,7 +1,14 @@
 import "server-only";
-import { DocumentStatus } from "@prisma/client";
+import { DocumentStatus, JournalStatus } from "@prisma/client";
 import { prisma, type DbClient } from "@/lib/db";
-import { subtract, toStorageString } from "@/lib/money";
+import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
+import {
+  add,
+  money,
+  subtract,
+  toStorageString,
+  type Decimal,
+} from "@/lib/money";
 import { summariseAgeing, type AgeingSummary } from "@/lib/settlements/ageing";
 
 /**
@@ -26,6 +33,122 @@ export type OpenDocument = {
 
 const isoDay = (date: Date) => date.toISOString().slice(0, 10);
 
+/**
+ * What credit and debit notes have already taken off each document.
+ *
+ * "Total minus settled" above was written when a payment was the only way an
+ * invoice got settled. A return is another: crediting four thousand rupees of
+ * goods back to a customer's account settles four thousand rupees of what they
+ * owe, exactly as a receipt would. Nothing subtracted it, so the ageing went on
+ * reporting the whole invoice while the receivable account behind it had
+ * already come down — the subsidiary ledger and its control account disagreeing
+ * by the value of every credit note ever raised. A shop reading that chases a
+ * customer for money the books do not say they owe.
+ *
+ * **Read from the entry the return posted, not from its total.** A return
+ * credited to the customer's account reduces what they owe; a return refunded
+ * over the counter in cash does not — the money went back, and the invoice
+ * still stands in full. Which of the two happened is decided by the refund mode,
+ * and the document does not keep it: the only record is which account the
+ * return credited. So this asks the ledger. It is also the reason the figure
+ * cannot drift out of step with the control account — it *is* the control
+ * account's movement.
+ */
+async function settledByNotes(
+  client: DbClient,
+  params: {
+    companyId: string;
+    documentIds: readonly string[];
+    side: "RECEIVABLE" | "PAYABLE";
+  },
+): Promise<Map<string, string>> {
+  const empty = new Map<string, string>();
+  if (params.documentIds.length === 0) return empty;
+
+  const notes =
+    params.side === "RECEIVABLE"
+      ? await client.salesReturn.findMany({
+          where: {
+            companyId: params.companyId,
+            saleId: { in: [...params.documentIds] },
+            status: DocumentStatus.POSTED,
+            journalEntryId: { not: null },
+          },
+          select: { saleId: true, journalEntryId: true },
+        })
+      : (
+          await client.purchaseReturn.findMany({
+            where: {
+              companyId: params.companyId,
+              purchaseId: { in: [...params.documentIds] },
+              status: DocumentStatus.POSTED,
+              journalEntryId: { not: null },
+            },
+            select: { purchaseId: true, journalEntryId: true },
+          })
+        ).map((note) => ({
+          saleId: note.purchaseId,
+          journalEntryId: note.journalEntryId,
+        }));
+
+  if (notes.length === 0) return empty;
+
+  const control = await client.account.findFirst({
+    where: {
+      companyId: params.companyId,
+      systemKey:
+        params.side === "RECEIVABLE"
+          ? SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE
+          : SYSTEM_ACCOUNT.ACCOUNTS_PAYABLE,
+    },
+    select: { id: true },
+  });
+  if (!control) return empty;
+
+  const lines = await client.journalLine.findMany({
+    where: {
+      companyId: params.companyId,
+      accountId: control.id,
+      status: JournalStatus.POSTED,
+      journalEntryId: {
+        in: notes.flatMap((note) =>
+          note.journalEntryId ? [note.journalEntryId] : [],
+        ),
+      },
+    },
+    select: { journalEntryId: true, debit: true, credit: true },
+  });
+
+  // A credit note credits the receivable; a debit note debits the payable.
+  // Either way what is wanted is the amount the control account came down by.
+  const byEntry = new Map<string, Decimal>();
+  for (const line of lines) {
+    const movement =
+      params.side === "RECEIVABLE"
+        ? subtract(line.credit, line.debit)
+        : subtract(line.debit, line.credit);
+    byEntry.set(
+      line.journalEntryId,
+      add(byEntry.get(line.journalEntryId) ?? money(0), movement),
+    );
+  }
+
+  const byDocument = new Map<string, Decimal>();
+  for (const note of notes) {
+    if (!note.saleId || !note.journalEntryId) continue;
+    const settled = byEntry.get(note.journalEntryId);
+    if (!settled) continue;
+    byDocument.set(
+      note.saleId,
+      add(byDocument.get(note.saleId) ?? money(0), settled),
+    );
+  }
+
+  return new Map(
+    [...byDocument].map(([id, amount]) => [id, toStorageString(amount)]),
+  );
+}
+
 /** Invoices a customer has not fully paid, oldest due first. */
 export async function openInvoices(
   client: DbClient,
@@ -48,11 +171,18 @@ export async function openInvoices(
     orderBy: [{ dueDate: "asc" }, { invoiceDate: "asc" }],
   });
 
+  const credited = await settledByNotes(client, {
+    companyId: params.companyId,
+    documentIds: sales.map((sale) => sale.id),
+    side: "RECEIVABLE",
+  });
+
   const now = new Date();
   return sales
     .map((sale) => {
       const due = sale.dueDate ?? sale.invoiceDate;
-      const outstanding = subtract(sale.totalAmount, sale.paidAmount);
+      const settled = add(sale.paidAmount, credited.get(sale.id) ?? money(0));
+      const outstanding = subtract(sale.totalAmount, settled);
       return {
         id: sale.id,
         number: sale.invoiceNumber,
@@ -93,11 +223,21 @@ export async function openBills(
     orderBy: [{ dueDate: "asc" }, { billDate: "asc" }],
   });
 
+  const debited = await settledByNotes(client, {
+    companyId: params.companyId,
+    documentIds: purchases.map((purchase) => purchase.id),
+    side: "PAYABLE",
+  });
+
   const now = new Date();
   return purchases
     .map((purchase) => {
       const due = purchase.dueDate ?? purchase.billDate;
-      const outstanding = subtract(purchase.totalAmount, purchase.paidAmount);
+      const settled = add(
+        purchase.paidAmount,
+        debited.get(purchase.id) ?? money(0),
+      );
+      const outstanding = subtract(purchase.totalAmount, settled);
       return {
         id: purchase.id,
         number: purchase.supplierBillNo
@@ -160,6 +300,7 @@ export async function receivablesAgeing(
       customerId: { not: null },
     },
     select: {
+      id: true,
       customerId: true,
       invoiceDate: true,
       dueDate: true,
@@ -169,13 +310,22 @@ export async function receivablesAgeing(
     },
   });
 
+  const credited = await settledByNotes(prisma, {
+    companyId,
+    documentIds: sales.map((sale) => sale.id),
+    side: "RECEIVABLE",
+  });
+
   const now = new Date();
   const documents = sales
     .map((sale) => ({
       partyId: sale.customerId ?? "",
       partyName: sale.customer?.name ?? "—",
       dueDate: sale.dueDate ?? sale.invoiceDate,
-      outstanding: subtract(sale.totalAmount, sale.paidAmount),
+      outstanding: subtract(
+        sale.totalAmount,
+        add(sale.paidAmount, credited.get(sale.id) ?? money(0)),
+      ),
     }))
     .filter((document) => document.outstanding.greaterThan(0));
 
@@ -194,6 +344,7 @@ export async function payablesAgeing(companyId: string): Promise<LedgerAgeing> {
       supplierId: { not: null },
     },
     select: {
+      id: true,
       supplierId: true,
       billDate: true,
       dueDate: true,
@@ -203,13 +354,22 @@ export async function payablesAgeing(companyId: string): Promise<LedgerAgeing> {
     },
   });
 
+  const debited = await settledByNotes(prisma, {
+    companyId,
+    documentIds: purchases.map((purchase) => purchase.id),
+    side: "PAYABLE",
+  });
+
   const now = new Date();
   const documents = purchases
     .map((purchase) => ({
       partyId: purchase.supplierId ?? "",
       partyName: purchase.supplier?.name ?? "—",
       dueDate: purchase.dueDate ?? purchase.billDate,
-      outstanding: subtract(purchase.totalAmount, purchase.paidAmount),
+      outstanding: subtract(
+        purchase.totalAmount,
+        add(purchase.paidAmount, debited.get(purchase.id) ?? money(0)),
+      ),
     }))
     .filter((document) => document.outstanding.greaterThan(0));
 
