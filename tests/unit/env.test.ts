@@ -116,6 +116,49 @@ describe("a driver without what it needs", () => {
     expect(() => assertEnv()).toThrow(/RAZORPAY_KEY_ID|RAZORPAY_KEY_SECRET/);
   });
 
+  /**
+   * The webhook secret is not an extra.
+   *
+   * A key id and secret are enough to open a checkout, so an installation
+   * without the webhook secret started cleanly, reported payments as
+   * available, and took real money — and then the webhook that confirms the
+   * payment answered 404, because the handler will not verify what it has no
+   * secret to verify against. The client says as much in its own comment: the
+   * plan moves when the provider tells the server so, and nothing else moves
+   * it. So the customer was charged and their plan stayed where it was.
+   */
+  it("refuses Razorpay with keys but no webhook secret", () => {
+    withEnv({
+      PAYMENTS_DRIVER: "razorpay",
+      RAZORPAY_KEY_ID: "rzp_live_example",
+      RAZORPAY_KEY_SECRET: "x".repeat(24),
+      RAZORPAY_WEBHOOK_SECRET: undefined,
+    });
+    expect(() => assertEnv()).toThrow(/RAZORPAY_WEBHOOK_SECRET/);
+  });
+
+  it("says why, because a missing webhook is not obvious from the symptom", () => {
+    // The symptom is a customer being charged and nothing happening, which
+    // looks like a provider fault rather than a missing variable.
+    withEnv({
+      PAYMENTS_DRIVER: "razorpay",
+      RAZORPAY_KEY_ID: "rzp_live_example",
+      RAZORPAY_KEY_SECRET: "x".repeat(24),
+      RAZORPAY_WEBHOOK_SECRET: undefined,
+    });
+    expect(() => assertEnv()).toThrow(/charged and nothing happens/);
+  });
+
+  it("accepts Razorpay configured all the way through", () => {
+    withEnv({
+      PAYMENTS_DRIVER: "razorpay",
+      RAZORPAY_KEY_ID: "rzp_live_example",
+      RAZORPAY_KEY_SECRET: "x".repeat(24),
+      RAZORPAY_WEBHOOK_SECRET: "y".repeat(24),
+    });
+    expect(() => assertEnv()).not.toThrow();
+  });
+
   it("refuses SMTP with no server", () => {
     withEnv({ EMAIL_DRIVER: "smtp", SMTP_URL: undefined });
     expect(() => assertEnv()).toThrow(/SMTP_URL/);

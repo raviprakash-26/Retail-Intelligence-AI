@@ -2061,6 +2061,15 @@ paying, the page says the payment was submitted and the plan updates when it is
 confirmed. It does not say "you are on the Business plan", because at that
 moment nobody knows.
 
+**Which is why the webhook secret is required rather than optional.** The key id
+and secret are enough to open a checkout, so an installation that had those and
+not the webhook secret started cleanly, showed payments as available, and took
+real money — and then the webhook answered 404, because the handler will not
+verify what it has no secret to verify against. The customer was charged and
+their plan stayed where it was. Nothing said so at boot, which made a missing
+variable look like a provider fault. Setting `PAYMENTS_DRIVER=razorpay` now
+requires all three, and the application refuses to start without them.
+
 **Four rules in the webhook handler**, each guarding a different failure:
 
 |                       |                                                                                                      |

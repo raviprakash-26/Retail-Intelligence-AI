@@ -157,6 +157,26 @@ const serverSchema = z
       const why = "when PAYMENTS_DRIVER is razorpay";
       needs("RAZORPAY_KEY_ID", value.RAZORPAY_KEY_ID, why);
       needs("RAZORPAY_KEY_SECRET", value.RAZORPAY_KEY_SECRET, why);
+      // The webhook is not an extra: it is the only thing that moves a plan.
+      //
+      // The key id and secret are enough to open a checkout, so an
+      // installation without this one started cleanly, reported payments as
+      // available, and took real money — and then the webhook that confirms it
+      // answered 404, because the handler will not verify what it has no secret
+      // to verify against. Nothing said so at boot. The customer paid and the
+      // plan stayed where it was, which is the worst way for a payment
+      // integration to be half-configured.
+      if (!value.RAZORPAY_WEBHOOK_SECRET) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["RAZORPAY_WEBHOOK_SECRET"],
+          message:
+            "RAZORPAY_WEBHOOK_SECRET is required when PAYMENTS_DRIVER is razorpay. " +
+            "A plan only moves when the provider's webhook confirms the payment, " +
+            "so without it a customer is charged and nothing happens. Take it from " +
+            "the webhook you registered in the Razorpay dashboard.",
+        });
+      }
     }
 
     if (value.PAYMENTS_DRIVER === "stripe") {
