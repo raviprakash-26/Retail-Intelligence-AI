@@ -1189,3 +1189,159 @@ describe("what a credit note does to the ageing", () => {
     );
   }, 90_000);
 });
+
+/**
+ * The allocation cap, once a credit note exists.
+ *
+ * "Allocation never exceeds what is owed" is one of the two ideas this module
+ * is built on, and it read *owed* as total minus payments. A credit note
+ * settles a document as surely as money does, so an invoice of 1,180 carrying
+ * a 472 credit note would accept a receipt for the whole 1,180 — 472 more than
+ * the customer owed — and put their account quietly into credit.
+ *
+ * Netting the notes into the ageing report fixed what the screen offered and
+ * left what the server would accept where it was, so the two came apart. That
+ * is the worse half of the pair: the cap is what catches a keying error at the
+ * till, and a cap the form applies but the server does not is not a cap.
+ */
+describe("what a credit note does to the allocation cap", () => {
+  async function invoiceWithCreditNote() {
+    const fixture = await createCompany();
+    const invoice = await raiseInvoice(fixture);
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: invoice.id,
+    });
+
+    await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: invoice.id,
+        returnDate: new Date().toISOString().slice(0, 10),
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+      },
+    });
+
+    // Taken from the reader rather than computed here, so the guard and the
+    // screen are asserted to agree rather than assumed to.
+    const open = await openInvoices(prisma, {
+      companyId: fixture.companyId,
+      customerId: fixture.customerId,
+    });
+    return { fixture, invoice, owed: Number(open[0]!.outstanding) };
+  }
+
+  it("refuses a receipt for more than the invoice still owes", async () => {
+    const { fixture, invoice, owed } = await invoiceWithCreditNote();
+    const full = Number(invoice.totalAmount);
+    expect(full).toBeGreaterThan(owed);
+
+    await expect(
+      createReceipt({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        input: receiptInput({
+          partyId: fixture.customerId,
+          amount: full,
+          allocations: [{ documentId: invoice.id, amount: full }],
+        }),
+      }),
+    ).rejects.toMatchObject({ code: "OVER_ALLOCATED" });
+
+    // Refused before anything was written: the invoice is untouched.
+    const untouched = await prisma.sale.findUniqueOrThrow({
+      where: { id: invoice.id },
+      select: { paidAmount: true },
+    });
+    expect(Number(untouched.paidAmount)).toBe(0);
+  }, 90_000);
+
+  it("names the amount actually left, not the invoice total", async () => {
+    // The message is the whole use of the cap at a till: it has to say what
+    // may be taken, or the person is left guessing at the counter.
+    const { fixture, invoice, owed } = await invoiceWithCreditNote();
+    const full = Number(invoice.totalAmount);
+
+    await expect(
+      createReceipt({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        input: receiptInput({
+          partyId: fixture.customerId,
+          amount: full,
+          allocations: [{ documentId: invoice.id, amount: full }],
+        }),
+      }),
+    ).rejects.toThrow(new RegExp(owed.toFixed(2).replace(".", "\\.")));
+  }, 90_000);
+
+  it("still takes exactly what is left after the credit note", async () => {
+    // The ordinary path, which a tighter cap must not catch up in it.
+    const { fixture, invoice, owed } = await invoiceWithCreditNote();
+
+    const receipt = await createReceipt({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: receiptInput({
+        partyId: fixture.customerId,
+        amount: owed,
+        allocations: [{ documentId: invoice.id, amount: owed }],
+      }),
+    });
+    expect(Number(receipt.unallocated)).toBe(0);
+
+    // Settled in full: the receivable stands at nil, so the cap let through
+    // exactly what the invoice owed and no less.
+    const receivable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+    );
+    expect(Number(receivable)).toBeCloseTo(0, 2);
+    await assertTrialBalances(fixture.companyId);
+  }, 90_000);
+
+  it("refuses a payment for more than a bill owes after a debit note", async () => {
+    const fixture = await createCompany();
+    const bill = await raiseBill(fixture);
+    const lines = await returnableBillLines({
+      companyId: fixture.companyId,
+      purchaseId: bill.id,
+    });
+
+    await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: new Date().toISOString().slice(0, 10),
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+      },
+    });
+
+    const full = Number(bill.totalAmount);
+    await expect(
+      createPayment({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        input: paymentInput({
+          partyId: fixture.supplierId,
+          amount: full,
+          allocations: [{ documentId: bill.id, amount: full }],
+        }),
+      }),
+    ).rejects.toMatchObject({ code: "OVER_ALLOCATED" });
+  }, 90_000);
+});

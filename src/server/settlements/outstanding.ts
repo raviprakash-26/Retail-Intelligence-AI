@@ -53,8 +53,15 @@ const isoDay = (date: Date) => date.toISOString().slice(0, 10);
  * return credited. So this asks the ledger. It is also the reason the figure
  * cannot drift out of step with the control account — it *is* the control
  * account's movement.
+ *
+ * Exported because the allocation guard in `settlement-service` has to answer
+ * the same question and must answer it the same way. Reporting what a document
+ * owes and refusing to take more than it owes are one definition, and the two
+ * going out of step is precisely how a receipt came to be accepted for more
+ * than an invoice was owed. It takes a client so the guard can pass its
+ * transaction and read the figure under the same lock as everything else.
  */
-async function settledByNotes(
+export async function settledByNotes(
   client: DbClient,
   params: {
     companyId: string;
