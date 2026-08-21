@@ -261,7 +261,13 @@ export async function createProduct(params: {
   userId: string;
   actorEmail: string;
   input: ProductInput;
-}): Promise<{ id: string; sku: string; openingEntry: string | null }> {
+}): Promise<{
+  id: string;
+  sku: string;
+  openingEntry: string | null;
+  /** See the same field on `createParty`. */
+  openingDeferredTo: string | null;
+}> {
   return prisma.$transaction(async (tx) => {
     await assertSkuIsFree(tx, params.companyId, params.input.sku);
     const references = await resolveReferences(
@@ -295,6 +301,7 @@ export async function createProduct(params: {
     });
 
     let openingEntry: string | null = null;
+    let openingDeferredTo: string | null = null;
 
     if (!isZero(stockValue)) {
       const opening = await resolveOpeningContext(tx, params.companyId);
@@ -355,6 +362,10 @@ export async function createProduct(params: {
         createdById: params.userId,
       });
       openingEntry = entry?.entryNumber ?? null;
+      openingDeferredTo =
+        opening.deferred && entry
+          ? opening.date.toISOString().slice(0, 10)
+          : null;
     }
 
     await recordAuditLog(
@@ -377,7 +388,12 @@ export async function createProduct(params: {
       tx,
     );
 
-    return { id: product.id, sku: product.sku, openingEntry };
+    return {
+      id: product.id,
+      sku: product.sku,
+      openingEntry,
+      openingDeferredTo,
+    };
   });
 }
 

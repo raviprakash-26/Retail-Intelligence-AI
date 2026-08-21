@@ -311,7 +311,17 @@ export async function createParty(params: {
   userId: string;
   actorEmail: string;
   input: CustomerInput | SupplierInput;
-}): Promise<{ id: string; code: string; openingEntry: string | null }> {
+}): Promise<{
+  id: string;
+  code: string;
+  openingEntry: string | null;
+  /**
+   * Set when the opening balance could not be dated to the start of the year
+   * because that month is closed, so the screen can say so rather than leaving
+   * the figure quietly sitting on a date nobody chose.
+   */
+  openingDeferredTo: string | null;
+}> {
   const config = PARTY_KIND[params.kind];
 
   return prisma.$transaction(async (tx) => {
@@ -411,6 +421,10 @@ export async function createParty(params: {
       id: created.id,
       code: created.code,
       openingEntry: entry?.entryNumber ?? null,
+      openingDeferredTo:
+        opening?.deferred && entry
+          ? opening.date.toISOString().slice(0, 10)
+          : null,
     };
   });
 }

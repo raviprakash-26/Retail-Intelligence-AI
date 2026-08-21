@@ -1,6 +1,7 @@
 "use client";
 
 import type { Control, FieldValues, Path } from "react-hook-form";
+import { toast } from "sonner";
 import { AmountInput } from "@/components/ui/amount-input";
 import {
   FormControl,
@@ -16,6 +17,31 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatDate } from "@/lib/format";
+
+/**
+ * Says so when an opening balance could not be dated to the start of the year.
+ *
+ * The books put it at the earliest month still open, which is the only date
+ * they can honestly hold it once April has been closed. That is a decision the
+ * product makes on the shop's behalf, so the shop is told: a figure quietly
+ * sitting on a date nobody chose is how a balance sheet stops being trusted.
+ *
+ * Silent on the ordinary path — `openingDeferredTo` is null whenever the
+ * balance landed where the form implied it would, which is nearly always.
+ */
+export function announceDeferredOpening(dated: string | null, subject: string) {
+  if (!dated) return;
+
+  // A bare "2026-07-01" parses as UTC midnight, which renders as the previous
+  // day for any browser behind UTC. Midday has no such edge.
+  const shown = formatDate(new Date(`${dated}T12:00:00`), { style: "medium" });
+
+  toast.info(`${subject} added, with its opening balance dated ${shown}`, {
+    description:
+      "The start of the financial year falls in a closed month, so the balance was placed in the earliest month still open.",
+  });
+}
 
 /**
  * Opening balance for a customer or supplier.

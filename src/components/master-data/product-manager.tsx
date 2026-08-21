@@ -17,6 +17,7 @@ import {
   ListPagination,
   ListToolbar,
 } from "@/components/master-data/list-toolbar";
+import { announceDeferredOpening } from "@/components/master-data/opening-balance-fields";
 import { TaxonomyDialog } from "@/components/master-data/taxonomy-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -415,10 +416,19 @@ function ProductDialog({
   const openingValue = (openingQuantity || 0) * (openingRate || 0);
 
   async function onSubmit(values: ProductInput) {
-    const result: ActionResult<unknown> = editing
-      ? await updateProductAction(editing.id, values)
-      : await createProductAction(values);
-    if (!applyResult(result)) return;
+    // Kept apart rather than merged into one `result`: only creating a product
+    // carries opening stock, so only that result can report the opening entry
+    // having been dated forward.
+    if (editing) {
+      const result = await updateProductAction(editing.id, values);
+      if (!applyResult(result as ActionResult<unknown>)) return;
+    } else {
+      const result = await createProductAction(values);
+      if (!applyResult(result as ActionResult<unknown>)) return;
+      if (result.ok) {
+        announceDeferredOpening(result.data.openingDeferredTo, values.name);
+      }
+    }
     onSaved();
   }
 
