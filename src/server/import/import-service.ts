@@ -13,6 +13,11 @@ import {
   productSchema,
   supplierSchema,
 } from "@/lib/validation/master-data";
+import { isWithinLimit } from "@/lib/billing/entitlements";
+import {
+  entitlementsFor,
+  getUsage,
+} from "@/server/billing/entitlement-service";
 import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
@@ -193,6 +198,31 @@ export async function commitImport(params: {
     throw new ImportError(
       "This file still has rows with problems. Check it again before bringing it in.",
     );
+  }
+
+  // The plan allowance, against the whole file rather than one row at a time.
+  //
+  // `billingRefusal` asks whether there is room for *one more*, which is the
+  // right question for a form and the wrong one for a file: a shop with fifty
+  // slots left passed that check and then brought in four hundred products.
+  // Only this knows how many rows are about to be written, so the arithmetic
+  // belongs here even though every other billing check sits in an action.
+  //
+  // The whole file is refused rather than the first fifty taken. A partial
+  // import leaves somebody guessing which rows landed, and the row that did
+  // not is the one with the opening balance on it.
+  if (params.dataset === "products" && prepared.length > 0) {
+    const [entitlements, usage] = await Promise.all([
+      entitlementsFor(params.companyId),
+      getUsage(params.companyId),
+    ]);
+    const allowance = entitlements.limits.productsPerCompany;
+    const afterwards = usage.productsPerCompany + prepared.length - 1;
+    if (!isWithinLimit(allowance, afterwards)) {
+      throw new ImportError(
+        `This file would take you to ${usage.productsPerCompany + prepared.length} products and your plan allows ${allowance}. Remove some rows, or move to a larger plan.`,
+      );
+    }
   }
 
   const failed: RowIssue[] = [];
