@@ -19,6 +19,7 @@ import type {
 } from "@/lib/validation/settlements";
 import { postJournalEntry } from "@/server/accounting/post-journal-entry";
 import { recordAuditLog } from "@/server/audit/audit-log";
+import { settledByNotes } from "./outstanding";
 import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { reversePostedEntry } from "@/server/documents/reversal";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
@@ -103,6 +104,17 @@ type AllocationTarget = {
   number: string;
   total: Prisma.Decimal;
   paid: Prisma.Decimal;
+  /**
+   * What credit or debit notes have already taken off it.
+   *
+   * Money is not the only thing that settles a document. Without this the
+   * guard below read "actually still owes" as total minus payments, and an
+   * invoice of 1,180 carrying a 472 credit note would accept a receipt for
+   * the whole 1,180 — 472 more than the customer owed — and quietly put their
+   * account into credit. The screen already refused it; only the server did
+   * not, and the server is the half that decides.
+   */
+  credited: ReturnType<typeof money>;
 };
 
 /**
@@ -144,7 +156,10 @@ function validateAllocations(
       );
     }
 
-    const outstanding = subtract(target.total, target.paid);
+    const outstanding = subtract(
+      target.total,
+      add(target.paid, target.credited),
+    );
     if (compare(amount, outstanding) > 0) {
       throw new SettlementError(
         `${target.number} only has ${outstanding.toFixed(2)} outstanding; ${amount.toFixed(2)} was allocated to it.`,
@@ -251,6 +266,14 @@ export async function createReceipt(params: {
         })
       : [];
 
+    // Read on `tx`, so what a credit note has taken off the invoice is seen
+    // under the same lock as the payments against it.
+    const credited = await settledByNotes(tx, {
+      companyId,
+      documentIds: sales.map((sale) => sale.id),
+      side: "RECEIVABLE",
+    });
+
     const targets = new Map<string, AllocationTarget>(
       sales.map((sale) => [
         sale.id,
@@ -259,6 +282,7 @@ export async function createReceipt(params: {
           number: sale.invoiceNumber,
           total: sale.totalAmount,
           paid: sale.paidAmount,
+          credited: money(credited.get(sale.id) ?? 0),
         },
       ]),
     );
@@ -463,6 +487,12 @@ export async function createPayment(params: {
         })
       : [];
 
+    const debited = await settledByNotes(tx, {
+      companyId,
+      documentIds: purchases.map((purchase) => purchase.id),
+      side: "PAYABLE",
+    });
+
     const targets = new Map<string, AllocationTarget>(
       purchases.map((purchase) => [
         purchase.id,
@@ -471,6 +501,7 @@ export async function createPayment(params: {
           number: purchase.billNumber,
           total: purchase.totalAmount,
           paid: purchase.paidAmount,
+          credited: money(debited.get(purchase.id) ?? 0),
         },
       ]),
     );

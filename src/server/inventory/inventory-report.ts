@@ -46,6 +46,17 @@ export type StockRow = {
   /** Below the reorder level, or out entirely. */
   status: "OUT" | "LOW" | "OK";
   lastMovementAt: Date | null;
+  /**
+   * Discontinued, but still holding stock.
+   *
+   * An archived product is normally left out of this list, which is what
+   * archiving is for. One still carrying stock is a different thing: the goods
+   * are on the shelf and in the Inventory account, so leaving them out made the
+   * stock report disagree with the balance sheet by their value. It stays until
+   * the stock reaches nil, marked, so nobody has to wonder why a line they
+   * discontinued is still here.
+   */
+  archived: boolean;
 };
 
 export type StockSummary = {
@@ -99,7 +110,23 @@ export async function stockRows(companyId: string): Promise<StockRow[]> {
     where: {
       companyId,
       isStockTracked: true,
-      archivedAt: null,
+      // Archiving hides a discontinued line, and should. What it must not hide
+      // is stock the business still owns: the goods are on the shelf and their
+      // value is in the Inventory account, so dropping them here made this
+      // report disagree with the balance sheet by exactly that amount — while
+      // `reconcileStock`, which reads every balance, went on reporting that the
+      // two agreed. The check written to catch this could not see it, because
+      // it and this list did not mean the same thing by "every product".
+      OR: [
+        { archivedAt: null },
+        {
+          inventoryBalances: {
+            some: {
+              OR: [{ quantity: { not: 0 } }, { stockValue: { not: 0 } }],
+            },
+          },
+        },
+      ],
     },
     select: {
       id: true,
@@ -107,6 +134,7 @@ export async function stockRows(companyId: string): Promise<StockRow[]> {
       name: true,
       sellingPrice: true,
       minStockLevel: true,
+      archivedAt: true,
       unit: { select: { code: true } },
       category: { select: { name: true } },
       inventoryBalances: {
@@ -156,6 +184,7 @@ export async function stockRows(companyId: string): Promise<StockRow[]> {
       minStockLevel: toStorageString(product.minStockLevel),
       status: statusOf(quantity, money(product.minStockLevel)),
       lastMovementAt: lastByProduct.get(product.id) ?? null,
+      archived: product.archivedAt !== null,
     };
   });
 }
