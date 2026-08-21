@@ -557,13 +557,15 @@ describe("products and opening stock", () => {
       input: productInput(unitId, { openingQuantity: 40, openingRate: 1450 }),
     });
 
+    // Names the quantity held. "It still has stock" is not something a person
+    // can act on without a number, and the number is what the guard reads.
     await expect(
       updateProduct({
         ...actor(company),
         productId: created.id,
         input: productInput(unitId, { isStockTracked: false }),
       }),
-    ).rejects.toThrow(/already carries stock/);
+    ).rejects.toThrow(/still holds 40 in stock/);
   });
 
   it("leaves opening stock untouched when the product is edited", async () => {
