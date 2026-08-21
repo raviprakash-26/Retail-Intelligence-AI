@@ -101,6 +101,9 @@ OIL-1L,Sunflower Oil 1L,PCS,1512,5,"1,110","1,332",25,
 TEA-250,Tea Leaves 250g,PCS,0902,5,95,120,,
 `;
 
+/** Plans created by the allowance cases below; see the note on `capProductsAt`. */
+const createdPlans: string[] = [];
+
 beforeAll(async () => {
   await ensurePlatformData();
 }, 60_000);
@@ -109,6 +112,10 @@ afterAll(async () => {
   for (const companyId of createdCompanies) {
     await purgeTestCompany(companyId).catch(() => undefined);
   }
+  // After the companies, so no subscription still points at these.
+  await prisma.subscriptionPlan.deleteMany({
+    where: { id: { in: createdPlans } },
+  });
   await purgeTestUsers(createdEmails);
   await disconnectTestDb();
 });
@@ -394,7 +401,14 @@ describe("a file bigger than one sitting", () => {
  * about to be written, so the arithmetic is done there against the whole file.
  */
 describe("a file against the plan's allowance", () => {
-  /** Puts the company on a plan of its own, so nothing else is disturbed. */
+  /**
+   * Puts the company on a plan of its own, so nothing else is disturbed.
+   *
+   * Removed again afterwards. Plans are platform-wide rather than tenant-owned,
+   * so `purgeTestCompany` does not reach them: leaving them behind put a row
+   * priced at nil in front of every other file's plan lookup, and the payments
+   * suite started reporting that an upgrade cost nothing.
+   */
   async function capProductsAt(companyId: string, allowed: number) {
     const plan = await prisma.subscriptionPlan.create({
       data: {
@@ -413,6 +427,7 @@ describe("a file against the plan's allowance", () => {
       },
       select: { id: true },
     });
+    createdPlans.push(plan.id);
     await prisma.subscription.update({
       where: { companyId },
       data: { planId: plan.id },
