@@ -626,3 +626,95 @@ describe("a product's stock card", () => {
     ).rejects.toThrow(InventoryReportError);
   });
 });
+
+/**
+ * Discontinuing a line the shop still owns stock of.
+ *
+ * Archiving a product takes it out of the stock list, which is what archiving
+ * is for. It was taking the product's *stock value* out with it, and that value
+ * stays in the Inventory account — so the stock report and the balance sheet
+ * came apart by exactly the amount of whatever was archived, silently.
+ *
+ * What makes this one worth a test rather than a note is that the check written
+ * to catch it could not. `reconcileStock` reads every balance, archived or not,
+ * so it went on reporting that the stock ledger and the books agreed while the
+ * report a shopkeeper actually reads had lost six thousand rupees. The two did
+ * not mean the same thing by "every product", and only one of them said so.
+ */
+describe("a discontinued product that still holds stock", () => {
+  async function archive(fixture: Fixture) {
+    const { setProductArchived } =
+      await import("@/server/master-data/product-service");
+    await setProductArchived({
+      companyId: fixture.companyId,
+      productId: fixture.productId,
+      archived: true,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+  }
+
+  it("keeps its value in the stock report, so the books still agree", async () => {
+    const fixture = await createCompany();
+
+    const before = await getStockSummary({ companyId: fixture.companyId });
+    expect(Number(before.totalValue)).toBeGreaterThan(0);
+
+    await archive(fixture);
+
+    const after = await getStockSummary({ companyId: fixture.companyId });
+    const ledger = await inventoryAccountBalance(fixture.companyId);
+
+    // Asserted against the Inventory account rather than a literal: the point
+    // is that the two agree, not that either is a particular number.
+    expect(Number(after.totalValue)).toBeCloseTo(Number(ledger), 2);
+    expect(Number(after.totalValue)).toBeCloseTo(Number(before.totalValue), 2);
+  }, 90_000);
+
+  it("says on the row that it is discontinued", async () => {
+    // Otherwise a line somebody archived reappears with no explanation, which
+    // reads as the archive not having worked.
+    const fixture = await createCompany();
+    await archive(fixture);
+
+    const summary = await getStockSummary({ companyId: fixture.companyId });
+    const row = summary.rows.find(
+      (entry) => entry.productId === fixture.productId,
+    );
+    expect(row).toBeDefined();
+    expect(row!.archived).toBe(true);
+  }, 90_000);
+
+  it("drops out once the stock is gone", async () => {
+    // Archiving still does what archiving is for. It is the stock that keeps
+    // the row alive, not the product.
+    const fixture = await createCompany();
+    const summary = await getStockSummary({ companyId: fixture.companyId });
+    const held = Number(
+      summary.rows.find((entry) => entry.productId === fixture.productId)!
+        .quantity,
+    );
+
+    // Write the whole position off, then discontinue it.
+    await adjust(fixture, { countedQuantity: 0 });
+    await archive(fixture);
+
+    const after = await getStockSummary({ companyId: fixture.companyId });
+    expect(
+      after.rows.find((entry) => entry.productId === fixture.productId),
+    ).toBeUndefined();
+    expect(held).toBeGreaterThan(0);
+
+    const ledger = await inventoryAccountBalance(fixture.companyId);
+    expect(Number(after.totalValue)).toBeCloseTo(Number(ledger), 2);
+  }, 90_000);
+
+  it("leaves an ordinary product marked as not discontinued", async () => {
+    const fixture = await createCompany();
+    const summary = await getStockSummary({ companyId: fixture.companyId });
+    const row = summary.rows.find(
+      (entry) => entry.productId === fixture.productId,
+    );
+    expect(row!.archived).toBe(false);
+  }, 90_000);
+});

@@ -126,6 +126,7 @@ function stockRow(overrides: Partial<StockRow> = {}): StockRow {
     minStockLevel: "0.0000",
     status: "OK",
     lastMovementAt: daysAgo(2),
+    archived: false,
     ...overrides,
   };
 }

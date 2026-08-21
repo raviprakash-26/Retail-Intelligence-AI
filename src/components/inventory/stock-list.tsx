@@ -143,6 +143,17 @@ export function StockList({
                       {row.sku}
                       {row.categoryName ? ` · ${row.categoryName}` : ""}
                     </p>
+                    {/*
+                      A discontinued line is normally not on this list at all.
+                      This one is here because it still holds stock, and that
+                      stock is still in the Inventory account — so it is said
+                      plainly rather than left to puzzle over.
+                    */}
+                    {row.archived && (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Discontinued · still in stock
+                      </p>
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     <span className="tabular-figures text-sm">
