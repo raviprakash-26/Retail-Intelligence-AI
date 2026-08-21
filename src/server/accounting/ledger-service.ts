@@ -450,18 +450,50 @@ export async function ledgerAccounts(
     }));
 }
 
-/** Customers or suppliers with movement on a control account. */
+/**
+ * Customers or suppliers with movement on a control account.
+ *
+ * Archived parties are kept when they still carry history, for exactly the
+ * reason retired accounts are kept above. Archiving a customer does not settle
+ * what they owe: the ageing report goes on listing the debt, because the debt
+ * is real. Dropping them from here meant the one document a shop sends somebody
+ * disputing a balance — the statement below, which exists to reconcile with
+ * that report — could not be produced for them at all. The books said chase
+ * this person and the application would not say what for.
+ */
 export async function ledgerParties(params: {
   companyId: string;
   partyType: PartyType;
-}): Promise<Array<{ id: string; name: string }>> {
-  const where = { companyId: params.companyId, archivedAt: null };
-  const select = { id: true, name: true };
+}): Promise<Array<{ id: string; name: string; archived: boolean }>> {
+  const used = await prisma.journalLine.groupBy({
+    by: ["partyId"],
+    where: {
+      companyId: params.companyId,
+      status: JournalStatus.POSTED,
+      partyType: params.partyType,
+      partyId: { not: null },
+    },
+    _count: { _all: true },
+  });
+  const withHistory = used.flatMap((row) => (row.partyId ? [row.partyId] : []));
+
+  const where = {
+    companyId: params.companyId,
+    OR: [{ archivedAt: null }, { id: { in: withHistory } }],
+  };
+  const select = { id: true, name: true, archivedAt: true };
   const orderBy = { name: "asc" } as const;
 
-  return params.partyType === PartyType.CUSTOMER
-    ? prisma.customer.findMany({ where, select, orderBy, take: 500 })
-    : prisma.supplier.findMany({ where, select, orderBy, take: 500 });
+  const parties =
+    params.partyType === PartyType.CUSTOMER
+      ? await prisma.customer.findMany({ where, select, orderBy, take: 500 })
+      : await prisma.supplier.findMany({ where, select, orderBy, take: 500 });
+
+  return parties.map((party) => ({
+    id: party.id,
+    name: party.name,
+    archived: party.archivedAt !== null,
+  }));
 }
 
 /**

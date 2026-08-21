@@ -42,6 +42,10 @@ import {
   returnableBillLines,
 } from "@/server/returns/purchase-return-service";
 import {
+  ledgerParties,
+  partyStatement,
+} from "@/server/accounting/ledger-service";
+import {
   disconnectTestDb,
   ensurePlatformData,
   purgeTestCompany,
@@ -1343,5 +1347,244 @@ describe("what a credit note does to the allocation cap", () => {
         }),
       }),
     ).rejects.toMatchObject({ code: "OVER_ALLOCATED" });
+  }, 90_000);
+});
+
+/**
+ * Archiving somebody who still owes money.
+ *
+ * Archiving a customer does not settle their debt. The ageing report goes on
+ * listing it, because it is real — and the ledger's party picker dropped them,
+ * so the one document a shop sends somebody disputing a balance could not be
+ * produced for them at all. The books said chase this person and the
+ * application would not say what for.
+ *
+ * `ledgerAccounts` keeps a retired account that still carries history, and says
+ * why in its own comment. The parties beneath it were not doing the same thing.
+ */
+describe("a party archived while still carrying a balance", () => {
+  async function archivedDebtor() {
+    const fixture = await createCompany();
+    const invoice = await raiseInvoice(fixture);
+    const { setPartyArchived } =
+      await import("@/server/master-data/party-service");
+    await setPartyArchived({
+      companyId: fixture.companyId,
+      kind: "CUSTOMER",
+      partyId: fixture.customerId,
+      archived: true,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+    return { fixture, invoice };
+  }
+
+  it("is still listed on the ledger, because the ageing still chases them", async () => {
+    const { fixture } = await archivedDebtor();
+
+    const ageing = await receivablesAgeing(fixture.companyId);
+    expect(Number(ageing.summary.total)).toBeGreaterThan(0);
+
+    const parties = await ledgerParties({
+      companyId: fixture.companyId,
+      partyType: "CUSTOMER",
+    });
+    const listed = parties.find((party) => party.id === fixture.customerId);
+    expect(listed).toBeDefined();
+
+    // And the statement the shop would send them reconciles with that figure,
+    // which is the whole reason the name has to be reachable.
+    const statement = await partyStatement({
+      companyId: fixture.companyId,
+      partyType: "CUSTOMER",
+      partyId: fixture.customerId,
+    });
+    expect(Number(statement.closingBalance)).toBeCloseTo(
+      Number(ageing.summary.total),
+      2,
+    );
+  }, 90_000);
+
+  it("is marked archived, so the name is not a surprise", async () => {
+    const { fixture } = await archivedDebtor();
+
+    const parties = await ledgerParties({
+      companyId: fixture.companyId,
+      partyType: "CUSTOMER",
+    });
+    expect(
+      parties.find((party) => party.id === fixture.customerId)!.archived,
+    ).toBe(true);
+  }, 90_000);
+
+  it("drops an archived party who never traded", async () => {
+    // Archiving still does what archiving is for. It is the history keeping
+    // the name on the list, not the party.
+    const fixture = await createCompany();
+    const { setPartyArchived } =
+      await import("@/server/master-data/party-service");
+    await setPartyArchived({
+      companyId: fixture.companyId,
+      kind: "CUSTOMER",
+      partyId: fixture.customerId,
+      archived: true,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+
+    const parties = await ledgerParties({
+      companyId: fixture.companyId,
+      partyType: "CUSTOMER",
+    });
+    expect(
+      parties.find((party) => party.id === fixture.customerId),
+    ).toBeUndefined();
+  }, 90_000);
+
+  it("leaves a trading customer listed and unmarked", async () => {
+    const fixture = await createCompany();
+    await raiseInvoice(fixture);
+
+    const parties = await ledgerParties({
+      companyId: fixture.companyId,
+      partyType: "CUSTOMER",
+    });
+    const listed = parties.find((party) => party.id === fixture.customerId);
+    expect(listed).toBeDefined();
+    expect(listed!.archived).toBe(false);
+  }, 90_000);
+});
+
+/**
+ * What the ageing report owes the control account behind it.
+ *
+ * The README says a customer statement "reconciles with the ageing report
+ * exactly, because both are derived from the same posted lines". They were not
+ * the same lines. The statement reads the receivable control account; the ageing
+ * read sale rows. Everything that reaches a receivable without being a sale was
+ * therefore invisible to it.
+ *
+ * The case that matters is the first thing a real shop does: carry its customers
+ * over from the old books with what they already owe. Fifty thousand rupees of
+ * opening balances went into the receivable account and the receivables report —
+ * on the dashboard, in the reports catalogue, and in what the advisor reasons
+ * from — read nil.
+ *
+ * Each case below asserts against the control account rather than a literal, so
+ * the two cannot come apart again without one of them failing.
+ */
+describe("the ageing against the control account", () => {
+  async function carriedOver(amount: number, nature: "DEBIT" | "CREDIT") {
+    const fixture = await createCompany();
+    const { createParty: mkParty } =
+      await import("@/server/master-data/party-service");
+    const party = await mkParty({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      kind: "CUSTOMER",
+      input: {
+        name: "Carried Over Traders",
+        phone: "",
+        email: "",
+        gstin: "",
+        pan: "",
+        addressLine1: "",
+        city: "",
+        stateCode: "29",
+        pincode: "",
+        creditDays: 30,
+        creditLimit: 10_000_000,
+        openingBalance: amount,
+        openingNature: nature,
+        notes: "",
+      } as never,
+    });
+    return { fixture, partyId: party.id };
+  }
+
+  it("counts a customer carried over from the old books", async () => {
+    const { fixture, partyId } = await carriedOver(50_000, "DEBIT");
+
+    const receivable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+    );
+    const ageing = await receivablesAgeing(fixture.companyId);
+
+    expect(Number(receivable)).toBeCloseTo(50_000, 2);
+    expect(Number(ageing.summary.total)).toBeCloseTo(Number(receivable), 2);
+
+    // And named, so the shop knows who to chase rather than seeing a lump.
+    const party = ageing.parties.find((entry) => entry.id === partyId);
+    expect(party).toBeDefined();
+    expect(Number(party!.outstanding)).toBeCloseTo(50_000, 2);
+  }, 90_000);
+
+  it("still ties once that customer starts trading", async () => {
+    // The carried balance and ordinary invoices have to add up together, not
+    // one replace the other.
+    const { fixture } = await carriedOver(50_000, "DEBIT");
+    await raiseInvoice(fixture);
+
+    const receivable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+    );
+    const ageing = await receivablesAgeing(fixture.companyId);
+    expect(Number(ageing.summary.total)).toBeCloseTo(Number(receivable), 2);
+    expect(Number(ageing.summary.total)).toBeGreaterThan(50_000);
+  }, 90_000);
+
+  it("nets money taken without being matched to an invoice", async () => {
+    // An advance genuinely reduces what a customer owes. Read from documents
+    // alone it did not, so the report overstated the debt by the payment.
+    const fixture = await createCompany();
+    await raiseInvoice(fixture);
+    await createReceipt({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: receiptInput({ partyId: fixture.customerId, amount: 400 }),
+    });
+
+    const receivable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+    );
+    const ageing = await receivablesAgeing(fixture.companyId);
+    expect(Number(ageing.summary.total)).toBeCloseTo(Number(receivable), 2);
+  }, 90_000);
+
+  it("ties on the payables side too", async () => {
+    const fixture = await createCompany();
+    await raiseBill(fixture);
+
+    const payable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_PAYABLE,
+    );
+    const ageing = await payablesAgeing(fixture.companyId);
+    // Payables sit as a credit balance, so the control account reads negative.
+    expect(Number(ageing.summary.total)).toBeCloseTo(-Number(payable), 2);
+  }, 90_000);
+
+  it("leaves an ordinary invoice reading exactly as it did", async () => {
+    // The residual must be nil when documents already explain the balance,
+    // or every existing figure would shift.
+    const fixture = await createCompany();
+    const invoice = await raiseInvoice(fixture);
+
+    const receivable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+    );
+    const ageing = await receivablesAgeing(fixture.companyId);
+    expect(Number(ageing.summary.total)).toBeCloseTo(
+      Number(invoice.totalAmount),
+      2,
+    );
+    expect(Number(ageing.summary.total)).toBeCloseTo(Number(receivable), 2);
+    expect(ageing.parties).toHaveLength(1);
   }, 90_000);
 });

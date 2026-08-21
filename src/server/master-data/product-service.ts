@@ -420,7 +420,8 @@ export async function updateProduct(params: {
         id: true,
         sku: true,
         isStockTracked: true,
-        openingQuantity: true,
+        // What it holds now, not what it was opened with. See below.
+        inventoryBalances: { select: { quantity: true, stockValue: true } },
       },
     });
     if (!existing) {
@@ -443,14 +444,29 @@ export async function updateProduct(params: {
     );
 
     // Turning stock tracking off on a product that already holds stock would
-    // strand its value in the Inventory account with nothing to explain it.
+    // strand its value in the Inventory account with nothing to explain it —
+    // the stock report drops an untracked product, the balance sheet does not.
+    //
+    // This asked `openingQuantity`, which is the number somebody typed when the
+    // product was first set up and never moves again. It is not what the
+    // product holds. A line opened at nil and stocked by purchases afterwards —
+    // which is most of them — passed the check with a shelf full of goods, and
+    // a line opened at five hundred and since sold down to nothing was refused
+    // a change that was perfectly safe. The rule was right and it was reading
+    // the wrong number.
+    const onHand = sum(
+      existing.inventoryBalances.map((balance) => balance.quantity),
+    );
+    const heldValue = sum(
+      existing.inventoryBalances.map((balance) => balance.stockValue),
+    );
     if (
       existing.isStockTracked &&
       !params.input.isStockTracked &&
-      !isZero(existing.openingQuantity)
+      (!isZero(onHand) || !isZero(heldValue))
     ) {
       throw new MasterDataError(
-        "This product already carries stock, so it cannot be switched to a non-stock item.",
+        `This product still holds ${onHand.toFixed(3).replace(/\.?0+$/, "")} in stock, so it cannot be switched to a non-stock item. Sell it or write it off first.`,
         "HAS_STOCK",
         "isStockTracked",
       );
