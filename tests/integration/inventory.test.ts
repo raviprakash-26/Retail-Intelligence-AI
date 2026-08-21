@@ -718,3 +718,122 @@ describe("a discontinued product that still holds stock", () => {
     expect(row!.archived).toBe(false);
   }, 90_000);
 });
+
+/**
+ * Switching a product to a non-stock item.
+ *
+ * The refusal was already here and its reason was already right: turning
+ * tracking off on a product that holds stock strands that stock's value in the
+ * Inventory account, because the stock report drops an untracked product and
+ * the balance sheet does not.
+ *
+ * It asked `openingQuantity` — the number typed when the product was first set
+ * up, which never moves again — instead of what the product holds. So a line
+ * opened at nil and stocked by purchases afterwards, which is most of them,
+ * walked straight through with a full shelf; and a line opened at a hundred and
+ * since sold down to nothing was refused a change that was perfectly safe. The
+ * rule was right and it was reading the wrong number, which is the kind of
+ * mistake a guard cannot report about itself.
+ */
+describe("turning stock tracking off", () => {
+  const productShape = (fixture: Fixture, sku: string) => ({
+    sku,
+    name: sku,
+    description: "",
+    barcode: "",
+    hsnCode: "1905",
+    categoryId: "",
+    unitId: fixture.unitId,
+    taxRateId: fixture.taxRateId,
+    purchasePrice: 60,
+    sellingPrice: 100,
+    mrp: 0,
+    openingQuantity: 0,
+    openingRate: 0,
+    minStockLevel: 0,
+  });
+
+  async function untrack(fixture: Fixture, productId: string, sku: string) {
+    const { updateProduct } =
+      await import("@/server/master-data/product-service");
+    return updateProduct({
+      companyId: fixture.companyId,
+      productId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        ...productShape(fixture, sku),
+        isStockTracked: false,
+      } satisfies ProductInput,
+    });
+  }
+
+  it("is refused on stock that arrived after the product was created", async () => {
+    // The dangerous direction: nil opening quantity, a shelf full of goods.
+    const fixture = await createCompany();
+    const { createProduct: mkProduct } =
+      await import("@/server/master-data/product-service");
+
+    const later = await mkProduct({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        ...productShape(fixture, "LATER"),
+        isStockTracked: true,
+      } satisfies ProductInput,
+    });
+    await adjust(fixture, { productId: later.id, countedQuantity: 40 });
+
+    await expect(untrack(fixture, later.id, "LATER")).rejects.toMatchObject({
+      code: "HAS_STOCK",
+    });
+
+    // And the report still ties to the books, which is what the refusal is for.
+    const summary = await getStockSummary({ companyId: fixture.companyId });
+    const ledger = await inventoryAccountBalance(fixture.companyId);
+    expect(Number(summary.totalValue)).toBeCloseTo(Number(ledger), 2);
+  }, 90_000);
+
+  it("is allowed once the stock has gone, whatever it opened with", async () => {
+    // The other direction: the fixture product opened at a hundred. Sold down
+    // to nothing it holds nothing, and the change is safe.
+    const fixture = await createCompany();
+    await adjust(fixture, { countedQuantity: 0 });
+
+    await expect(
+      untrack(fixture, fixture.productId, "WIDGET"),
+    ).resolves.toBeUndefined();
+  }, 90_000);
+
+  it("says how much is still held, so the refusal can be acted on", async () => {
+    const fixture = await createCompany();
+    await adjust(fixture, { countedQuantity: 7 });
+
+    await expect(untrack(fixture, fixture.productId, "WIDGET")).rejects.toThrow(
+      /still holds 7 /,
+    );
+  }, 90_000);
+
+  it("leaves a tracked product tracked when nothing asked otherwise", async () => {
+    const fixture = await createCompany();
+    const { updateProduct } =
+      await import("@/server/master-data/product-service");
+    await updateProduct({
+      companyId: fixture.companyId,
+      productId: fixture.productId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        ...productShape(fixture, "WIDGET"),
+        sellingPrice: 120,
+        isStockTracked: true,
+      } satisfies ProductInput,
+    });
+
+    const summary = await getStockSummary({ companyId: fixture.companyId });
+    const ledger = await inventoryAccountBalance(fixture.companyId);
+    expect(Number(summary.totalValue)).toBeCloseTo(Number(ledger), 2);
+    expect(Number(summary.totalValue)).toBeGreaterThan(0);
+  }, 90_000);
+});
