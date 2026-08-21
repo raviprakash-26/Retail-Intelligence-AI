@@ -1,5 +1,5 @@
 import "server-only";
-import { DocumentStatus, JournalStatus } from "@prisma/client";
+import { DocumentStatus, JournalStatus, PartyType } from "@prisma/client";
 import { prisma, type DbClient } from "@/lib/db";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import {
@@ -296,6 +296,184 @@ function serialise(summary: AgeingSummary) {
   };
 }
 
+/**
+ * What the control account holds that no document accounts for.
+ *
+ * The ageing is built from documents because documents are what carry a due
+ * date. Not everything that lands on a receivable is a document. A customer
+ * carried over from the old books arrives as an opening balance; money received
+ * without being matched to an invoice sits as an advance; a bad debt written
+ * back by hand is a journal entry and nothing else. None of those is a sale, so
+ * none of them reached this report — and a shop that had just moved onto the
+ * product, having entered every customer it was owed by, saw a receivables
+ * total of nil while its receivable account held the lot.
+ *
+ * The README promises that a customer statement "reconciles with the ageing
+ * report exactly, because both are derived from the same posted lines". They
+ * were not the same lines: the statement reads the control account and this read
+ * sale rows. So the difference between the two is computed here and carried into
+ * the ageing as one more figure per party, which makes that promise true by
+ * construction rather than by coincidence — including for whatever anybody posts
+ * to a receivable in future that nobody has thought of yet.
+ *
+ * The residual is dated from the party's earliest posted line on the account,
+ * which is when the balance was brought on. Carried-forward debt then ages from
+ * the day it was entered rather than appearing as if it arose today.
+ */
+async function controlAccountByParty(
+  companyId: string,
+  side: "RECEIVABLE" | "PAYABLE",
+): Promise<Map<string, { balance: Decimal; since: Date }>> {
+  const empty = new Map<string, { balance: Decimal; since: Date }>();
+
+  const account = await prisma.account.findFirst({
+    where: {
+      companyId,
+      systemKey:
+        side === "RECEIVABLE"
+          ? SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE
+          : SYSTEM_ACCOUNT.ACCOUNTS_PAYABLE,
+    },
+    select: { id: true },
+  });
+  if (!account) return empty;
+
+  const rows = await prisma.journalLine.groupBy({
+    by: ["partyId"],
+    where: {
+      companyId,
+      accountId: account.id,
+      status: JournalStatus.POSTED,
+      partyType:
+        side === "RECEIVABLE" ? PartyType.CUSTOMER : PartyType.SUPPLIER,
+      partyId: { not: null },
+    },
+    _sum: { debit: true, credit: true },
+    _min: { entryDate: true },
+  });
+
+  for (const row of rows) {
+    if (!row.partyId) continue;
+    // A receivable is a debit balance and a payable a credit one; both are
+    // wanted as "what is owed", so the sign is taken the right way round.
+    const balance =
+      side === "RECEIVABLE"
+        ? subtract(row._sum.debit ?? 0, row._sum.credit ?? 0)
+        : subtract(row._sum.credit ?? 0, row._sum.debit ?? 0);
+    empty.set(row.partyId, {
+      balance,
+      since: row._min.entryDate ?? new Date(),
+    });
+  }
+
+  return empty;
+}
+
+/**
+ * Adds the part of each party's balance that no document explains.
+ *
+ * Positive where something was brought on outside a document — an opening
+ * balance, a manual entry — and negative where money was taken without being
+ * matched to one, which is an advance and genuinely reduces what is owed.
+ */
+async function withLedgerResidual(
+  companyId: string,
+  side: "RECEIVABLE" | "PAYABLE",
+  documents: Array<{
+    partyId: string;
+    partyName: string;
+    dueDate: Date;
+    outstanding: Decimal;
+  }>,
+): Promise<typeof documents> {
+  const control = await controlAccountByParty(companyId, side);
+  if (control.size === 0) return documents;
+
+  const documented = new Map<string, Decimal>();
+  for (const document of documents) {
+    documented.set(
+      document.partyId,
+      add(documented.get(document.partyId) ?? money(0), document.outstanding),
+    );
+  }
+
+  const residuals: Array<{ partyId: string; balance: Decimal; since: Date }> =
+    [];
+  for (const [partyId, entry] of control) {
+    const residual = subtract(
+      entry.balance,
+      documented.get(partyId) ?? money(0),
+    );
+    if (residual.isZero()) continue;
+    residuals.push({ partyId, balance: residual, since: entry.since });
+  }
+  if (residuals.length === 0) return documents;
+
+  // Names for parties the documents never mentioned — a customer carried over
+  // and not yet invoiced has no sale to take a name from.
+  const named = new Map(documents.map((d) => [d.partyId, d.partyName]));
+  const missing = residuals
+    .filter((entry) => !named.has(entry.partyId))
+    .map((entry) => entry.partyId);
+  if (missing.length > 0) {
+    const parties =
+      side === "RECEIVABLE"
+        ? await prisma.customer.findMany({
+            where: { companyId, id: { in: missing } },
+            select: { id: true, name: true },
+          })
+        : await prisma.supplier.findMany({
+            where: { companyId, id: { in: missing } },
+            select: { id: true, name: true },
+          });
+    for (const party of parties) named.set(party.id, party.name);
+  }
+
+  // A residual above nil is a balance no document explains — carried over from
+  // the old books, or written on by hand — so it joins the list as one more
+  // thing owed, dated from when it was brought on.
+  //
+  // Below nil it is money taken without being matched to a document, and it has
+  // to come *off this party's own debt* rather than join the list. `summarise`
+  // drops a non-positive row deliberately, so that one customer's credit cannot
+  // net away another's debt — right for documents, and the reason an advance
+  // cannot simply be appended here. It is applied oldest first, which is what
+  // the rest of this module means by settling: money goes against the debt that
+  // has been waiting longest.
+  const reduced = documents.map((document) => ({ ...document }));
+  const rows: typeof documents = [];
+
+  for (const entry of residuals) {
+    if (entry.balance.greaterThan(0)) {
+      rows.push({
+        partyId: entry.partyId,
+        partyName: named.get(entry.partyId) ?? "—",
+        dueDate: entry.since,
+        outstanding: entry.balance,
+      });
+      continue;
+    }
+
+    let advance = subtract(money(0), entry.balance);
+    const theirs = reduced
+      .filter((document) => document.partyId === entry.partyId)
+      .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+
+    for (const document of theirs) {
+      if (!advance.greaterThan(0)) break;
+      const taken = document.outstanding.greaterThan(advance)
+        ? advance
+        : document.outstanding;
+      document.outstanding = subtract(document.outstanding, taken);
+      advance = subtract(advance, taken);
+    }
+    // Anything still left is a party in net credit. They owe nothing, and the
+    // credit stays out of the total rather than reducing somebody else's debt.
+  }
+
+  return [...reduced, ...rows];
+}
+
 /** Receivables: who owes the business, and how overdue each of them is. */
 export async function receivablesAgeing(
   companyId: string,
@@ -324,17 +502,21 @@ export async function receivablesAgeing(
   });
 
   const now = new Date();
-  const documents = sales
-    .map((sale) => ({
-      partyId: sale.customerId ?? "",
-      partyName: sale.customer?.name ?? "—",
-      dueDate: sale.dueDate ?? sale.invoiceDate,
-      outstanding: subtract(
-        sale.totalAmount,
-        add(sale.paidAmount, credited.get(sale.id) ?? money(0)),
-      ),
-    }))
-    .filter((document) => document.outstanding.greaterThan(0));
+  const documents = await withLedgerResidual(
+    companyId,
+    "RECEIVABLE",
+    sales
+      .map((sale) => ({
+        partyId: sale.customerId ?? "",
+        partyName: sale.customer?.name ?? "—",
+        dueDate: sale.dueDate ?? sale.invoiceDate,
+        outstanding: subtract(
+          sale.totalAmount,
+          add(sale.paidAmount, credited.get(sale.id) ?? money(0)),
+        ),
+      }))
+      .filter((document) => document.outstanding.greaterThan(0)),
+  );
 
   return {
     summary: serialise(summariseAgeing(documents, now)),
@@ -368,17 +550,21 @@ export async function payablesAgeing(companyId: string): Promise<LedgerAgeing> {
   });
 
   const now = new Date();
-  const documents = purchases
-    .map((purchase) => ({
-      partyId: purchase.supplierId ?? "",
-      partyName: purchase.supplier?.name ?? "—",
-      dueDate: purchase.dueDate ?? purchase.billDate,
-      outstanding: subtract(
-        purchase.totalAmount,
-        add(purchase.paidAmount, debited.get(purchase.id) ?? money(0)),
-      ),
-    }))
-    .filter((document) => document.outstanding.greaterThan(0));
+  const documents = await withLedgerResidual(
+    companyId,
+    "PAYABLE",
+    purchases
+      .map((purchase) => ({
+        partyId: purchase.supplierId ?? "",
+        partyName: purchase.supplier?.name ?? "—",
+        dueDate: purchase.dueDate ?? purchase.billDate,
+        outstanding: subtract(
+          purchase.totalAmount,
+          add(purchase.paidAmount, debited.get(purchase.id) ?? money(0)),
+        ),
+      }))
+      .filter((document) => document.outstanding.greaterThan(0)),
+  );
 
   return {
     summary: serialise(summariseAgeing(documents, now)),
