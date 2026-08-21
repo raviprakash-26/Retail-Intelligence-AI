@@ -145,6 +145,80 @@ describe("professional tax", () => {
     );
     expect(n(result.professionalTax)).toBe(0);
   });
+
+  /**
+   * The threshold belongs to the state as much as the amount does.
+   *
+   * It was fixed at Karnataka's while the amount was settable, so a business
+   * in a state levying from ₹7,500 could say what it withheld but not from
+   * what wage, and everybody under ₹25,000 had nothing withheld. The business
+   * had said it was liable and the software quietly decided it was not.
+   */
+  it("is levied from the wage the business set, not Bengaluru's", () => {
+    const result = computeStatutory(
+      { basicSalary: 20_000, allowances: 0 },
+      {
+        providentFund: false,
+        employeeStateInsurance: false,
+        professionalTaxMonthly: 200,
+        professionalTaxThreshold: 7_500,
+      },
+    );
+    expect(n(result.professionalTax)).toBe(200);
+  });
+
+  it("is still nil below the wage the business set", () => {
+    // The threshold has to work in both directions, or it is just an on switch.
+    const result = computeStatutory(
+      { basicSalary: 5_000, allowances: 0 },
+      {
+        providentFund: false,
+        employeeStateInsurance: false,
+        professionalTaxMonthly: 200,
+        professionalTaxThreshold: 7_500,
+      },
+    );
+    expect(n(result.professionalTax)).toBe(0);
+  });
+
+  it("keeps Karnataka's threshold for a business that set only the amount", () => {
+    // Every business configured before the threshold was settable is in this
+    // state, and none of their payrolls may move by a rupee.
+    const below = computeStatutory(
+      { basicSalary: 20_000, allowances: 0 },
+      {
+        providentFund: false,
+        employeeStateInsurance: false,
+        professionalTaxMonthly: 200,
+        professionalTaxThreshold: null,
+      },
+    );
+    const above = computeStatutory(
+      { basicSalary: 30_000, allowances: 0 },
+      {
+        providentFund: false,
+        employeeStateInsurance: false,
+        professionalTaxMonthly: 200,
+        professionalTaxThreshold: null,
+      },
+    );
+    expect(n(below.professionalTax)).toBe(0);
+    expect(n(above.professionalTax)).toBe(200);
+  });
+
+  it("levies nothing at exactly the threshold, as it always has", () => {
+    // "Above" means above. Karnataka's own slab starts over ₹25,000.
+    const result = computeStatutory(
+      { basicSalary: 7_500, allowances: 0 },
+      {
+        providentFund: false,
+        employeeStateInsurance: false,
+        professionalTaxMonthly: 200,
+        professionalTaxThreshold: 7_500,
+      },
+    );
+    expect(n(result.professionalTax)).toBe(0);
+  });
 });
 
 describe("tax deducted at source", () => {

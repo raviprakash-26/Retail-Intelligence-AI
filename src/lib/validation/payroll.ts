@@ -19,6 +19,16 @@ export const payrollPolicySchema = z.object({
     .min(0, "Professional tax cannot be negative.")
     .max(10_000, "That looks too large for a monthly figure.")
     .nullable(),
+  /**
+   * The wage above which it is levied. Null keeps Karnataka's, which is where
+   * a business that set only the amount already sat.
+   */
+  professionalTaxThreshold: z
+    .number()
+    .min(0, "A threshold cannot be negative.")
+    .max(10_00_000, "That looks too large for a monthly wage.")
+    .nullable()
+    .optional(),
 });
 
 export const payrollRunSchema = z.object({

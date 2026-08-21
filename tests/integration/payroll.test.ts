@@ -11,6 +11,7 @@ import {
   previewPayroll,
   listPayrollRuns,
   getPayrollRun,
+  payrollPolicy,
   PayrollError,
 } from "@/server/payroll/payroll-service";
 import {
@@ -76,6 +77,7 @@ async function createCompany(policy?: {
   providentFund?: boolean;
   esi?: boolean;
   professionalTax?: number | null;
+  professionalTaxThreshold?: number | null;
 }): Promise<Fixture> {
   const email = `pay-${uniqueSlug("x").replace(/-/g, "")}@example.com`;
   createdEmails.push(email);
@@ -89,6 +91,7 @@ async function createCompany(policy?: {
         providentFundApplicable: policy.providentFund ?? false,
         esiApplicable: policy.esi ?? false,
         professionalTaxMonthly: policy.professionalTax ?? null,
+        professionalTaxThreshold: policy.professionalTaxThreshold ?? null,
       },
     });
   }
@@ -401,4 +404,51 @@ describe("what payroll refuses to do", () => {
     ).toBe(toStorageString(0));
     expect(await listPayrollRuns(mine.companyId)).toHaveLength(0);
   }, 120_000);
+});
+
+/**
+ * The wage above which professional tax is levied.
+ *
+ * The monthly amount was settable and this was not, so a business outside
+ * Karnataka could say what it withheld but not from what wage — and Bengaluru's
+ * ₹25,000 was applied to everyone. A shop in a state levying from ₹7,500
+ * withheld nothing from anybody under ₹25,000, having told the software it was
+ * liable. These cases run the whole way through the database, because the
+ * arithmetic being right is no use if the figure never reaches it.
+ */
+describe("professional tax outside Karnataka", () => {
+  it("carries the threshold from the company through to the payslip", async () => {
+    const fixture = await createCompany({
+      professionalTax: 200,
+      professionalTaxThreshold: 7_500,
+    });
+    await hire(fixture, "Clerk", 20_000);
+
+    const policy = await payrollPolicy(fixture.companyId);
+    expect(policy.professionalTaxThreshold).toBe(7_500);
+
+    const preview = await previewPayroll({
+      companyId: fixture.companyId,
+      year: 2026,
+      month: 6,
+    });
+    expect(Number(preview.totals.professionalTax)).toBe(200);
+  }, 90_000);
+
+  it("leaves a business that set only the amount exactly where it was", async () => {
+    // Every tenant configured before the threshold existed is in this state,
+    // and none of their payrolls may move by a rupee.
+    const fixture = await createCompany({ professionalTax: 200 });
+    await hire(fixture, "Clerk", 20_000);
+
+    const policy = await payrollPolicy(fixture.companyId);
+    expect(policy.professionalTaxThreshold).toBeNull();
+
+    const preview = await previewPayroll({
+      companyId: fixture.companyId,
+      year: 2026,
+      month: 6,
+    });
+    expect(Number(preview.totals.professionalTax)).toBe(0);
+  }, 90_000);
 });
