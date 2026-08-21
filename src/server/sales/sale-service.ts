@@ -613,6 +613,27 @@ export async function voidSale(params: {
         );
       }
 
+      // The mirror of the guard in `createSalesReturn`, which refuses a return
+      // against a voided invoice because "returning would reverse them twice".
+      // The same is true the other way round and was not checked: a void
+      // reverses the whole invoice — every unit of stock, the full revenue, the
+      // full tax — so an invoice that has already had part of it credited back
+      // gets that part reversed a second time. The books then hold stock the
+      // shop never had, negative revenue against a cancelled sale, and a
+      // credit note in the GST register for an invoice that no longer exists.
+      const returns = await tx.salesReturn.findMany({
+        where: { companyId: params.companyId, saleId: sale.id },
+        select: { returnNumber: true },
+        orderBy: { returnDate: "asc" },
+      });
+      if (returns.length > 0) {
+        const numbers = returns.map((entry) => entry.returnNumber).join(", ");
+        throw new SaleError(
+          `${sale.invoiceNumber} has already been credited back in part by ${numbers}, so it cannot be voided — that would reverse the returned goods twice. Record a return for what is left of it instead.`,
+          "ALREADY_RETURNED",
+        );
+      }
+
       const company = await tx.company.findUniqueOrThrow({
         where: { id: params.companyId },
         select: { inventoryMethod: true },

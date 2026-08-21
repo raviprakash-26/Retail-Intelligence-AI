@@ -7,7 +7,7 @@ import { registerOwner } from "@/server/auth/registration";
 import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
-import { createSale, voidSale } from "@/server/sales/sale-service";
+import { createSale, SaleError, voidSale } from "@/server/sales/sale-service";
 import { getTrialBalance } from "@/server/accounting/trial-balance-service";
 import { readPosition } from "@/server/inventory/stock-service";
 import {
@@ -512,6 +512,127 @@ describe("what a return refuses to do", () => {
         },
       }),
     ).rejects.toThrow(/voided/i);
+  }, 90_000);
+
+  /**
+   * The same rule read from the other end.
+   *
+   * The refusal above was written and the mirror of it was not, so an invoice
+   * that had been partly credited back could still be voided — and a void
+   * reverses the whole invoice. On a sale of ten with four returned, the books
+   * ended up holding four units of stock the shop never had, four hundred
+   * rupees of negative revenue against a cancelled sale, a customer apparently
+   * owed money, and a credit note in the GST register belonging to an invoice
+   * that no longer existed.
+   */
+  it("will not void an invoice that has already been returned against", async () => {
+    const fixture = await createCompany();
+    const sale = await sell(fixture, 10);
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+    });
+
+    const credited = await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: sale.id,
+        returnDate: today,
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+      },
+    });
+
+    const attempt = voidSale({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      saleId: sale.id,
+      reason: "Entered twice",
+    });
+
+    await expect(attempt).rejects.toMatchObject({ code: "ALREADY_RETURNED" });
+    // Named, so the shop can go and look at the credit note in question, and
+    // told what to do instead — the void is refused, not the correction.
+    await expect(attempt).rejects.toThrow(
+      new RegExp(`${credited.returnNumber}[\\s\\S]*record a return`, "i"),
+    );
+  }, 90_000);
+
+  it("leaves the books untouched when that void is refused", async () => {
+    // The defect stated as a figure: stock drifted by exactly the returned
+    // quantity, because the return put four back and the void put ten back.
+    const fixture = await createCompany();
+
+    const onHand = async () => {
+      const last = await prisma.inventoryMovement.findFirst({
+        where: { companyId: fixture.companyId, productId: fixture.productId },
+        orderBy: [{ movementDate: "desc" }, { createdAt: "desc" }],
+        select: { balanceQuantity: true },
+      });
+      return Number(last?.balanceQuantity ?? 0);
+    };
+
+    const sale = await sell(fixture, 10);
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+    });
+    await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: sale.id,
+        returnDate: today,
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+      },
+    });
+
+    const before = await onHand();
+    await expect(
+      voidSale({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        saleId: sale.id,
+        reason: "Entered twice",
+      }),
+    ).rejects.toThrow(SaleError);
+
+    expect(await onHand()).toBeCloseTo(before, 3);
+    const still = await prisma.sale.findUniqueOrThrow({
+      where: { id: sale.id },
+      select: { status: true },
+    });
+    expect(still.status).toBe(DocumentStatus.POSTED);
+  }, 90_000);
+
+  it("still voids an invoice nothing has come back against", async () => {
+    // The ordinary void, which the new guard must not have caught up in it.
+    const fixture = await createCompany();
+    const sale = await sell(fixture, 10);
+
+    await voidSale({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      saleId: sale.id,
+      reason: "Entered twice",
+    });
+
+    const voided = await prisma.sale.findUniqueOrThrow({
+      where: { id: sale.id },
+      select: { status: true },
+    });
+    expect(voided.status).toBe(DocumentStatus.VOIDED);
   }, 90_000);
 
   it("will not be dated before the invoice", async () => {

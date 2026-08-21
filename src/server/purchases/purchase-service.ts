@@ -637,6 +637,26 @@ export async function voidPurchase(params: {
         );
       }
 
+      // As on the sales side: a void reverses the whole bill, so a bill that
+      // has already had part of it sent back to the supplier gets that part
+      // reversed twice. `STOCK_ALREADY_SOLD` below catches some of these by
+      // accident — taking the stock back out fails when there is not enough
+      // left — but only when the shop happens to be short. A bill returned in
+      // part and restocked from elsewhere passes that check and corrupts the
+      // books quietly, which is the worse of the two outcomes.
+      const returns = await tx.purchaseReturn.findMany({
+        where: { companyId: params.companyId, purchaseId: purchase.id },
+        select: { returnNumber: true },
+        orderBy: { returnDate: "asc" },
+      });
+      if (returns.length > 0) {
+        const numbers = returns.map((entry) => entry.returnNumber).join(", ");
+        throw new PurchaseError(
+          `${purchase.billNumber} has already been returned in part by ${numbers}, so it cannot be voided — that would reverse the returned goods twice. Record a return for what is left of it instead.`,
+          "ALREADY_RETURNED",
+        );
+      }
+
       const entryId = purchase.journalEntryId;
       if (!entryId) {
         throw new PurchaseError(
