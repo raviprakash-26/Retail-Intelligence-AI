@@ -556,6 +556,77 @@ describe("what a debit note refuses to do", () => {
     ).rejects.toThrow(/voided/i);
   }, 90_000);
 
+  /**
+   * The same rule read from the other end.
+   *
+   * Voiding a bill that had already been partly returned put the returned
+   * goods back out of stock twice and reversed the input credit twice.
+   * `STOCK_ALREADY_SOLD` caught some of these by accident — taking the stock
+   * out fails when there is not enough left — but a shop holding stock of the
+   * same product from anywhere else sailed past it.
+   */
+  it("will not void a bill that has already been returned against", async () => {
+    const fixture = await createCompany();
+    const bill = await buy(fixture, 10);
+    const line = await firstLine(fixture, bill.id);
+
+    const returned = await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: today,
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: line.lineId, quantity: 4 }],
+      },
+    });
+
+    const attempt = voidPurchase({
+      companyId: fixture.companyId,
+      purchaseId: bill.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      reason: "Entered twice",
+    });
+
+    await expect(attempt).rejects.toMatchObject({ code: "ALREADY_RETURNED" });
+    await expect(attempt).rejects.toThrow(
+      new RegExp(`${returned.returnNumber}[\\s\\S]*record a return`, "i"),
+    );
+
+    // Refused before anything moved: the bill is still posted and the trial
+    // balance is untouched.
+    const still = await prisma.purchase.findUniqueOrThrow({
+      where: { id: bill.id },
+      select: { status: true },
+    });
+    expect(still.status).toBe(DocumentStatus.POSTED);
+    await assertTrialBalances(fixture.companyId);
+  }, 90_000);
+
+  it("still voids a bill nothing has gone back against", async () => {
+    // The ordinary void, which the new guard must not have caught up in it.
+    const fixture = await createCompany();
+    const bill = await buy(fixture, 10);
+
+    await voidPurchase({
+      companyId: fixture.companyId,
+      purchaseId: bill.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      reason: "Goods never arrived",
+    });
+
+    const voided = await prisma.purchase.findUniqueOrThrow({
+      where: { id: bill.id },
+      select: { status: true },
+    });
+    expect(voided.status).toBe(DocumentStatus.VOIDED);
+  }, 90_000);
+
   it("will not be dated before the bill", async () => {
     const fixture = await createCompany();
     const bill = await buy(fixture, 5);
