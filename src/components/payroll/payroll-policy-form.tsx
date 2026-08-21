@@ -122,22 +122,31 @@ export function PayrollPolicyForm({
                   id="pt-enabled"
                   checked={hasProfessionalTax}
                   disabled={readOnly}
-                  onCheckedChange={(checked) =>
+                  onCheckedChange={(checked) => {
                     form.setValue(
                       "professionalTaxMonthly",
                       checked ? 200 : null,
                       { shouldDirty: true },
-                    )
-                  }
+                    );
+                    // Karnataka's slab, offered whole rather than half. Both
+                    // figures are the state's, and offering only the amount is
+                    // what left businesses elsewhere on Bengaluru's threshold.
+                    form.setValue(
+                      "professionalTaxThreshold",
+                      checked ? 25000 : null,
+                      { shouldDirty: true },
+                    );
+                  }}
                 />
                 <div className="space-y-1">
                   <Label htmlFor="pt-enabled">
                     This state levies professional tax
                   </Label>
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    A flat monthly figure above ₹25,000 of gross pay. Every
-                    state sets its own, so it is not guessed from your address —
-                    Karnataka&rsquo;s ₹200 is offered as a starting point.
+                    A flat monthly figure, levied above a wage the state fixes.
+                    Both are set here rather than guessed from your address,
+                    because every state differs — Karnataka&rsquo;s ₹200 above
+                    ₹25,000 is offered as a starting point.
                   </p>
                 </div>
               </div>
@@ -161,6 +170,35 @@ export function PayrollPolicyForm({
                           className="w-40"
                         />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              {hasProfessionalTax && (
+                <FormField
+                  control={form.control}
+                  name="professionalTaxThreshold"
+                  render={({ field }) => (
+                    <FormItem className="pl-7">
+                      <FormLabel className="text-xs text-muted-foreground">
+                        Levied above
+                      </FormLabel>
+                      <FormControl>
+                        <AmountInput
+                          value={field.value ?? 0}
+                          onChange={field.onChange}
+                          onBlur={field.onBlur}
+                          disabled={readOnly}
+                          prefix="₹"
+                          className="w-40"
+                        />
+                      </FormControl>
+                      <p className="text-xs text-muted-foreground">
+                        Monthly gross. Staff earning this or less have none
+                        withheld.
+                      </p>
                       <FormMessage />
                     </FormItem>
                   )}

@@ -101,6 +101,9 @@ OIL-1L,Sunflower Oil 1L,PCS,1512,5,"1,110","1,332",25,
 TEA-250,Tea Leaves 250g,PCS,0902,5,95,120,,
 `;
 
+/** Plans created by the allowance cases below; see the note on `capProductsAt`. */
+const createdPlans: string[] = [];
+
 beforeAll(async () => {
   await ensurePlatformData();
 }, 60_000);
@@ -109,6 +112,10 @@ afterAll(async () => {
   for (const companyId of createdCompanies) {
     await purgeTestCompany(companyId).catch(() => undefined);
   }
+  // After the companies, so no subscription still points at these.
+  await prisma.subscriptionPlan.deleteMany({
+    where: { id: { in: createdPlans } },
+  });
   await purgeTestUsers(createdEmails);
   await disconnectTestDb();
 });
@@ -375,4 +382,93 @@ describe("a file bigger than one sitting", () => {
     });
     expect(trial.balanced).toBe(true);
   }, 300_000);
+});
+
+/**
+ * A file is subject to the plan, the same as a form is.
+ *
+ * Every module that writes asks `billingRefusal` before it does. This one did
+ * not, so a subscription that had lapsed could still bring in four hundred
+ * records at a time — "everything already recorded stays readable and
+ * exportable" is what a read-only subscription promises, and writable was never
+ * on that list. That half is guarded in the action, where every other module
+ * guards it, and watched by `action-billing-coverage`.
+ *
+ * The allowance is the half that could not live there. `billingRefusal` asks
+ * whether there is room for *one more*, which is the right question for a form
+ * and the wrong one for a file: a shop with fifty slots left passes it and then
+ * brings in four hundred products. Only the service knows how many rows are
+ * about to be written, so the arithmetic is done there against the whole file.
+ */
+describe("a file against the plan's allowance", () => {
+  /**
+   * Puts the company on a plan of its own, so nothing else is disturbed.
+   *
+   * Removed again afterwards. Plans are platform-wide rather than tenant-owned,
+   * so `purgeTestCompany` does not reach them: leaving them behind put a row
+   * priced at nil in front of every other file's plan lookup, and the payments
+   * suite started reporting that an upgrade cost nothing.
+   */
+  async function capProductsAt(companyId: string, allowed: number) {
+    const plan = await prisma.subscriptionPlan.create({
+      data: {
+        key: `test-cap-${uniqueSlug("p")}`,
+        name: "Test Cap",
+        features: ["core.transactions"],
+        limits: {
+          users: -1,
+          branches: -1,
+          productsPerCompany: allowed,
+          transactionsPerMonth: -1,
+          aiMessagesPerMonth: -1,
+          storageMb: -1,
+        },
+        isPublic: false,
+      },
+      select: { id: true },
+    });
+    createdPlans.push(plan.id);
+    await prisma.subscription.update({
+      where: { companyId },
+      data: { planId: plan.id },
+    });
+  }
+
+  const threeProducts = `sku,name,unitCode,sellingPrice
+CAP-1,First,PCS,100
+CAP-2,Second,PCS,100
+CAP-3,Third,PCS,100
+`;
+
+  it("refuses a file that would take the shop past its allowance", async () => {
+    const fixture = await createCompany();
+    await capProductsAt(fixture.companyId, 2);
+
+    await expect(run(fixture, "products", threeProducts)).rejects.toThrow(
+      /plan allows 2/,
+    );
+
+    // Refused whole. A partial import leaves somebody guessing which rows
+    // landed, and the row that did not is the one with the opening balance.
+    const products = await prisma.product.count({
+      where: { companyId: fixture.companyId },
+    });
+    expect(products).toBe(0);
+  }, 90_000);
+
+  it("brings in a file that fits exactly", async () => {
+    const fixture = await createCompany();
+    await capProductsAt(fixture.companyId, 3);
+
+    const result = await run(fixture, "products", threeProducts);
+    expect(result.created).toBe(3);
+  }, 90_000);
+
+  it("leaves an unlimited plan alone", async () => {
+    const fixture = await createCompany();
+    await capProductsAt(fixture.companyId, -1);
+
+    const result = await run(fixture, "products", threeProducts);
+    expect(result.created).toBe(3);
+  }, 90_000);
 });

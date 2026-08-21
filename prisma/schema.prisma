@@ -539,6 +539,9 @@ model Company {
   /// Monthly professional tax, or null where the state levies none or the
   /// business has not said. Never guessed from the address.
   professionalTaxMonthly  Decimal?              @db.Decimal(18, 4)
+  /// The monthly wage above which that figure is levied. Null keeps
+  /// Karnataka's, which is where every business sat before this was settable.
+  professionalTaxThreshold Decimal?             @db.Decimal(18, 4)
   /// True for seeded sample tenants; surfaced in the UI as a demo banner.
   isDemo             Boolean                  @default(false)
   onboardingStep     Int                      @default(0)

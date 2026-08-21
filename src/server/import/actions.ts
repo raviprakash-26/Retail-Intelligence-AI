@@ -6,6 +6,7 @@ import type { DatasetKey } from "@/lib/import/datasets";
 import { recordAuditLog } from "@/server/audit/audit-log";
 import { fail, ok, type ActionResult } from "@/server/auth/action-result";
 import { assertPermission } from "@/server/auth/context";
+import { billingRefusal } from "@/server/billing/guards";
 import { requireSameOrigin } from "@/server/security/request-context";
 import {
   commitImport,
@@ -74,6 +75,18 @@ export async function commitImportAction(
   if (originError) return originError;
 
   const context = await assertPermission("data.import");
+
+  // Creating a product through the form asks this; creating four hundred
+  // through a file did not. That is the comparison that matters, because this
+  // calls the very same `createProduct` in a loop — a shop whose subscription
+  // had lapsed was refused one and allowed the four hundred.
+  //
+  // Not every module asks: the ledger-side actions do not, and whether a
+  // read-only subscription may still post a journal entry or close a period is
+  // a question about the product rather than about this file. This matches the
+  // path it duplicates and leaves that question where it was.
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
 
   const parsed = schema.safeParse(input);
   if (!parsed.success) {

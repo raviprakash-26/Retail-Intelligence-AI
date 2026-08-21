@@ -131,6 +131,7 @@ export async function updatePayrollPolicyAction(
       providentFundApplicable: parsed.data.providentFund,
       esiApplicable: parsed.data.employeeStateInsurance,
       professionalTaxMonthly: parsed.data.professionalTaxMonthly,
+      professionalTaxThreshold: parsed.data.professionalTaxThreshold ?? null,
     },
   });
 
@@ -146,6 +147,7 @@ export async function updatePayrollPolicyAction(
       providentFund: parsed.data.providentFund,
       employeeStateInsurance: parsed.data.employeeStateInsurance,
       professionalTaxMonthly: parsed.data.professionalTaxMonthly,
+      professionalTaxThreshold: parsed.data.professionalTaxThreshold ?? null,
     },
   });
 

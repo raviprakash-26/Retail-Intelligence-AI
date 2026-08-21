@@ -56,8 +56,16 @@ export const ESI = {
  *
  * Karnataka's slab is the default because the product's own demo shop is in
  * Bengaluru, and a wrong default that looks plausible is worse than an obvious
- * one. A business elsewhere sets its own monthly figure; the slab is not
- * guessed from the address.
+ * one. A business elsewhere sets its own figures; the slab is not guessed from
+ * the address.
+ *
+ * Both halves of a slab are settable, and for a while only one of them was. The
+ * monthly amount could be set and the threshold could not, so a shop in a state
+ * that levies from ₹7,500 would say "we levy ₹200 a month", and this would
+ * silently apply Karnataka's ₹25,000 and withhold nothing from anybody earning
+ * less than that. The business had said it was liable and the software quietly
+ * decided it was not — which is the plausible wrong default the paragraph above
+ * exists to refuse, arrived at from the other direction.
  */
 export const KARNATAKA_PROFESSIONAL_TAX = {
   threshold: 25_000,
@@ -74,12 +82,21 @@ export type PayrollPolicy = {
    * business has not said. Never inferred from the address.
    */
   professionalTaxMonthly: number | null;
+  /**
+   * The monthly wage above which that figure is levied.
+   *
+   * Null falls back to Karnataka's, which keeps every business that set a
+   * monthly figure before this existed exactly where it was. A business in
+   * another state sets its own rather than inheriting Bengaluru's.
+   */
+  professionalTaxThreshold?: number | null;
 };
 
 export const NO_STATUTORY_DEDUCTIONS: PayrollPolicy = {
   providentFund: false,
   employeeStateInsurance: false,
   professionalTaxMonthly: null,
+  professionalTaxThreshold: null,
 };
 
 export type EarningsInput = {
@@ -154,9 +171,13 @@ export function computeStatutory(
     : money(0);
 
   // Professional tax is a flat monthly figure above a threshold, not a rate.
+  // The threshold is the business's own where it has set one; Karnataka's only
+  // where it has not.
+  const professionalTaxThreshold =
+    policy.professionalTaxThreshold ?? KARNATAKA_PROFESSIONAL_TAX.threshold;
   const professionalTax =
     policy.professionalTaxMonthly !== null &&
-    gross.greaterThan(KARNATAKA_PROFESSIONAL_TAX.threshold)
+    gross.greaterThan(professionalTaxThreshold)
       ? money(policy.professionalTaxMonthly)
       : money(0);
 

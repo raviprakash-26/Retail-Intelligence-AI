@@ -124,6 +124,7 @@ export async function payrollPolicy(companyId: string): Promise<PayrollPolicy> {
       providentFundApplicable: true,
       esiApplicable: true,
       professionalTaxMonthly: true,
+      professionalTaxThreshold: true,
     },
   });
 
@@ -134,6 +135,10 @@ export async function payrollPolicy(companyId: string): Promise<PayrollPolicy> {
       company.professionalTaxMonthly === null
         ? null
         : Number(company.professionalTaxMonthly),
+    professionalTaxThreshold:
+      company.professionalTaxThreshold === null
+        ? null
+        : Number(company.professionalTaxThreshold),
   };
 }
 
