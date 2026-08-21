@@ -135,6 +135,16 @@ export function PeriodManager({
                         {period.pending.journalDrafts === 1 ? "" : "s"}
                       </span>
                     )}
+                    {/*
+                      Why the Reopen button beside it is greyed out. A disabled
+                      button's `title` does not fire on hover in every browser,
+                      so the reason has to be readable without one.
+                    */}
+                    {period.fiscalYearClosed && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        year closed
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2 text-right">
                     {canClose && period.status === "OPEN" && (
@@ -159,10 +169,16 @@ export function PeriodManager({
                         type="button"
                         variant="ghost"
                         size="sm"
+                        disabled={!period.reopenable || pending === period.id}
                         onClick={() => {
                           setReopening(period);
                           setReason("");
                         }}
+                        title={
+                          period.reopenable
+                            ? undefined
+                            : `${period.fiscalYearLabel} has been closed. Reopen the year first, under Financial years below.`
+                        }
                       >
                         <LockOpen className="size-3.5" aria-hidden="true" />
                         Reopen

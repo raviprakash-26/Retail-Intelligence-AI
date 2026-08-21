@@ -32,6 +32,16 @@ import { recordAuditLog } from "@/server/audit/audit-log";
  * behind something already filed can change, so it demands a reason, and that
  * reason goes into the append-only log where an auditor will find it.
  *
+ * **Reopening stops at the year.** A month inside a year that has been closed
+ * cannot be reopened on its own. Closing a year posts an entry that sweeps the
+ * income and expense accounts into retained earnings; reopening one of its
+ * months and posting into it adds earnings the closing entry has already been
+ * written and cannot account for, so the year's profit and its retained
+ * earnings disagree from then on — while the year still shows as closed. The
+ * year has to be reopened first, which reverses that entry, and reopening it
+ * leaves every month closed, so this is one extra step rather than a different
+ * road.
+ *
  * **Nothing produces LOCKED yet, and that is on purpose.** The schema has a
  * third state meaning "closed and not reopenable". The posting guard already
  * treats it correctly, because anything other than OPEN is refused. What is
@@ -43,7 +53,8 @@ import { recordAuditLog } from "@/server/audit/audit-log";
 export class PeriodError extends Error {
   constructor(
     message: string,
-    readonly code: "NOT_FOUND" | "ALREADY" | "PENDING" | "LOCKED" | "ORDER",
+    readonly code:
+      "NOT_FOUND" | "ALREADY" | "PENDING" | "LOCKED" | "ORDER" | "YEAR_CLOSED",
   ) {
     super(message);
     this.name = "PeriodError";
@@ -65,6 +76,16 @@ export type PeriodView = {
   pending: { journalDrafts: number };
   /** True where this period may be closed right now. */
   closable: boolean;
+  /**
+   * True where this period may be reopened right now.
+   *
+   * False once the year around it has been closed. `reopenPeriod` refuses
+   * that outright; this is so the screen can say why before somebody types a
+   * reason into a dialog that was never going to be accepted.
+   */
+  reopenable: boolean;
+  /** The year around it, so the screen can name what has to be reopened first. */
+  fiscalYearClosed: boolean;
 };
 
 /** Every period of every year, newest first, with what closing would mean. */
@@ -79,7 +100,7 @@ export async function listPeriods(companyId: string): Promise<PeriodView[]> {
       endDate: true,
       status: true,
       closedAt: true,
-      fiscalYear: { select: { label: true } },
+      fiscalYear: { select: { label: true, closedAt: true } },
     },
     orderBy: [{ startDate: "desc" }],
   });
@@ -108,6 +129,7 @@ export async function listPeriods(companyId: string): Promise<PeriodView[]> {
 
   return periods.map((period) => {
     const journalDrafts = draftBy.get(period.id) ?? 0;
+    const fiscalYearClosed = period.fiscalYear.closedAt !== null;
     return {
       id: period.id,
       label: period.label,
@@ -121,6 +143,9 @@ export async function listPeriods(companyId: string): Promise<PeriodView[]> {
       pending: { journalDrafts },
       closable:
         period.status === FiscalPeriodStatus.OPEN && journalDrafts === 0,
+      reopenable:
+        period.status === FiscalPeriodStatus.CLOSED && !fiscalYearClosed,
+      fiscalYearClosed,
     };
   });
 }
@@ -225,13 +250,30 @@ export async function reopenPeriod(params: {
 
   const period = await prisma.fiscalPeriod.findFirst({
     where: { id: params.periodId, companyId: params.companyId },
-    select: { id: true, label: true, status: true },
+    select: {
+      id: true,
+      label: true,
+      status: true,
+      fiscalYear: { select: { label: true, closedAt: true } },
+    },
   });
   if (!period)
     throw new PeriodError("That period could not be found.", "NOT_FOUND");
 
   if (period.status === FiscalPeriodStatus.OPEN) {
     throw new PeriodError(`${period.label} is already open.`, "ALREADY");
+  }
+
+  // Checked before the LOCKED case below only because a closed year is the
+  // reachable one. Closing the year is what makes the twelve months settled
+  // rather than merely shut: the closing entry has already swept this month's
+  // income into retained earnings, so anything posted here afterwards would be
+  // earnings that entry cannot account for, in a year still showing as closed.
+  if (period.fiscalYear.closedAt) {
+    throw new PeriodError(
+      `${period.fiscalYear.label} has been closed, so ${period.label} cannot be reopened on its own. Reopen the year first — that reverses its closing entry — and then reopen the month.`,
+      "YEAR_CLOSED",
+    );
   }
   if (period.status === FiscalPeriodStatus.LOCKED) {
     // Nothing produces this state yet; the check is here so that if anything

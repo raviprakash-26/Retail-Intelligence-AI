@@ -11,7 +11,12 @@ import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
 import { createSale } from "@/server/sales/sale-service";
-import { closePeriod, listPeriods } from "@/server/accounting/period-service";
+import {
+  closePeriod,
+  listPeriods,
+  PeriodError,
+  reopenPeriod,
+} from "@/server/accounting/period-service";
 import {
   closeFiscalYear,
   listYearsForClosing,
@@ -630,5 +635,171 @@ describe("reopening a closed year", () => {
         reason: "No reason it should work",
       }),
     ).rejects.toThrow(/not closed/i);
+  }, 120_000);
+});
+
+/**
+ * The months inside a year that has been closed.
+ *
+ * `reopenPeriod` was written before anything could close a year, and never
+ * learned about it. It asked whether the *period* was closed and nothing else,
+ * so a month inside a settled year could be reopened on its own and posted
+ * into — after the closing entry that swept that month's income into retained
+ * earnings had already been written. The year went on wearing its padlock
+ * while its profit moved, and no route existed to sweep the difference: a
+ * closed year is not closable again.
+ *
+ * These cases fix the boundary between the two modules, which is the thing
+ * neither of them owned.
+ */
+describe("months inside a closed year", () => {
+  /** A shop whose year is closed, and the month it traded in. */
+  async function shopWithClosedYear() {
+    const shop = await shopReadyToClose();
+    await closeEveryMonth(shop);
+    await closeFiscalYear({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      fiscalYearId: shop.yearId,
+    });
+
+    const now = Date.now();
+    const trading = (await listPeriods(shop.companyId)).find(
+      (period) =>
+        period.startDate.getTime() <= now && period.endDate.getTime() >= now,
+    )!;
+    return { shop, trading };
+  }
+
+  it("refuses to reopen one, and names the year to reopen instead", async () => {
+    const { shop, trading } = await shopWithClosedYear();
+
+    await expect(
+      reopenPeriod({
+        companyId: shop.companyId,
+        userId: shop.userId,
+        actorEmail: "owner@example.com",
+        periodId: trading.id,
+        reason: "A supplier bill arrived late",
+      }),
+    ).rejects.toMatchObject({ code: "YEAR_CLOSED" });
+
+    // Named, not merely refused: the person has to know the year comes first.
+    await expect(
+      reopenPeriod({
+        companyId: shop.companyId,
+        userId: shop.userId,
+        actorEmail: "owner@example.com",
+        periodId: trading.id,
+        reason: "A supplier bill arrived late",
+      }),
+    ).rejects.toThrow(/reopen the year first/i);
+
+    const after = (await listPeriods(shop.companyId)).find(
+      (period) => period.id === trading.id,
+    )!;
+    expect(after.status).toBe("CLOSED");
+  }, 120_000);
+
+  it("keeps the settled year settled", async () => {
+    // The defect this guards, stated as the shop would see it: a year that has
+    // been closed reports nil income, and must still report nil afterwards.
+    const { shop, trading } = await shopWithClosedYear();
+
+    const revenue = async () =>
+      Number(
+        (
+          await getFinancialStatements({
+            companyId: shop.companyId,
+            from: isoDay(shop.from),
+            to: isoDay(shop.to),
+          })
+        ).trading.revenueTotal,
+      );
+
+    expect(await revenue()).toBe(0);
+
+    await expect(
+      reopenPeriod({
+        companyId: shop.companyId,
+        userId: shop.userId,
+        actorEmail: "owner@example.com",
+        periodId: trading.id,
+        reason: "A supplier bill arrived late",
+      }),
+    ).rejects.toThrow(PeriodError);
+
+    // Nothing can be posted into it, so the year's result cannot drift away
+    // from the retained earnings the closing entry already moved.
+    expect(await revenue()).toBe(0);
+    const year = await prisma.fiscalYear.findUniqueOrThrow({
+      where: { id: shop.yearId },
+      select: { closedAt: true },
+    });
+    expect(year.closedAt).not.toBeNull();
+  }, 120_000);
+
+  it("reports the month as un-reopenable, so the screen can grey the button", async () => {
+    const { shop, trading } = await shopWithClosedYear();
+
+    const view = (await listPeriods(shop.companyId)).find(
+      (period) => period.id === trading.id,
+    )!;
+    expect(view.status).toBe("CLOSED");
+    expect(view.fiscalYearClosed).toBe(true);
+    expect(view.reopenable).toBe(false);
+  }, 120_000);
+
+  it("lets the month reopen once the year has been reopened", async () => {
+    // One extra step, not a different road — which is what makes the refusal
+    // above a reasonable thing to do to somebody with a late supplier bill.
+    const { shop, trading } = await shopWithClosedYear();
+
+    await reopenFiscalYear({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      fiscalYearId: shop.yearId,
+      reason: "A supplier bill arrived after the year was closed",
+    });
+
+    const between = (await listPeriods(shop.companyId)).find(
+      (period) => period.id === trading.id,
+    )!;
+    // Reopening the year does not reopen its months; it makes them reopenable.
+    expect(between.status).toBe("CLOSED");
+    expect(between.reopenable).toBe(true);
+
+    const reopened = await reopenPeriod({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      periodId: trading.id,
+      reason: "A supplier bill arrived late",
+    });
+    expect(reopened.status).toBe("OPEN");
+  }, 120_000);
+
+  it("still reopens a month in a year that was never closed", async () => {
+    // The ordinary case, which the new guard must not have caught up in it.
+    const shop = await shopReadyToClose();
+    await closeEveryMonth(shop);
+
+    const now = Date.now();
+    const trading = (await listPeriods(shop.companyId)).find(
+      (period) =>
+        period.startDate.getTime() <= now && period.endDate.getTime() >= now,
+    )!;
+    expect(trading.reopenable).toBe(true);
+
+    const reopened = await reopenPeriod({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      periodId: trading.id,
+      reason: "A supplier bill arrived late",
+    });
+    expect(reopened.status).toBe("OPEN");
   }, 120_000);
 });
