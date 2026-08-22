@@ -134,6 +134,7 @@ export function periodLabel(year: number, month: number): string {
 }
 
 type RegisterRow = {
+  direction: GstDirection;
   ratePercent: Decimal;
   taxableValue: Decimal;
   cgstAmount: Decimal;
@@ -147,7 +148,36 @@ type RegisterRow = {
   hsnCode: string | null;
   itcEligible: boolean;
   documentId: string;
+  isAmendment: boolean;
 };
+
+/**
+ * Documents that were voided, and so belong on no table of the return.
+ *
+ * A void appends the document's own rows back with the sign flipped, under the
+ * same document id — that is how the register stays append-only and a period
+ * somebody has already read still shows what was there. The money nets to
+ * nothing, which is right, and every table then counted the document anyway.
+ *
+ * So a return could carry a B2B line naming a customer, with a taxable value of
+ * zero and one invoice against them: a supply that does not exist, reported to
+ * a counterparty who would find it in their own GSTR-2B. The invoice count is
+ * the figure an accountant reconciles against the portal, and it read one too
+ * high for every invoice cancelled that month.
+ *
+ * A document is cancelled when its reversal sits beside it — original rows and
+ * amendment rows sharing one id. Nothing else produces that. A credit note is a
+ * document in its own right with its own id, so it is not caught here and still
+ * appears, which is what the return requires of it.
+ */
+function cancelledDocuments(rows: readonly RegisterRow[]): ReadonlySet<string> {
+  const original = new Set<string>();
+  const reversed = new Set<string>();
+  for (const row of rows) {
+    (row.isAmendment ? reversed : original).add(row.documentId);
+  }
+  return new Set([...reversed].filter((id) => original.has(id)));
+}
 
 /** Adds a set of rows into one summary line. */
 function summarise(
@@ -281,6 +311,7 @@ export async function getGstWorkingPaper(params: {
         hsnCode: true,
         itcEligible: true,
         documentId: true,
+        isAmendment: true,
       },
     }),
     prisma.company.findUniqueOrThrow({
@@ -289,12 +320,16 @@ export async function getGstWorkingPaper(params: {
     }),
   ]);
 
-  const outwardRows = rows.filter(
+  const all = rows as RegisterRow[];
+  const cancelled = cancelledDocuments(all);
+  const live = all.filter((row) => !cancelled.has(row.documentId));
+
+  const outwardRows = live.filter(
     (row) => row.direction === GstDirection.OUTWARD,
-  ) as RegisterRow[];
-  const inwardRows = rows.filter(
+  );
+  const inwardRows = live.filter(
     (row) => row.direction === GstDirection.INWARD,
-  ) as RegisterRow[];
+  );
 
   // A registered customer goes in the B2B table; everyone else is B2C.
   const b2bRows = outwardRows.filter((row) => Boolean(row.partyGstin));
@@ -393,7 +428,10 @@ export async function getGstWorkingPaper(params: {
       agrees: outputDifference.isZero() && inputDifference.isZero(),
     },
     registration: company.gstRegistration,
-    empty: rows.length === 0,
+    // What is left to report, not what was ever recorded. A month whose only
+    // invoice was cancelled has nothing to prepare, and saying so is better
+    // than a full working paper of zeros.
+    empty: live.length === 0,
   };
 }
 

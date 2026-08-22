@@ -366,6 +366,75 @@ describe("outward supplies", () => {
     expect(after.reconciliation.agrees).toBe(true);
   });
 
+  /**
+   * A void has to leave the tables as well as the totals.
+   *
+   * The case above asserts the money and always passed: the reversing rows net
+   * the value to nothing, which is right. What nothing asserted was the shape
+   * around it, and the void stayed there — counted as an invoice on every
+   * table, and named on the B2B one with a taxable value of zero. That is a
+   * supply reported against a customer who was billed nothing, and it is the
+   * count an accountant reconciles against the portal.
+   */
+  it("leaves no trace of a voided invoice on the tables", async () => {
+    const fixture = await createCompany();
+    const sale = await sell(fixture, fixture.registeredCustomerId, 10);
+    await sell(fixture, fixture.walkInCustomerId, 4);
+
+    await voidSale({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      reason: "Raised against the wrong customer",
+    });
+
+    const after = await paperFor(fixture);
+
+    // One invoice stands: the walk-in sale.
+    expect(after.outward.total.documents).toBe(1);
+    expect(after.outward.byHsn[0]?.documents).toBe(1);
+
+    // And the customer who was billed nothing is not on the B2B table at all.
+    expect(after.outward.b2b).toEqual([]);
+    expect(after.outward.b2bTotal.documents).toBe(0);
+    expect(after.outward.b2cTotal.documents).toBe(1);
+  });
+
+  it("says there is nothing to prepare when the only invoice was voided", async () => {
+    const fixture = await createCompany();
+    const sale = await sell(fixture, fixture.registeredCustomerId, 10);
+    expect((await paperFor(fixture)).empty).toBe(false);
+
+    await voidSale({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      reason: "Raised against the wrong customer",
+    });
+
+    // Rather than a full working paper of zeros, which is what a month with
+    // rows in the register but nothing left to report used to render.
+    expect((await paperFor(fixture)).empty).toBe(true);
+  });
+
+  it("keeps a credit note on the return, which is not a void", async () => {
+    // The two look alike in the register — both append negative rows — and
+    // only one of them cancels a document. A credit note is a document of its
+    // own with its own id, and the return reports it.
+    const fixture = await createCompany();
+    const bill = await buy(fixture, 10);
+    await returnWholeBill(fixture, bill.id);
+
+    const paper = await paperFor(fixture);
+
+    // The bill and the debit note against it: two documents, netting to nil.
+    expect(paper.inward.byRate[0]?.documents).toBe(2);
+    expect(paper.empty).toBe(false);
+    expect(paper.reconciliation.agrees).toBe(true);
+  });
+
   it("counts only the period asked for", async () => {
     const fixture = await createCompany();
     await sell(fixture, fixture.registeredCustomerId, 10, "2026-06-15");
