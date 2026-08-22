@@ -13,6 +13,10 @@ import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
 import { createPurchase } from "@/server/purchases/purchase-service";
+import {
+  createPurchaseReturn,
+  returnableBillLines,
+} from "@/server/returns/purchase-return-service";
 import { createSale, voidSale } from "@/server/sales/sale-service";
 import {
   getGstWorkingPaper,
@@ -244,6 +248,30 @@ async function buy(fixture: Fixture, quantity: number, claimCredit = true) {
   });
 }
 
+/** Sends a whole bill back to the supplier, in the same period it was bought. */
+async function returnWholeBill(fixture: Fixture, purchaseId: string) {
+  const lines = await returnableBillLines({
+    companyId: fixture.companyId,
+    purchaseId,
+  });
+  return createPurchaseReturn({
+    companyId: fixture.companyId,
+    userId: fixture.userId,
+    actorEmail: fixture.actorEmail,
+    branchId: null,
+    input: {
+      purchaseId,
+      returnDate: IN_PERIOD,
+      reason: "",
+      refundMode: "CREDIT",
+      lines: lines.map((line) => ({
+        sourceLineId: line.lineId,
+        quantity: Number(line.returnable),
+      })),
+    },
+  });
+}
+
 const paperFor = (fixture: Fixture) =>
   getGstWorkingPaper({
     companyId: fixture.companyId,
@@ -454,6 +482,51 @@ describe("reconciling against the books", () => {
     expect(paper.inward.eligible.totalTax).toBe(toStorageString(0));
     expect(paper.reconciliation.inputFromLedger).toBe(toStorageString(0));
     expect(paper.reconciliation.agrees).toBe(true);
+  });
+
+  /**
+   * Sending back a bill whose credit was never claimed.
+   *
+   * This is where the reconciliation could not help, and it is worth being
+   * plain about why. The debit note used to credit input tax that had never
+   * been claimed *and* stamp its register row as eligible — so the register and
+   * the ledger moved by the same wrong amount in the same direction, the
+   * difference between them stayed at zero, and `agrees` said yes. A check that
+   * compares two figures cannot catch a mistake made identically in both.
+   *
+   * What it does catch is the money. A month's claimable credit is what the
+   * set-off runs on, so surrendering a claim nobody made left less credit
+   * against output tax and more payable in cash than was owed.
+   */
+  it("surrenders no credit when an unclaimed bill goes back", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, fixture.registeredCustomerId, 10);
+    const claimed = await buy(fixture, 10, true);
+    const unclaimed = await buy(fixture, 20, false);
+
+    const before = await paperFor(fixture);
+    await returnWholeBill(fixture, unclaimed.id);
+    const after = await paperFor(fixture);
+
+    // The claimable credit is the one from the claimed bill, before and after.
+    expect(before.inward.eligible.totalTax).toBe(toStorageString(90));
+    expect(after.inward.eligible.totalTax).toBe(toStorageString(90));
+
+    // So the set-off runs on the same credit and arrives at the same cash.
+    expect(after.setOff.totalPayable).toBe(before.setOff.totalPayable);
+    expect(after.reconciliation.agrees).toBe(true);
+    expect(after.reconciliation.inputFromLedger).toBe(toStorageString(90));
+
+    // And the unclaimable tax is still reported as what it is: a cost, not a
+    // credit — reduced by the goods that went back.
+    expect(after.inward.ineligible.totalTax).toBe(toStorageString(0));
+
+    // Returning the claimed bill *does* give its credit up, which is the case
+    // that must keep working for the guard above to mean anything.
+    await returnWholeBill(fixture, claimed.id);
+    const returned = await paperFor(fixture);
+    expect(returned.inward.eligible.totalTax).toBe(toStorageString(0));
+    expect(returned.reconciliation.agrees).toBe(true);
   });
 });
 

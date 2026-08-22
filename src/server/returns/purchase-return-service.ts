@@ -107,6 +107,9 @@ export async function createPurchaseReturn(params: {
           status: true,
           branchId: true,
           supplyType: true,
+          // Whether this bill's input tax was claimed. It decides both what the
+          // debit note may give back and what the goods were valued at.
+          itcEligible: true,
           supplier: { select: { id: true, name: true, gstin: true } },
           items: {
             select: {
@@ -317,17 +320,33 @@ export async function createPurchaseReturn(params: {
         },
       ];
 
-      const taxLines: Array<[string, Decimal]> = [
-        [SYSTEM_ACCOUNT.GST_INPUT_CGST, totals.cgstAmount],
-        [SYSTEM_ACCOUNT.GST_INPUT_SGST, totals.sgstAmount],
-        [SYSTEM_ACCOUNT.GST_INPUT_IGST, totals.igstAmount],
-        [SYSTEM_ACCOUNT.GST_INPUT_CESS, totals.cessAmount],
-      ];
-      for (const [key, amount] of taxLines) {
-        if (!isZero(amount)) {
-          // Input credit already claimed on goods that went back has to be
-          // given up. That is what a debit note does under GST.
-          lines.push({ accountId: accountId(key), credit: amount });
+      // Only credit that was actually claimed can be given up.
+      //
+      // The bill decided this, and the same rule read from the other side: a
+      // purchase posts input tax as an asset only when it can be set off, and
+      // otherwise lands it onto the cost of the goods because it "must not
+      // appear here as well, or the bill would be counted twice". Where nothing
+      // was ever debited, crediting it back puts a credit balance on an asset
+      // account that came from nowhere — and the tax, which is sitting inside
+      // the stock value, then leaves a second time as a cost.
+      const returnedTax = add(
+        totals.cgstAmount,
+        totals.sgstAmount,
+        totals.igstAmount,
+        totals.cessAmount,
+      );
+
+      if (purchase.itcEligible) {
+        const taxLines: Array<[string, Decimal]> = [
+          [SYSTEM_ACCOUNT.GST_INPUT_CGST, totals.cgstAmount],
+          [SYSTEM_ACCOUNT.GST_INPUT_SGST, totals.sgstAmount],
+          [SYSTEM_ACCOUNT.GST_INPUT_IGST, totals.igstAmount],
+          [SYSTEM_ACCOUNT.GST_INPUT_CESS, totals.cessAmount],
+        ];
+        for (const [key, amount] of taxLines) {
+          if (!isZero(amount)) {
+            lines.push({ accountId: accountId(key), credit: amount });
+          }
         }
       }
 
@@ -359,7 +378,15 @@ export async function createPurchaseReturn(params: {
       // Whatever the supplier refunds and the shelf gives up do not match, the
       // difference is a real cost or credit — most often freight capitalised
       // into goods that have since gone back, which bought nothing.
-      const difference = subtract(stockValueRemoved, totals.taxableAmount);
+      // Against what the bill actually put into stock, which is the taxable
+      // amount when the credit was claimed and the tax-inclusive figure when it
+      // was not — the same choice `createPurchase` makes when it values the
+      // goods coming in. Comparing tax-inclusive stock against a tax-exclusive
+      // refund reports the whole of an unclaimable tax as a cost of returning.
+      const costBasis = purchase.itcEligible
+        ? totals.taxableAmount
+        : add(totals.taxableAmount, returnedTax);
+      const difference = subtract(stockValueRemoved, costBasis);
       if (!isZero(difference)) {
         lines.push(
           compare(difference, 0) > 0
@@ -406,7 +433,11 @@ export async function createPurchaseReturn(params: {
         placeOfSupply: company.stateCode,
         partyName: purchase.supplier?.name ?? "Supplier",
         partyGstin: purchase.supplier?.gstin ?? null,
-        itcEligible: true,
+        // What the bill said, not what a debit note usually is. A negative row
+        // marked eligible is credit being surrendered, and surrendering a claim
+        // nobody made understates the month's claimable credit and overstates
+        // the cash payable that the set-off arrives at.
+        itcEligible: purchase.itcEligible,
         lines: priced.map((entry) => entry.line),
         sign: -1,
       });
