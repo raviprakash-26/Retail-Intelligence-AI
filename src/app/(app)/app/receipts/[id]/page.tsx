@@ -69,7 +69,7 @@ export default async function ReceiptDetailPage({
         date: sale.invoiceDate,
         allocated: allocated.get(sale.id) ?? "0",
         total: toStorageString(sale.totalAmount),
-        paid: toStorageString(sale.paidAmount),
+        outstanding: sale.outstanding,
       }))}
       entry={entry}
       canVoid={context.permissions.has("receipts.void")}
