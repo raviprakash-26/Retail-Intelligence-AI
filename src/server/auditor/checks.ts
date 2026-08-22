@@ -8,12 +8,20 @@ import {
 } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
-import { compare, isNegative, money, PRESENTATION_SCALE } from "@/lib/money";
+import {
+  add,
+  compare,
+  isNegative,
+  money,
+  PRESENTATION_SCALE,
+  subtract,
+} from "@/lib/money";
 import { CASH_PAYMENT_LIMIT } from "@/lib/tax/presumptive";
 import { RULES, type RuleKey, type Severity } from "@/lib/auditor/rules";
 import { getTrialBalance } from "@/server/accounting/trial-balance-service";
 import { getGstWorkingPaper } from "@/server/gst/gst-return-service";
 import { reconcileStock } from "@/server/inventory/inventory-report";
+import { settledByNotes } from "@/server/settlements/outstanding";
 import { aggregateCashDays, cashOutflows } from "@/server/tax/cash-outflows";
 
 /**
@@ -502,76 +510,92 @@ async function checkCashOverLimit(context: CheckContext): Promise<Finding[]> {
 /** Days past due at which an unpaid invoice is worth surfacing. */
 const LONG_OVERDUE_DAYS = 90;
 
-type OverdueTotals = {
-  invoices: bigint;
-  outstanding: Prisma.Decimal | null;
-};
-
 /**
  * Money owed for a long time.
  *
- * The total is aggregated in the database over every matching invoice, not
- * summed from a page of them. It used to take the first fifty rows and add
- * those up, which meant a shop with two hundred overdue invoices was shown the
- * outstanding of fifty presented as the whole — a figure that was wrong, looked
- * exact, and got smaller the worse the problem was.
+ * Two things this has to get right, and it used to get neither.
  *
- * The oldest invoice is fetched separately, because naming one is a detail and
- * totalling them is a number somebody may act on.
+ * **Every matching invoice, not a page of them.** It once took the first fifty
+ * overdue invoices and added those up, so a shop with two hundred was shown the
+ * outstanding of fifty presented as the whole — a figure that was wrong, looked
+ * exact, and got smaller the worse the problem was. Every overdue invoice is
+ * read here, with no page bound; the earlier fault was summing a page, not
+ * summing outside the database.
+ *
+ * **What an invoice still owes, not what was receipted against it.** Asking
+ * whether `totalAmount > paidAmount` is what settled meant before returns
+ * existed. A credit note settles an invoice as surely as a receipt does, so an
+ * invoice whose goods had all come back and been credited still read as unpaid:
+ * counted among those owed for over ninety days, added into the total, and
+ * eligible to be named as the oldest. The auditor told a shop to chase a
+ * customer for goods that customer had already sent back.
+ *
+ * `settledByNotes` is the definition the ageing report, the receipt form's
+ * allocation cap, the cash projection, the income tax working paper and both
+ * document lists already share, and it answers from the movement the return
+ * posted to the receivable account — which is what tells a return credited to
+ * the account apart from one refunded over the counter.
  */
 async function checkLongOverdue(context: CheckContext): Promise<Finding[]> {
   const cutoff = new Date(
     context.to.getTime() - LONG_OVERDUE_DAYS * 86_400_000,
   );
 
-  const where: Prisma.SaleWhereInput = {
-    companyId: context.companyId,
-    status: DocumentStatus.POSTED,
-    customerId: { not: null },
-    OR: [
-      { dueDate: { lt: cutoff } },
-      { dueDate: null, invoiceDate: { lt: cutoff } },
-    ],
-  };
-
-  // Postgres does the subtraction and the sum, in the numeric type the columns
-  // are stored in. Nothing passes through a float on the way.
-  const totals = await prisma.$queryRaw<OverdueTotals[]>`
-    SELECT COUNT(*)::bigint AS invoices,
-           SUM(s."totalAmount" - s."paidAmount") AS outstanding
-    FROM sales s
-    WHERE s."companyId" = ${context.companyId}::uuid
-      AND s.status = ${DocumentStatus.POSTED}::"DocumentStatus"
-      AND s."customerId" IS NOT NULL
-      AND s."totalAmount" > s."paidAmount"
-      AND COALESCE(s."dueDate", s."invoiceDate") < ${cutoff}
-  `;
-
-  const row = totals[0];
-  const invoices = Number(row?.invoices ?? 0);
-  if (invoices === 0) return [];
-
-  const oldest = await prisma.sale.findFirst({
-    where: { ...where, totalAmount: { gt: prisma.sale.fields.paidAmount } },
+  const overdue = await prisma.sale.findMany({
+    where: {
+      companyId: context.companyId,
+      status: DocumentStatus.POSTED,
+      customerId: { not: null },
+      OR: [
+        { dueDate: { lt: cutoff } },
+        { dueDate: null, invoiceDate: { lt: cutoff } },
+      ],
+    },
     select: {
+      id: true,
       invoiceNumber: true,
       invoiceDate: true,
       dueDate: true,
+      totalAmount: true,
+      paidAmount: true,
       customer: { select: { name: true } },
     },
     orderBy: { invoiceDate: "asc" },
   });
+  if (overdue.length === 0) return [];
+
+  const credited = await settledByNotes(prisma, {
+    companyId: context.companyId,
+    documentIds: overdue.map((sale) => sale.id),
+    side: "RECEIVABLE",
+  });
+
+  const stillOwed = overdue
+    .map((sale) => ({
+      sale,
+      outstanding: subtract(
+        sale.totalAmount,
+        add(sale.paidAmount, credited.get(sale.id) ?? money(0)),
+      ),
+    }))
+    .filter((entry) => compare(entry.outstanding, 0) > 0);
+
+  if (stillOwed.length === 0) return [];
+
+  // Oldest by invoice date among those that still owe something — the list is
+  // already in that order, so the first one is it.
+  const oldest = stillOwed[0]!.sale;
 
   return [
     finding("LONG_OVERDUE_RECEIVABLE", {
-      invoices,
-      outstanding: money(row?.outstanding?.toString() ?? 0).toFixed(
+      invoices: stillOwed.length,
+      outstanding: add(...stillOwed.map((entry) => entry.outstanding)).toFixed(
         PRESENTATION_SCALE,
       ),
       thresholdDays: LONG_OVERDUE_DAYS,
-      oldestInvoice: oldest?.invoiceNumber ?? null,
-      oldestCustomer: oldest?.customer?.name ?? "Unnamed customer",
-      oldestDate: oldest ? isoDay(oldest.dueDate ?? oldest.invoiceDate) : null,
+      oldestInvoice: oldest.invoiceNumber,
+      oldestCustomer: oldest.customer?.name ?? "Unnamed customer",
+      oldestDate: isoDay(oldest.dueDate ?? oldest.invoiceDate),
     }),
   ];
 }
