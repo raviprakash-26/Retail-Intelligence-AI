@@ -133,10 +133,24 @@ const serverSchema = z
      * reachability are reconnaissance in a way that "ok" is not, and an
      * operator opting in is a decision somebody made.
      */
-    METRICS_TOKEN: z
-      .string()
-      .min(16, "METRICS_TOKEN needs at least 16 characters to be worth having")
-      .optional(),
+    METRICS_TOKEN: z.preprocess(
+      // An empty value is how every other optional here says "not set" —
+      // `SMTP_URL=`, `AI_API_KEY=` and the payment keys all ship blank in
+      // .env.example and mean absent. This one read a blank as a token of
+      // length zero and refused to boot over it, which is why its example
+      // line is the only one that had to be commented out instead. Blank
+      // means the endpoint is off; a token that is actually set still has to
+      // be worth having.
+      (value) =>
+        typeof value === "string" && value.trim() === "" ? undefined : value,
+      z
+        .string()
+        .min(
+          16,
+          "METRICS_TOKEN needs at least 16 characters to be worth having",
+        )
+        .optional(),
+    ),
     SEED_DEMO_DATA: booleanish.default(false),
   })
   // Each pluggable driver states its own required configuration, so a

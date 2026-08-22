@@ -147,6 +147,28 @@ describe("a deployment that would send no email", () => {
   });
 });
 
+describe("a setting left blank", () => {
+  /**
+   * Blank means "not set" throughout this file — `SMTP_URL=`, `AI_API_KEY=`
+   * and the payment keys all ship blank in `.env.example` and mean absent.
+   * The metrics token used to read a blank as a token of length zero and
+   * refuse to boot over it, which is why its example line was the only one
+   * that had to be commented out rather than left empty, and why a compose
+   * deployment could not forward it at all.
+   */
+  it("turns the metrics endpoint off rather than refusing to start", () => {
+    withEnv({ METRICS_TOKEN: "" });
+    expect(() => assertEnv()).not.toThrow();
+  });
+
+  it("still refuses a token too short to be worth having", () => {
+    // Blank is a decision. Four characters is a mistake, and the distinction
+    // is the whole reason there is a minimum.
+    withEnv({ METRICS_TOKEN: "abcd" });
+    expect(() => assertEnv()).toThrow(/METRICS_TOKEN/);
+  });
+});
+
 describe("a driver without what it needs", () => {
   it("refuses an AI driver with no key", () => {
     withEnv({ AI_DRIVER: "anthropic", AI_API_KEY: undefined });

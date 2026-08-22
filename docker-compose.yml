@@ -6,7 +6,8 @@
 # instance, no backup schedule, and the database volume lives on the same host.
 # The README says what that means and what to do instead.
 #
-#   cp .env.example .env      # then fill in AUTH_SECRET and the database URL
+#   cp .env.example .env      # then fill in AUTH_SECRET, APP_URL and
+#                             # POSTGRES_PASSWORD, and answer EMAIL_ALLOW_CONSOLE
 #   docker compose up -d --build
 #   docker compose run --rm app npx prisma migrate deploy
 #   docker compose run --rm app npx tsx prisma/seed.ts   # platform data
@@ -44,21 +45,79 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Everything the application reads, and nothing it does not.
+    #
+    # A container only receives what is named here — `.env` is read to fill in
+    # the `${...}` below, and is otherwise not passed to it. This block used to
+    # name seven variables, so an install that filled in `.env` as the line at
+    # the top of this file says got a container that ignored almost all of it:
+    # payment keys configured and payments disabled, a tuned drain window back
+    # at its default, a chosen log level with no effect. The `backup` service
+    # below always did this properly; this one did not.
     environment:
+      # Owned by this file rather than by whoever deploys it. Where the
+      # database lives is a fact about this topology, and a production
+      # container that could be told it was in development is a foot-gun.
       NODE_ENV: production
       DATABASE_URL: "postgresql://${POSTGRES_USER:-riai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-riai}?schema=public"
-      APP_URL: "${APP_URL:?set APP_URL in .env}"
-      AUTH_SECRET: "${AUTH_SECRET:?generate one with openssl rand -base64 48}"
-      # Redis is in this file now, so the limiter shares one counter and this
-      # deployment can be scaled to more than one container without the limits
-      # quietly becoming per-replica. Drop the driver back to "memory" and set
-      # RATE_LIMIT_ALLOW_IN_MEMORY=true if you would rather run without it —
-      # the environment validator will hold you to saying so out loud.
-      RATE_LIMIT_DRIVER: redis
-      REDIS_URL: "redis://redis:6379"
       # Nothing is seeded into a production database by default: the demo
       # tenant and the development administrator both refuse to run here.
       SEED_DEMO_DATA: "false"
+
+      APP_URL: "${APP_URL:?set APP_URL in .env}"
+      AUTH_SECRET: "${AUTH_SECRET:?generate one with openssl rand -base64 48}"
+      SESSION_MAX_AGE_SECONDS: "${SESSION_MAX_AGE_SECONDS:-43200}"
+      PASSWORD_HASH_ROUNDS: "${PASSWORD_HASH_ROUNDS:-12}"
+
+      # Redis is in this file, so the limiter shares one counter and this
+      # deployment can be scaled to more than one container without the limits
+      # quietly becoming per-replica. Set RATE_LIMIT_DRIVER=memory and
+      # RATE_LIMIT_ALLOW_IN_MEMORY=true in .env if you would rather run without
+      # it — the environment validator will hold you to saying so out loud, and
+      # now that both are forwarded, saying it actually reaches the container.
+      RATE_LIMIT_DRIVER: "${RATE_LIMIT_DRIVER:-redis}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
+      RATE_LIMIT_ALLOW_IN_MEMORY: "${RATE_LIMIT_ALLOW_IN_MEMORY:-false}"
+
+      # No mailer is written yet — see "What this is not ready for" in the
+      # README — so a self-hosted install sends nothing, and the validator
+      # refuses to start rather than let that be true silently. Answer it in
+      # .env: EMAIL_ALLOW_CONSOLE=true to accept that no email leaves this
+      # deployment, or point EMAIL_DRIVER at a driver once one exists.
+      EMAIL_DRIVER: "${EMAIL_DRIVER:-console}"
+      EMAIL_ALLOW_CONSOLE: "${EMAIL_ALLOW_CONSOLE:-false}"
+      EMAIL_FROM: "${EMAIL_FROM:-Retail Intelligence AI <no-reply@example.com>}"
+      SMTP_URL: "${SMTP_URL:-}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+
+      # All three Razorpay values or none: the key pair opens a checkout and
+      # the webhook secret is what lets a payment be confirmed, so a container
+      # given two of the three would take money and never move a plan.
+      PAYMENTS_DRIVER: "${PAYMENTS_DRIVER:-disabled}"
+      RAZORPAY_KEY_ID: "${RAZORPAY_KEY_ID:-}"
+      RAZORPAY_KEY_SECRET: "${RAZORPAY_KEY_SECRET:-}"
+      RAZORPAY_WEBHOOK_SECRET: "${RAZORPAY_WEBHOOK_SECRET:-}"
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-}"
+
+      AI_DRIVER: "${AI_DRIVER:-disabled}"
+      AI_API_KEY: "${AI_API_KEY:-}"
+      AI_MODEL: "${AI_MODEL:-claude-sonnet-5}"
+      AI_MAX_OUTPUT_TOKENS: "${AI_MAX_OUTPUT_TOKENS:-2048}"
+
+      # The drain window has to exceed whatever health-check interval sits in
+      # front of this, and the stop grace period below has to exceed the drain.
+      SHUTDOWN_DRAIN_MS: "${SHUTDOWN_DRAIN_MS:-10000}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      INSTANCE_ID: "${INSTANCE_ID:-}"
+      METRICS_TOKEN: "${METRICS_TOKEN:-}"
+    # Longer than SHUTDOWN_DRAIN_MS, or the drain is cut short by the thing it
+    # exists to survive. Compose allows ten seconds by default and the drain
+    # window is ten seconds by default, so without this the SIGKILL lands on
+    # the same tick as the graceful exit — which did not matter while the
+    # process was exiting in twelve milliseconds and matters now that it is
+    # not. The replica overlay says the same thing for the same reason.
+    stop_grace_period: 30s
     ports:
       - "${APP_PORT:-3000}:3000"
 
