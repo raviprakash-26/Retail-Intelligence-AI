@@ -20,6 +20,7 @@ import {
 } from "@/server/settlements/settlement-service";
 import { listAccountMeta } from "@/server/accounting/balances";
 import { createManualEntry } from "@/server/accounting/journal-service";
+import { createBranch } from "@/server/company/branch-service";
 import {
   getFinancialStatements,
   summarise,
@@ -176,7 +177,12 @@ async function sell(fixture: Fixture, quantity: number, date = TODAY) {
   });
 }
 
-async function spend(fixture: Fixture, amount: number, category = "Rent") {
+async function spend(
+  fixture: Fixture,
+  amount: number,
+  category = "Rent",
+  branchId: string | null = null,
+) {
   const categories = await listExpenseCategories(fixture.companyId);
   const found = categories.find((entry) => entry.name === category);
   if (!found) throw new Error(`No ${category} category`);
@@ -185,7 +191,7 @@ async function spend(fixture: Fixture, amount: number, category = "Rent") {
     companyId: fixture.companyId,
     userId: fixture.userId,
     actorEmail: fixture.actorEmail,
-    branchId: null,
+    branchId,
     input: {
       categoryId: found.id,
       expenseDate: TODAY,
@@ -576,5 +582,56 @@ describe("the plain-language reading", () => {
 
     const notes = summarise(await statementsFor(fixture));
     expect(notes.join(" ")).toMatch(/broke even exactly/);
+  });
+});
+
+describe("one shop's own statements", () => {
+  /**
+   * The same branch filter the trial balance uses, reached by the other door.
+   *
+   * `getFinancialStatements` takes a `branchId` and passes it to the balance
+   * engine, where it was written against a relation Prisma does not have. A
+   * retailer asking for the Jayanagar shop's profit and loss got a validation
+   * error, not a statement — and because no caller supplied the parameter and
+   * no test exercised it, the query had never once run.
+   */
+  it("charges an expense to the shop that incurred it", async () => {
+    const fixture = await createCompany();
+    const second = await createBranch({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        code: "BLR2",
+        name: "Jayanagar",
+        addressLine1: "",
+        city: "",
+        stateCode: "",
+        pincode: "",
+        phone: "",
+      },
+    });
+
+    await spend(fixture, 5000, "Rent", second.id);
+    await spend(fixture, 3000, "Rent", null);
+
+    const branch = await getFinancialStatements({
+      companyId: fixture.companyId,
+      from: YEAR_START,
+      to: YEAR_END,
+      branchId: second.id,
+    });
+    const whole = await statementsFor(fixture);
+
+    expect(lineNamed(branch.profitAndLoss.expenses, "Rent")?.amount).toBe(
+      toStorageString(5000),
+    );
+    expect(lineNamed(whole.profitAndLoss.expenses, "Rent")?.amount).toBe(
+      toStorageString(8000),
+    );
+
+    // A branch's own books still have to balance, which is the gate this
+    // function refuses to answer without.
+    expect(branch.balanceSheet.balanced).toBe(true);
   });
 });
