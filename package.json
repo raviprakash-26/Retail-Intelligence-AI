@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
-    "start": "next start",
+    "start": "NEXT_MANUAL_SIG_HANDLE=1 next start",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
@@ -31,7 +31,8 @@
     "test:unit": "vitest run tests/unit",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "start:standalone": "rm -rf .next/standalone/.next/static .next/standalone/public && cp -R .next/static .next/standalone/.next/static && cp -R public .next/standalone/public && node .next/standalone/server.js"
+    "start:standalone": "rm -rf .next/standalone/.next/static .next/standalone/public && cp -R .next/static .next/standalone/.next/static && cp -R public .next/standalone/public && NEXT_MANUAL_SIG_HANDLE=1 node .next/standalone/server.js",
+    "test:shutdown": "vitest run --config vitest.shutdown.config.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

@@ -79,6 +79,13 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+# The application drains on SIGTERM — stops reporting ready, keeps serving
+# while the balancer notices, then closes the database and exits. Next installs
+# its own SIGTERM handler before the application is loaded, and that one closes
+# the socket and exits immediately; with it in place the drain got twelve
+# milliseconds of a fifteen-second window. This is Next's documented way to say
+# the process handles its own termination. See src/server/lifecycle.ts.
+ENV NEXT_MANUAL_SIG_HANDLE=1
 
 # Never root. A process that posts other people's accounts should not also be
 # able to rewrite the filesystem it runs on.

@@ -2913,6 +2913,23 @@ This is not request tracking. Counting in-flight requests inside a Next.js
 server means wrapping its handler, which is a much larger thing to own; waiting
 out a stated window covers the same failure with none of that surface.
 
+**The process has to be given its own termination.** Next installs a SIGTERM
+handler before it loads the application, and that handler closes the socket and
+exits at once — so for as long as it was in charge, none of the above happened.
+Measured against a real build, the process was gone twelve milliseconds into a
+fifteen-second window, the database was never disconnected, and the probe the
+balancer was about to call answered a refused connection rather than a 503.
+`NEXT_MANUAL_SIG_HANDLE=1` is Next's own way of saying the application handles
+its own signals; the image sets it, the start scripts set it, and a test starts
+the built server and sends it a real SIGTERM rather than trusting any of that.
+
+The same test is why the draining flag lives on `globalThis`. The shutdown
+handler and the readiness route are compiled into separate bundles with
+separate module registries, so a module-level variable gave each of them a
+private copy: the handler set its own, and `/api/ready` went on answering
+`200 ready` for every second of the drain. A window the balancer is never told
+about is a window in which nothing is achieved.
+
 **Each replica answers for itself.** Logs and the metrics scrape carry an
 instance label, defaulting to the container hostname, so two replicas are
 tellable apart. `riai_instance_info`, `riai_instance_started_at_seconds` and
