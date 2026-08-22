@@ -76,7 +76,8 @@ async function bookMovements(
   params: {
     companyId: string;
     accountId: string;
-    from: Date;
+    /** Omitted reads everything up to `to`, which is what outstanding means. */
+    from?: Date;
     to: Date;
   },
 ): Promise<BookMovement[]> {
@@ -85,7 +86,9 @@ async function bookMovements(
       companyId: params.companyId,
       accountId: params.accountId,
       status: JournalStatus.POSTED,
-      entryDate: { gte: params.from, lte: params.to },
+      entryDate: params.from
+        ? { gte: params.from, lte: params.to }
+        : { lte: params.to },
     },
     orderBy: [{ entryDate: "asc" }, { lineNumber: "asc" }],
     select: {
@@ -134,7 +137,8 @@ async function statementMovements(
   params: {
     companyId: string;
     bankAccountId: string;
-    from: Date;
+    /** Omitted reads everything up to `to`, which is what outstanding means. */
+    from?: Date;
     to: Date;
   },
 ): Promise<StatementMovement[]> {
@@ -142,7 +146,9 @@ async function statementMovements(
     where: {
       companyId: params.companyId,
       bankAccountId: params.bankAccountId,
-      txnDate: { gte: params.from, lte: params.to },
+      txnDate: params.from
+        ? { gte: params.from, lte: params.to }
+        : { lte: params.to },
     },
     orderBy: [{ txnDate: "asc" }, { createdAt: "asc" }],
     select: {
@@ -240,17 +246,32 @@ export async function reconciliationView(params: {
   });
   if (!bankAccount) return null;
 
-  const [statement, book, importedCount] = await Promise.all([
+  // Read to the end of the period rather than across it, then narrow.
+  //
+  // A reconciliation has two different spans in it and they were the same one.
+  // The balances have always been read as at `to` — a balance is cumulative or
+  // it is not a balance — while what is outstanding was read only inside the
+  // window. So the identity was computed from two spans, and a cheque written
+  // in April and unpresented at the end of May was in the balance and not in
+  // the outstanding items: the whole of it, and of everything else before the
+  // window, came out as an unexplained gap. On a fixture with an opening
+  // balance that was ₹1,93,000 of accusation against a shop with nothing wrong.
+  //
+  // Worse, it could not be put right. That cheque was absent from May's
+  // unmatched list and the statement line that cleared it was absent from
+  // April's, so there was no view from which the two could be matched at all.
+  //
+  // Outstanding means outstanding as at a date, which is what the classic
+  // reconciliation statement means by it.
+  const [allStatement, allBook, importedCount] = await Promise.all([
     statementMovements(prisma, {
       companyId: params.companyId,
       bankAccountId: bankAccount.id,
-      from: params.from,
       to: params.to,
     }),
     bookMovements(prisma, {
       companyId: params.companyId,
       accountId: bankAccount.accountId,
-      from: params.from,
       to: params.to,
     }),
     prisma.bankTransaction.count({
@@ -258,10 +279,21 @@ export async function reconciliationView(params: {
     }),
   ]);
 
-  const unmatchedStatement = statement.filter(
+  // What happened in the period, which is what the page lists as its activity.
+  const statement = allStatement.filter(
+    (row) => row.txnDate >= params.from && row.txnDate <= params.to,
+  );
+  const book = allBook.filter(
+    (row) => row.entryDate >= params.from && row.entryDate <= params.to,
+  );
+
+  // What is still outstanding at the end of it, whenever it arose.
+  const unmatchedStatement = allStatement.filter(
     (row) => row.matchedEntryId === null,
   );
-  const unmatchedBook = book.filter((row) => row.matchedTransactionId === null);
+  const unmatchedBook = allBook.filter(
+    (row) => row.matchedTransactionId === null,
+  );
 
   const [perBooks, perStatement] = await Promise.all([
     bookBalanceAsAt(prisma, {
