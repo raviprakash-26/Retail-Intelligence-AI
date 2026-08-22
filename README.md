@@ -3078,6 +3078,16 @@ avoids.
   against a test key, and watch the webhook arrive.
 - **Stripe is still only a seam.** The driver is selected by configuration and
   only one driver has been written.
+- **No email actually leaves the building.** The console driver is the only one
+  written: it prints the message to the log and reports it delivered, which is
+  what a development machine wants. `smtp` and `resend` are selectable and
+  validated — setting `EMAIL_DRIVER=smtp` insists on an `SMTP_URL` — but both
+  fall through to a mailer that logs the failure and sends nothing. That
+  matters most for the messages nobody sees fail: a password reset, an
+  invitation, an address verification. A production build now refuses the
+  console driver unless `EMAIL_ALLOW_CONSOLE=true` says out loud that this
+  deployment sends none, because the default was silence and the alternative
+  was a reset link sitting in a container log.
 - **Nothing is filed with any authority.** GST and income tax are prepared for a
   human to review and submit.
 - **Backups can go off the machine, but a nightly dump still loses a day.**

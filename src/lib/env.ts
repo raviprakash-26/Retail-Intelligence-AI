@@ -91,6 +91,21 @@ const serverSchema = z
     RATE_LIMIT_ALLOW_IN_MEMORY: booleanish.default(false),
 
     /**
+     * Says out loud that this deployment sends no email.
+     *
+     * The console driver is a development affordance: it prints the message —
+     * the whole message, including the link in a password reset — and reports
+     * it as delivered. It is also the default, so a production deployment that
+     * simply did not set `EMAIL_DRIVER` printed reset tokens into its own logs
+     * and told the person at the keyboard that a link was on its way.
+     *
+     * The same shape as `RATE_LIMIT_ALLOW_IN_MEMORY`, for the same reason: the
+     * setting is defensible while somebody is trying the product out, and
+     * indefensible by omission.
+     */
+    EMAIL_ALLOW_CONSOLE: booleanish.default(false),
+
+    /**
      * Names this replica in logs and in the metrics scrape.
      *
      * Optional because the container's hostname is a good default and every
@@ -231,6 +246,17 @@ const serverSchema = z
           path: ["APP_URL"],
           message:
             "APP_URL must use https in production (session cookies are Secure-only)",
+        });
+      }
+      if (value.EMAIL_DRIVER === "console" && !value.EMAIL_ALLOW_CONSOLE) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["EMAIL_DRIVER"],
+          message:
+            "The console email driver prints messages to the log instead of sending them, " +
+            "including the link in a password reset — so nobody can recover an account and " +
+            "the token sits in your logs. Configure a real driver, or set " +
+            "EMAIL_ALLOW_CONSOLE=true to acknowledge that this deployment sends no email.",
         });
       }
       if (

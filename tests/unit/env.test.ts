@@ -22,6 +22,8 @@ const REQUIRED = {
   // Acknowledged rather than assumed — see the test below for why the
   // validator insists on one or the other.
   RATE_LIMIT_ALLOW_IN_MEMORY: "true",
+  // Acknowledged for the same reason, and tested on its own below.
+  EMAIL_ALLOW_CONSOLE: "true",
 } as const;
 
 let original: NodeJS.ProcessEnv;
@@ -100,6 +102,46 @@ describe("a configuration it refuses", () => {
       RATE_LIMIT_ALLOW_IN_MEMORY: undefined,
       RATE_LIMIT_DRIVER: "redis",
       REDIS_URL: "redis://localhost:6379",
+    });
+    expect(() => assertEnv()).not.toThrow();
+  });
+});
+
+describe("a deployment that would send no email", () => {
+  /**
+   * The console driver prints the message and calls it delivered.
+   *
+   * That is what a development machine wants and the opposite of what a live
+   * one does. It is also the default, so a production deployment that simply
+   * never set `EMAIL_DRIVER` printed password-reset links into its own logs
+   * and told the person at the keyboard that a link was on its way — nobody
+   * recovers an account, and the token is sitting in the log of whoever can
+   * read them.
+   *
+   * Guarded the way in-memory rate limiting is: allowed, but only out loud.
+   */
+  it("refuses the console driver in production", () => {
+    withEnv({ EMAIL_ALLOW_CONSOLE: undefined });
+    expect(() => assertEnv()).toThrow(/EMAIL_DRIVER|console email driver/);
+  });
+
+  it("says what goes wrong rather than naming the setting", () => {
+    // "Set EMAIL_DRIVER" tells somebody what to type. It does not tell them
+    // that until they do, nobody can reset a password.
+    withEnv({ EMAIL_ALLOW_CONSOLE: undefined });
+    expect(() => assertEnv()).toThrow(/password reset/);
+  });
+
+  it("accepts it once the deployment says so out loud", () => {
+    withEnv({ EMAIL_ALLOW_CONSOLE: "true" });
+    expect(() => assertEnv()).not.toThrow();
+  });
+
+  it("leaves a real driver alone", () => {
+    withEnv({
+      EMAIL_DRIVER: "smtp",
+      SMTP_URL: "smtp://user:pass@mail.example.com:587",
+      EMAIL_ALLOW_CONSOLE: undefined,
     });
     expect(() => assertEnv()).not.toThrow();
   });
