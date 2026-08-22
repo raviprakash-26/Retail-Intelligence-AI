@@ -882,7 +882,7 @@ function PresumptivePanel({ paper }: { paper: TaxWorkingPaper }) {
 
       <Section
         title="Whether it is available"
-        subtitle="Turnover, legal form and receipt mix"
+        subtitle={`Turnover, legal form, and cash at ${formatPercent(presumptive.cashShareOfTurnoverPercent)} of turnover`}
       >
         <ul className="space-y-2 px-5 py-4">
           {presumptive.reasons.map((reason) => (

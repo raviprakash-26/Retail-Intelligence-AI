@@ -11,10 +11,15 @@ import {
 /**
  * Section 44AD, and the audit threshold that sits next to it.
  *
- * Both turn on the same fact — how much of the money moved in cash — and both
- * get it wrong in the same direction when that fact is assumed rather than
- * measured. A shop that banks everything is entitled to a ₹3 crore presumptive
- * ceiling and a ₹10 crore audit limit, and usually does not know it.
+ * Both relax at 5% of cash, and it is tempting to read that as one rule. It is
+ * not: 44AD measures cash receipts against *turnover*, and 44AB measures cash
+ * receipts against *total receipts* and cash payments against total payments.
+ * The same number, three denominators. Using 44AB's for 44AD is a defect this
+ * file used to assert as the intended behaviour.
+ *
+ * A shop that banks everything is entitled to a ₹3 crore presumptive ceiling
+ * and a ₹10 crore audit limit, and usually does not know it. Getting the
+ * denominator wrong takes the first of those away from businesses that have it.
  */
 
 const mix = (turnover: number, digital: number, cash: number) =>
@@ -120,32 +125,94 @@ describe("who may use it", () => {
   });
 });
 
+/**
+ * The proviso to section 44AD(1) raises the ceiling to ₹3 crore where "the
+ * amount or aggregate of the amounts received during the previous year, in
+ * cash, does not exceed five per cent of the total turnover or gross receipts".
+ *
+ * Against turnover. Not against the money that came in — that is section 44AB's
+ * denominator, tested below, and the two part company for any business with
+ * debtors. Turnover is what was sold; receipts are what was collected, and a
+ * year contains sales that will be paid for later and collections of sales made
+ * earlier. Measuring the first rule with the second one's ratio denies the
+ * section to businesses entitled to it, and the further receipts sit from
+ * turnover the wider the gap.
+ */
 describe("the turnover ceiling", () => {
   it("is ₹2 crore for a business that handles cash", () => {
-    const result = mix(PRESUMPTIVE_LIMIT + 1, 0, 100);
+    // A rupee over the ordinary ceiling, with a fifth of the turnover taken
+    // across the counter. This case used to say ₹100 of cash and no other
+    // receipts at all, which made it a cash business by ratio and not by any
+    // other reading — it was measuring the wrong denominator and needed a
+    // business that had barely traded to do it.
+    const result = mix(PRESUMPTIVE_LIMIT + 1, 16_000_000, 4_000_000);
+
+    expect(result.cashShareOfTurnoverPercent).toBeCloseTo(20, 1);
     expect(result.limitApplied).toBe(PRESUMPTIVE_LIMIT);
     expect(result.eligible).toBe(false);
     expect(result.reasons.join(" ")).toMatch(/2 crore ceiling/i);
   });
 
-  it("rises to ₹3 crore where cash is within 5% of receipts", () => {
-    // ₹2.5 crore of turnover, 2% of it collected in cash.
+  it("rises to ₹3 crore where cash is within 5% of turnover", () => {
+    // ₹2.5 crore of turnover, ₹20,000 of it taken in cash.
     const result = mix(25_000_000, 980_000, 20_000);
     expect(result.limitApplied).toBe(PRESUMPTIVE_LIMIT_LOW_CASH);
     expect(result.eligible).toBe(true);
     expect(result.reasons.join(" ")).toMatch(/₹3 crore ceiling applies/i);
   });
 
-  it("holds the line exactly at 5%", () => {
-    const atFive = mix(25_000_000, 950_000, 50_000);
-    const justOver = mix(25_000_000, 949_000, 51_000);
+  it("measures the cash against turnover, not against the year's receipts", () => {
+    // The case that was decided wrongly. ₹2.5 crore sold; ₹10 lakh of it
+    // collected so far, ₹51,000 of that in cash. Cash is 5.1% of the money
+    // that came in and 0.204% of what was sold — and it is the second figure
+    // the section asks about, so the ₹3 crore ceiling applies and this
+    // business may use it.
+    const result = mix(25_000_000, 949_000, 51_000);
+
+    expect(result.cashShareOfTurnoverPercent).toBeCloseTo(0.2, 2);
+    expect(result.limitApplied).toBe(PRESUMPTIVE_LIMIT_LOW_CASH);
+    expect(result.eligible).toBe(true);
+  });
+
+  it("still refuses the higher ceiling to a business that is genuinely cash-heavy", () => {
+    // The relaxation has to keep meaning something. ₹2.5 crore of turnover
+    // with ₹30 lakh taken in cash is 12% of it, whatever the receipts say.
+    const result = mix(25_000_000, 3_000_000, 3_000_000);
+
+    expect(result.cashShareOfTurnoverPercent).toBeCloseTo(12, 2);
+    expect(result.limitApplied).toBe(PRESUMPTIVE_LIMIT);
+    expect(result.eligible).toBe(false);
+  });
+
+  it("holds the line exactly at 5% of turnover", () => {
+    // Compared as amounts rather than as a rounded percentage, so a business
+    // sitting on the line is not moved across it by the second decimal place.
+    const atFive = mix(25_000_000, 0, 1_250_000);
+    const justOver = mix(25_000_000, 0, 1_250_001);
+
     expect(atFive.limitApplied).toBe(PRESUMPTIVE_LIMIT_LOW_CASH);
     expect(justOver.limitApplied).toBe(PRESUMPTIVE_LIMIT);
     expect(justOver.eligible).toBe(false);
   });
 
+  it("says which figure it used, because the two are easily confused", () => {
+    const result = mix(25_000_000, 949_000, 51_000);
+    // Naming the percentage is the difference between a reader who can check
+    // the answer and one who has to guess which ratio was meant.
+    expect(result.reasons.join(" ")).toMatch(/0\.2% of it/);
+    expect(result.reasons.join(" ")).toMatch(
+      /not account payee counts as cash/i,
+    );
+  });
+
   it("admits a business sitting exactly on the ceiling", () => {
     const result = mix(PRESUMPTIVE_LIMIT, 0, 100);
+    expect(result.eligible).toBe(true);
+  });
+
+  it("does not divide by a turnover of nothing", () => {
+    const result = mix(0, 0, 0);
+    expect(result.cashShareOfTurnoverPercent).toBe(0);
     expect(result.eligible).toBe(true);
   });
 });

@@ -236,6 +236,8 @@ export type TaxWorkingPaper = {
   presumptive: {
     turnover: string;
     digitalSharePercent: number;
+    /** Cash received against turnover — the ratio the ₹3 crore ceiling turns on. */
+    cashShareOfTurnoverPercent: number;
     digitalTurnover: string;
     cashTurnover: string;
     incomeAtFullRate: string;
@@ -726,6 +728,7 @@ function serialisePresumptive(
   return {
     turnover: toStorageString(result.turnover),
     digitalSharePercent: result.digitalSharePercent,
+    cashShareOfTurnoverPercent: result.cashShareOfTurnoverPercent,
     digitalTurnover: toStorageString(result.digitalTurnover),
     cashTurnover: toStorageString(result.cashTurnover),
     incomeAtFullRate: toStorageString(result.incomeAtFullRate),

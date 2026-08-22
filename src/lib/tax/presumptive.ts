@@ -42,7 +42,15 @@ import type { Assessee } from "@/lib/tax/income-tax";
 export const PRESUMPTIVE_LIMIT = 20_000_000;
 export const PRESUMPTIVE_LIMIT_LOW_CASH = 30_000_000;
 
-/** Cash may be no more than this share of turnover for the higher ceiling. */
+/**
+ * Cash may be no more than this share for the relaxed limit to apply.
+ *
+ * The same 5% appears in section 44AD and in section 44AB, measured against
+ * different things: 44AD tests cash receipts against *turnover*, and 44AB tests
+ * cash receipts against *total receipts* and cash payments against total
+ * payments. One number, two denominators — worth stating, because using the
+ * second for the first is exactly the mistake this constant used to be part of.
+ */
 export const LOW_CASH_SHARE_PERCENT = 5;
 
 /** The two deemed-profit rates. */
@@ -61,8 +69,26 @@ const ELIGIBLE_ASSESSEES: ReadonlySet<Assessee> = new Set<Assessee>([
 
 export type PresumptiveResult = {
   turnover: Decimal;
-  /** Share of turnover treated as received through banking channels, 0-100. */
+  /**
+   * How much of the money that came in this year did so through banking
+   * channels, 0-100.
+   *
+   * A share of *receipts*, not of turnover — the books record collections
+   * against the business rather than against individual invoices, so this is
+   * the proportion used to split turnover between the two deemed rates below.
+   * It is not what the ₹3 crore ceiling turns on; see `cashShareOfTurnoverPercent`.
+   */
   digitalSharePercent: number;
+  /**
+   * Cash received as a share of turnover, 0-100.
+   *
+   * This is the figure section 44AD's proviso actually tests, and it is a
+   * different question from the one above: a year's receipts and a year's
+   * turnover are not the same money. Sales made on credit are turnover that
+   * has not been received, and collections of last year's debtors are receipts
+   * that are not turnover.
+   */
+  cashShareOfTurnoverPercent: number;
   digitalTurnover: Decimal;
   cashTurnover: Decimal;
   /** 8% of everything — the figure that holds whatever the receipt mix was. */
@@ -109,8 +135,29 @@ export function presumptiveIncome(params: {
   const digitalTurnover = percentOf(turnover, digitalSharePercent);
   const cashTurnover = subtract(turnover, digitalTurnover);
 
-  const cashSharePercent = 100 - digitalSharePercent;
-  const lowCash = cashSharePercent <= LOW_CASH_SHARE_PERCENT;
+  // The proviso to section 44AD(1) measures cash against turnover: the higher
+  // ceiling applies where "the amount or aggregate of the amounts received
+  // during the previous year, in cash, does not exceed five per cent of the
+  // total turnover or gross receipts".
+  //
+  // Not against the money that came in this year, which is the other ratio on
+  // this page and a different question. Section 44AB's relaxation *does* use
+  // aggregate receipts as its denominator, which is presumably how the two got
+  // crossed — but 44AB is a test about how a business is paid, and this is a
+  // test about how much of what it sold was paid for in cash. They part company
+  // as soon as receipts and turnover differ, which is any business with debtors:
+  // a shop with ₹2.5 crore of turnover that took ₹51,000 in cash was told it
+  // could not use the section at all, because it had collected only ₹10 lakh
+  // that year and cash was 5.1% of *that*.
+  //
+  // Compared as amounts rather than as a rounded percentage, so a business
+  // sitting on the line is not moved across it by the second decimal place.
+  const cashShareOfTurnoverPercent =
+    compare(turnover, 0) > 0
+      ? divide(cashReceipts, turnover).times(100).toDecimalPlaces(2).toNumber()
+      : 0;
+  const lowCash =
+    compare(cashReceipts, percentOf(turnover, LOW_CASH_SHARE_PERCENT)) <= 0;
   const limitApplied = lowCash ? PRESUMPTIVE_LIMIT_LOW_CASH : PRESUMPTIVE_LIMIT;
 
   const reasons: string[] = [];
@@ -132,7 +179,7 @@ export function presumptiveIncome(params: {
     );
   } else if (lowCash && compare(turnover, PRESUMPTIVE_LIMIT) > 0) {
     reasons.push(
-      "Turnover is above ₹2 crore, but cash receipts are within 5% of it, so the ₹3 crore ceiling applies.",
+      `Turnover is above ₹2 crore, but cash receipts are ${cashShareOfTurnoverPercent}% of it — within 5% — so the ₹3 crore ceiling applies. A cheque or draft that is not account payee counts as cash for this test.`,
     );
   }
 
@@ -145,6 +192,7 @@ export function presumptiveIncome(params: {
   return {
     turnover,
     digitalSharePercent,
+    cashShareOfTurnoverPercent,
     digitalTurnover,
     cashTurnover,
     incomeAtFullRate: percentOf(turnover, RATE_ON_CASH),
