@@ -265,9 +265,25 @@ async function postClosingEntry(
   // As at the year end, not within a window: what has to be cleared is whatever
   // is sitting in the account on the last day. Earlier years are already closed
   // — the ordering rule above guarantees it — so nothing older is left in there.
+  //
+  // Retired accounts included, and that is not incidental. Closing brings every
+  // income and expense account to nil, which is exactly when somebody tidies the
+  // chart and puts away the ones they no longer use — retiring is allowed
+  // because they all read zero. Reopen the year and close it again, and an
+  // active-only read leaves whatever the retired account was carrying out of the
+  // year's result, while the profit and loss account — which reads inactive
+  // accounts too — goes on reporting it. The books balance either way, so
+  // nothing complains; retained earnings simply carries a figure the statements
+  // never showed.
+  //
+  // The guard on retiring an account asks whether it holds anything *now*, which
+  // is the right question for putting one away. This asks what it held *at the
+  // year end*. Different questions, and this is the one that has to see every
+  // account.
   const balances = await accountBalances({
     companyId: params.companyId,
     to: params.year.endDate,
+    includeInactive: true,
   });
 
   const lines: Array<{
