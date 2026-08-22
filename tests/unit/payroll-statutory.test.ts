@@ -4,6 +4,7 @@ import {
   totalStatutory,
   EPF,
   ESI,
+  KARNATAKA_PROFESSIONAL_TAX,
   NO_STATUTORY_DEDUCTIONS,
   type PayrollPolicy,
 } from "@/lib/payroll/statutory";
@@ -132,6 +133,44 @@ describe("professional tax", () => {
     expect(n(result.professionalTax)).toBe(0);
   });
 
+  /**
+   * Exactly on the threshold.
+   *
+   * Karnataka levies ₹200 where the monthly wage is "not less than ₹25,000",
+   * so a salary of exactly ₹25,000 is liable — and ₹25,000 is the roundest
+   * number a small shop pays anybody. The comparison here was strictly
+   * greater, which is the one wage in the schedule it gets wrong, and the two
+   * cases either side of it never asked: they were ₹30,000 and ₹20,000.
+   *
+   * Under-deducting professional tax does not leave the employee better off.
+   * The employer is liable for what it failed to withhold.
+   */
+  it("is levied on a wage exactly on the threshold", () => {
+    const result = computeStatutory(
+      { basicSalary: KARNATAKA_PROFESSIONAL_TAX.threshold, allowances: 0 },
+      {
+        providentFund: false,
+        employeeStateInsurance: false,
+        professionalTaxMonthly: 200,
+      },
+    );
+    expect(n(result.professionalTax)).toBe(200);
+  });
+
+  it("is nil one rupee below it", () => {
+    // The other side of the same line, so the boundary is pinned rather than
+    // moved.
+    const result = computeStatutory(
+      { basicSalary: KARNATAKA_PROFESSIONAL_TAX.threshold - 1, allowances: 0 },
+      {
+        providentFund: false,
+        employeeStateInsurance: false,
+        professionalTaxMonthly: 200,
+      },
+    );
+    expect(n(result.professionalTax)).toBe(0);
+  });
+
   it("is nil when the business has not set one", () => {
     // Levied by the state and different in each. A plausible wrong default is
     // worse than an obviously absent one.
@@ -206,8 +245,21 @@ describe("professional tax", () => {
     expect(n(above.professionalTax)).toBe(200);
   });
 
-  it("levies nothing at exactly the threshold, as it always has", () => {
-    // "Above" means above. Karnataka's own slab starts over ₹25,000.
+  /**
+   * This case used to assert the opposite, and gave a reason: *"Above" means
+   * above. Karnataka's own slab starts over ₹25,000.*
+   *
+   * The schedule says otherwise. As amended with effect from 1 April 2023 it
+   * levies ₹200 where the monthly salary or wage is "not less than twenty-five
+   * thousand rupees" — inclusive, so ₹25,000 exactly is liable. The reason
+   * given was a statement about the law rather than about the code, and it was
+   * the wrong way round.
+   *
+   * The threshold a business sets means the same thing: the first wage that is
+   * liable. A single number cannot say whether a state's own schedule reads
+   * "not less than" or "above", and the schedules are written the first way.
+   */
+  it("levies on a wage exactly at the threshold a business set", () => {
     const result = computeStatutory(
       { basicSalary: 7_500, allowances: 0 },
       {
@@ -217,7 +269,7 @@ describe("professional tax", () => {
         professionalTaxThreshold: 7_500,
       },
     );
-    expect(n(result.professionalTax)).toBe(0);
+    expect(n(result.professionalTax)).toBe(200);
   });
 });
 

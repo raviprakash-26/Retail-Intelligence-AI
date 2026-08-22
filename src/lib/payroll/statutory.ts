@@ -68,6 +68,7 @@ export const ESI = {
  * exists to refuse, arrived at from the other direction.
  */
 export const KARNATAKA_PROFESSIONAL_TAX = {
+  /** The schedule reads "not less than", so a wage of exactly this is liable. */
   threshold: 25_000,
   monthly: 200,
 } as const;
@@ -83,7 +84,11 @@ export type PayrollPolicy = {
    */
   professionalTaxMonthly: number | null;
   /**
-   * The monthly wage above which that figure is levied.
+   * The monthly wage at or above which that figure is levied.
+   *
+   * At, not above: a schedule that reads "not less than ₹25,000" — or a
+   * business that says it levies "from ₹7,500" — means the wage on the line is
+   * liable.
    *
    * Null falls back to Karnataka's, which keeps every business that set a
    * monthly figure before this existed exactly where it was. A business in
@@ -170,14 +175,22 @@ export function computeStatutory(
     ? percent(gross, ESI.employerRate)
     : money(0);
 
-  // Professional tax is a flat monthly figure above a threshold, not a rate.
+  // Professional tax is a flat monthly figure from a threshold, not a rate.
   // The threshold is the business's own where it has set one; Karnataka's only
   // where it has not.
+  //
+  // From it, not above it. Karnataka's schedule levies where the monthly wage
+  // is "not less than" ₹25,000, so a salary of exactly ₹25,000 is liable — and
+  // that is the roundest number a small shop pays anybody. A state that says it
+  // levies "from ₹7,500" means the same thing about its own figure. The
+  // comparison was strictly greater, which got that one wage wrong in every
+  // state, and under-deducting does not leave the employee better off: the
+  // employer is liable for what it failed to withhold.
   const professionalTaxThreshold =
     policy.professionalTaxThreshold ?? KARNATAKA_PROFESSIONAL_TAX.threshold;
   const professionalTax =
     policy.professionalTaxMonthly !== null &&
-    gross.greaterThan(professionalTaxThreshold)
+    gross.greaterThanOrEqualTo(professionalTaxThreshold)
       ? money(policy.professionalTaxMonthly)
       : money(0);
 
