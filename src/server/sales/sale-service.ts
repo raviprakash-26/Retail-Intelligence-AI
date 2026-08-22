@@ -19,9 +19,17 @@ import {
   totalLines,
   type SupplyType,
 } from "@/lib/tax/gst";
-import { type Decimal, add, isZero, money, toStorageString } from "@/lib/money";
+import {
+  type Decimal,
+  add,
+  isZero,
+  money,
+  subtract,
+  toStorageString,
+} from "@/lib/money";
 import type { SaleInput } from "@/lib/validation/sales";
 import { postJournalEntry } from "@/server/accounting/post-journal-entry";
+import { settledByNotes } from "@/server/settlements/outstanding";
 import { recordAuditLog } from "@/server/audit/audit-log";
 import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { writeGstRows } from "@/server/documents/gst-register";
@@ -857,15 +865,40 @@ export async function listSales(params: {
         cessAmount: true,
       },
     }),
-    prisma.sale.aggregate({
+    // The documents themselves rather than a sum of them, because what each
+    // one still owes needs the credit notes against it and those are per
+    // document. Three small columns; the same rows the ageing already reads.
+    prisma.sale.findMany({
       where: {
         companyId: params.companyId,
         status: DocumentStatus.POSTED,
         paymentMode: "CREDIT",
       },
-      _sum: { totalAmount: true, paidAmount: true },
+      select: { id: true, totalAmount: true, paidAmount: true },
     }),
   ]);
+
+  // A credit note settles an invoice exactly as a receipt does. This figure
+  // used to be total less receipted, which is what "settled" meant before
+  // returns existed — so the headline on the sales page went on claiming money
+  // the ageing report, the reminder and the receipt form had all stopped
+  // asking for. `settledByNotes` is the definition those three share.
+  const creditedByNotes = await settledByNotes(prisma, {
+    companyId: params.companyId,
+    documentIds: outstanding.map((sale) => sale.id),
+    side: "RECEIVABLE",
+  });
+  const creditOutstanding = outstanding.reduce(
+    (running, sale) =>
+      add(
+        running,
+        subtract(
+          sale.totalAmount,
+          add(sale.paidAmount, creditedByNotes.get(sale.id) ?? money(0)),
+        ),
+      ),
+    money(0),
+  );
 
   return {
     rows: sales.map((sale) => ({
@@ -897,11 +930,7 @@ export async function listSales(params: {
         postedTotals._sum.cessAmount ?? 0,
       ),
     ),
-    creditOutstanding: toStorageString(
-      money(outstanding._sum.totalAmount ?? 0).minus(
-        money(outstanding._sum.paidAmount ?? 0),
-      ),
-    ),
+    creditOutstanding: toStorageString(creditOutstanding),
   };
 }
 

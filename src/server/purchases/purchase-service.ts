@@ -26,10 +26,12 @@ import {
   divide,
   isZero,
   money,
+  subtract,
   toStorageString,
 } from "@/lib/money";
 import type { PurchaseInput } from "@/lib/validation/purchases";
 import { postJournalEntry } from "@/server/accounting/post-journal-entry";
+import { settledByNotes } from "@/server/settlements/outstanding";
 import { recordAuditLog } from "@/server/audit/audit-log";
 import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { writeGstRows } from "@/server/documents/gst-register";
@@ -903,15 +905,38 @@ export async function listPurchases(params: {
           cessAmount: true,
         },
       }),
-      prisma.purchase.aggregate({
+      // The bills themselves rather than a sum of them: what each still owes
+      // needs the debit notes raised against it, and those are per document.
+      prisma.purchase.findMany({
         where: {
           companyId: params.companyId,
           status: DocumentStatus.POSTED,
           paymentMode: "CREDIT",
         },
-        _sum: { totalAmount: true, paidAmount: true },
+        select: { id: true, totalAmount: true, paidAmount: true },
       }),
     ]);
+
+  // A debit note settles a bill exactly as a payment does. This was total less
+  // paid, which is what "settled" meant before returns existed, so the figure
+  // on the purchases page claimed a debt the ageing and the payment form had
+  // both already reduced. `settledByNotes` is the definition they share.
+  const debitedByNotes = await settledByNotes(prisma, {
+    companyId: params.companyId,
+    documentIds: outstanding.map((purchase) => purchase.id),
+    side: "PAYABLE",
+  });
+  const payablesOutstanding = outstanding.reduce(
+    (running, purchase) =>
+      add(
+        running,
+        subtract(
+          purchase.totalAmount,
+          add(purchase.paidAmount, debitedByNotes.get(purchase.id) ?? money(0)),
+        ),
+      ),
+    money(0),
+  );
 
   return {
     rows: purchases.map((purchase) => ({
@@ -949,11 +974,7 @@ export async function listPurchases(params: {
         credit._sum.cessAmount ?? 0,
       ),
     ),
-    payablesOutstanding: toStorageString(
-      money(outstanding._sum.totalAmount ?? 0).minus(
-        money(outstanding._sum.paidAmount ?? 0),
-      ),
-    ),
+    payablesOutstanding: toStorageString(payablesOutstanding),
   };
 }
 

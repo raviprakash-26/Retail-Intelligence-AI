@@ -15,8 +15,11 @@ import { registerOwner } from "@/server/auth/registration";
 import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
-import { createPurchase } from "@/server/purchases/purchase-service";
-import { createSale } from "@/server/sales/sale-service";
+import {
+  createPurchase,
+  listPurchases,
+} from "@/server/purchases/purchase-service";
+import { createSale, listSales } from "@/server/sales/sale-service";
 import {
   openBills,
   openInvoices,
@@ -1090,6 +1093,103 @@ describe("what a credit note does to the ageing", () => {
       customerId: fixture.customerId,
     });
     expect(Number(open[0]!.outstanding)).toBeCloseTo(Number(receivable), 2);
+  }, 90_000);
+
+  /**
+   * The figure on the sales page, which is the same question asked again.
+   *
+   * "On credit" is what customers still owe on invoices, and it was computed
+   * from the documents alone — every posted credit sale's total less what had
+   * been receipted against it. A credit note settles an invoice exactly as a
+   * receipt does, and nothing here subtracted it, so the headline on the page
+   * a shopkeeper opens most disagreed with the ageing report, the reminder it
+   * sends, and the cap on what a receipt may collect. Four consumers already
+   * shared one definition of settled; this was a fifth that had its own.
+   */
+  it("agrees with what the receipt form will let you collect", async () => {
+    const fixture = await createCompany();
+    const invoice = await raiseInvoice(fixture);
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: invoice.id,
+    });
+
+    await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: invoice.id,
+        returnDate: new Date().toISOString().slice(0, 10),
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+      },
+    });
+
+    const open = await openInvoices(prisma, {
+      companyId: fixture.companyId,
+      customerId: fixture.customerId,
+    });
+    const owed = open.reduce(
+      (total, doc) => total + Number(doc.outstanding),
+      0,
+    );
+
+    const list = await listSales({ companyId: fixture.companyId });
+    expect(Number(list.creditOutstanding)).toBeCloseTo(owed, 2);
+
+    // And against the account itself, so the page cannot drift from the books.
+    const receivable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+    );
+    expect(Number(list.creditOutstanding)).toBeCloseTo(Number(receivable), 2);
+  }, 90_000);
+
+  it("says the same about what is owed to a supplier", async () => {
+    const fixture = await createCompany();
+    const bill = await raiseBill(fixture);
+    const lines = await returnableBillLines({
+      companyId: fixture.companyId,
+      purchaseId: bill.id,
+    });
+
+    await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: new Date().toISOString().slice(0, 10),
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+      },
+    });
+
+    const open = await openBills(prisma, {
+      companyId: fixture.companyId,
+      supplierId: fixture.supplierId,
+    });
+    const owed = open.reduce(
+      (total, doc) => total + Number(doc.outstanding),
+      0,
+    );
+
+    const list = await listPurchases({ companyId: fixture.companyId });
+    expect(Number(list.payablesOutstanding)).toBeCloseTo(owed, 2);
+
+    const payable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_PAYABLE,
+    );
+    expect(Number(list.payablesOutstanding)).toBeCloseTo(
+      Math.abs(Number(payable)),
+      2,
+    );
   }, 90_000);
 
   it("leaves the invoice standing when the customer was refunded in cash", async () => {
