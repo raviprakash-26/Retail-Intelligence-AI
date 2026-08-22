@@ -109,6 +109,49 @@ export async function getProductTaxonomy(
   };
 }
 
+/**
+ * The category a category is being filed under, checked against its own books.
+ *
+ * Asked in one place because it was answered in two, and they disagreed.
+ * Creating a category looked the parent up scoped to the company and dropped
+ * anything that did not resolve; updating one wrote the field straight from the
+ * form. So a shop could not be given another business's category as a parent
+ * when it first filed one, and could be handed the same thing a moment later by
+ * editing it.
+ *
+ * Nothing reads a parent's name, so no other business's data was ever shown.
+ * What was written is the quieter problem: a foreign key across the tenant
+ * boundary, on a relation declared `onDelete: SetNull`. The other business
+ * deleting that category — or being purged, which cascades — reaches into these
+ * records and changes them, and the category is meanwhile filed under a parent
+ * that is not in its own tree.
+ *
+ * Refused rather than dropped, which is the other half of the disagreement.
+ * Dropping it tells a shop its category was saved, leaves it at the root, and
+ * says nothing about why. This is the same situation `resolveReferences`
+ * reports when a *product* names another tenant's category, and it answers the
+ * same way.
+ */
+async function resolveParent(
+  companyId: string,
+  parentId: string | null | undefined,
+): Promise<string | null> {
+  if (!parentId) return null;
+
+  const parent = await prisma.category.findFirst({
+    where: { id: parentId, companyId },
+    select: { id: true },
+  });
+  if (!parent) {
+    throw new MasterDataError(
+      "That category could not be found.",
+      "NOT_FOUND",
+      "parentId",
+    );
+  }
+  return parent.id;
+}
+
 export async function createCategory(params: {
   companyId: string;
   userId: string;
@@ -130,21 +173,12 @@ export async function createCategory(params: {
     );
   }
 
-  // A parent from another tenant resolves to nothing, so the reference is
-  // dropped rather than crossing the company boundary.
-  const parent = params.input.parentId
-    ? await prisma.category.findFirst({
-        where: { id: params.input.parentId, companyId: params.companyId },
-        select: { id: true },
-      })
-    : null;
-
   const category = await prisma.category.create({
     data: {
       companyId: params.companyId,
       name: params.input.name,
       description: params.input.description || null,
-      parentId: parent?.id ?? null,
+      parentId: await resolveParent(params.companyId, params.input.parentId),
     },
     select: { id: true },
   });
@@ -208,7 +242,7 @@ export async function updateCategory(params: {
     data: {
       name: params.input.name,
       description: params.input.description || null,
-      parentId: params.input.parentId || null,
+      parentId: await resolveParent(params.companyId, params.input.parentId),
     },
   });
 

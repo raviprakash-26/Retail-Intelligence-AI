@@ -32,6 +32,7 @@ import {
   createCategory,
   createUnit,
   getProductTaxonomy,
+  updateCategory,
   updateUnit,
 } from "@/server/master-data/taxonomy-service";
 import { MasterDataError } from "@/server/master-data/errors";
@@ -831,6 +832,95 @@ describe("units and categories", () => {
       taxonomy.categories.find((entry) => entry.id === category.id)
         ?.productCount,
     ).toBe(1);
+  });
+
+  /**
+   * A category's parent belongs to the same business as the category.
+   *
+   * Creating one checked it, and said why in a comment beside the check.
+   * Updating one took the same field straight from the form.
+   *
+   * Nothing reads the parent's name, so no other business's data is disclosed.
+   * What gets written is worse in a quieter way: a foreign key across the
+   * tenant boundary, on a relation declared `onDelete: SetNull`. The other
+   * business deleting that category — or being purged entirely, which cascades
+   * — reaches into this one's records and changes them. And the category is
+   * left filed under a parent that is not in its own tree.
+   */
+  it("refuses a parent belonging to another business", async () => {
+    const mine = await createCompany("Parent Check Mart");
+    const theirs = await createCompany("Somebody Else Mart");
+
+    const outsider = await createCategory({
+      ...actor(theirs),
+      input: { name: "Their Shelf", parentId: "", description: "" },
+    });
+    const mineCategory = await createCategory({
+      ...actor(mine),
+      input: { name: "My Shelf", parentId: "", description: "" },
+    });
+
+    await expect(
+      updateCategory({
+        ...actor(mine),
+        categoryId: mineCategory.id,
+        input: { name: "My Shelf", parentId: outsider.id, description: "" },
+      }),
+    ).rejects.toThrow(MasterDataError);
+
+    const stored = await prisma.category.findUniqueOrThrow({
+      where: { id: mineCategory.id },
+      select: { parentId: true },
+    });
+    expect(stored.parentId).toBeNull();
+  });
+
+  it("refuses one on the way in, too", async () => {
+    // Creating already scoped the lookup, but dropped what did not resolve and
+    // saved the category anyway — so the shop was told it worked and got no
+    // parent. Both doors now answer the same way, which is the point: one rule
+    // with two implementations is how the two came to disagree.
+    const mine = await createCompany("Create Parent Mart");
+    const theirs = await createCompany("Another Shop Mart");
+
+    const outsider = await createCategory({
+      ...actor(theirs),
+      input: { name: "Their Aisle", parentId: "", description: "" },
+    });
+
+    await expect(
+      createCategory({
+        ...actor(mine),
+        input: { name: "My Aisle", parentId: outsider.id, description: "" },
+      }),
+    ).rejects.toThrow(MasterDataError);
+  });
+
+  it("still accepts a parent of its own", async () => {
+    // The other half: the check must not refuse the ordinary case it exists to
+    // allow, which is what a guard written as "reject anything unfamiliar"
+    // tends to do.
+    const company = await createCompany("Own Parent Mart");
+    const parent = await createCategory({
+      ...actor(company),
+      input: { name: "Groceries", parentId: "", description: "" },
+    });
+    const child = await createCategory({
+      ...actor(company),
+      input: { name: "Pulses", parentId: "", description: "" },
+    });
+
+    await updateCategory({
+      ...actor(company),
+      categoryId: child.id,
+      input: { name: "Pulses", parentId: parent.id, description: "" },
+    });
+
+    const stored = await prisma.category.findUniqueOrThrow({
+      where: { id: child.id },
+      select: { parentId: true },
+    });
+    expect(stored.parentId).toBe(parent.id);
   });
 });
 
