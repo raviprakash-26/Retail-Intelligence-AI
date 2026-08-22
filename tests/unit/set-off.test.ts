@@ -141,6 +141,125 @@ describe("what is left over", () => {
   });
 });
 
+/**
+ * Where the leftover IGST credit goes.
+ *
+ * The sequence of heads is prescribed and the two crossings are forbidden, but
+ * one thing is not fixed: rule 88A says IGST credit is used against IGST first
+ * and the remainder "may be utilised towards the payment of central tax and
+ * State tax or Union territory tax, as the case may be, **in any order and in
+ * any proportion**".
+ *
+ * That choice belongs to the taxpayer, and it is worth money. CGST credit
+ * cannot pay SGST and SGST credit cannot pay CGST, so IGST credit is the only
+ * credit that can reach either. Spending it on a head that its own credit was
+ * going to cover anyway strands the other head's shortfall, and the shop pays
+ * that shortfall in cash while the credit it could not use is carried forward.
+ *
+ * This went unnoticed because the two cases above that fix an order both come
+ * to nil payable whichever way the credit is split, so neither could show the
+ * cost.
+ */
+describe("choosing where leftover IGST credit goes", () => {
+  it("sends it where a head's own credit cannot reach", () => {
+    // The ordinary retail position: stock bought interstate gives IGST credit,
+    // stock bought locally gives CGST and SGST credit, and local sales are
+    // owed in CGST and SGST.
+    //
+    // Spent CGST-first, ₹100 of IGST clears the whole CGST liability, the
+    // ₹30 of CGST credit is left with nothing to pay and carries forward, and
+    // the shop pays ₹70 of SGST in cash. Split across both shortfalls, it pays
+    // ₹40 — which is the whole liability less the whole credit, and nothing is
+    // stranded.
+    const result = applySetOff(
+      { cgst: 100, sgst: 100 },
+      { igst: 100, cgst: 30, sgst: 30 },
+    );
+
+    expect(result.totalPayable.toFixed(2)).toBe("40.00");
+
+    // Nothing is left over. Credit carried forward beside cash paid is the
+    // signature of the wrong split, so its absence is the thing to assert.
+    expect(result.totalCarriedForward.toFixed(2)).toBe("0.00");
+
+    // Which head that ₹40 sits under is deliberately not asserted. The pool
+    // cannot cover both shortfalls here, and every division of it comes to the
+    // same cash — so pinning one would be repeating the mistake this fixes.
+    expect(at(result, "igst")).toBe("0.00");
+  });
+
+  it("leaves alone a head its own credit already covers", () => {
+    // All the IGST credit belongs on SGST: the CGST liability is already
+    // covered twice over by CGST credit, so a rupee of IGST spent there is a
+    // rupee that has to be found in cash on the other side.
+    const result = applySetOff(
+      { cgst: 100, sgst: 100 },
+      { igst: 100, cgst: 200, sgst: 0 },
+    );
+
+    expect(result.totalPayable.toFixed(2)).toBe("0.00");
+    expect(
+      result.steps
+        .filter((step) => step.from === "igst")
+        .map((step) => `${step.against} ${step.amount.toFixed(2)}`),
+    ).toEqual(["sgst 100.00"]);
+    // The CGST credit that was never needed is what carries forward.
+    expect(result.carriedForward.cgst.toFixed(2)).toBe("100.00");
+  });
+
+  it("never pays cash that another permissible split would have avoided", () => {
+    // Stated as the property rather than as a figure. Every split of the
+    // leftover IGST credit between the two heads is allowed by rule 88A, so
+    // the one taken must not cost more than any of them.
+    //
+    // The alternative below is deliberately not a second implementation of the
+    // set-off: with no IGST liability in play it is just the two shortfalls
+    // left after the credit each head can use, which is all that has to be
+    // beaten.
+    const leastPayable = (
+      liabilityC: number,
+      liabilityS: number,
+      creditC: number,
+      creditS: number,
+      pool: number,
+    ) => {
+      let best = Number.POSITIVE_INFINITY;
+      for (let toCgst = 0; toCgst <= pool; toCgst += 1) {
+        const usedC = Math.min(toCgst, liabilityC);
+        const usedS = Math.min(pool - toCgst, liabilityS);
+        best = Math.min(
+          best,
+          Math.max(0, liabilityC - usedC - creditC) +
+            Math.max(0, liabilityS - usedS - creditS),
+        );
+      }
+      return best;
+    };
+
+    const cases: Array<[number, number, number, number, number]> = [
+      [100, 100, 30, 30, 100],
+      [100, 100, 200, 0, 100],
+      [900, 400, 0, 500, 600],
+      [250, 250, 100, 0, 300],
+      [500, 500, 500, 500, 400],
+      [80, 20, 10, 90, 50],
+      [1000, 1000, 0, 0, 2500],
+      [0, 750, 400, 0, 300],
+    ];
+
+    for (const [lc, ls, cc, cs, pool] of cases) {
+      const result = applySetOff(
+        { cgst: lc, sgst: ls },
+        { igst: pool, cgst: cc, sgst: cs },
+      );
+      expect(
+        Number(result.totalPayable.toFixed(2)),
+        `liability ${lc}/${ls}, own credit ${cc}/${cs}, IGST ${pool}`,
+      ).toBe(leastPayable(lc, ls, cc, cs, pool));
+    }
+  });
+});
+
 describe("the arithmetic holds", () => {
   it("never creates or destroys value", () => {
     // Credit used, credit carried forward and tax still payable must always
