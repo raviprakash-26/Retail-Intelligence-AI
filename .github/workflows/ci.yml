@@ -164,6 +164,18 @@ jobs:
           # skipping. Only this job builds, so only this job may claim it.
           EXPECT_CLIENT_BUNDLE: "1"
 
+      # Here for the same reason as the scan above: it starts the artefact the
+      # build produced, sends it a real SIGTERM and watches what happens. The
+      # verify job never builds, so there it would skip — and a skip reads as a
+      # pass. Before the browser suite, so a port is free and a failure here is
+      # not mistaken for a broken test run.
+      - name: Prove SIGTERM drains before it exits
+        run: npm run test:shutdown
+        env:
+          # Says a build is expected here, so a missing one fails rather than
+          # skipping. Only this job builds, so only this job may claim it.
+          EXPECT_SHUTDOWN_SERVER: "1"
+
       - name: Install the browser
         run: npx playwright install --with-deps chromium
 
