@@ -1,6 +1,7 @@
 import {
   Decimal,
   add,
+  divide,
   isZero,
   money,
   multiply,
@@ -111,6 +112,35 @@ export function splitIntoHalves(total: MoneyInput): [Decimal, Decimal] {
   return [first, subtract(whole, first)];
 }
 
+/**
+ * Divides the tax inside an inclusive price between GST and cess.
+ *
+ * The pair has to sum to `combined` exactly — that is the whole point of
+ * deriving it by subtraction — so cess is rounded and GST takes the remainder,
+ * the same way `splitIntoHalves` gives the odd paisa to the second half rather
+ * than rounding both and hoping.
+ *
+ * Cess is the one rounded because it is the smaller and rarer of the two; a
+ * paisa moved onto the GST line is a paisa on a figure that is already in the
+ * hundreds, and cess appears on a handful of goods rather than on everything.
+ */
+function splitInclusiveTax(
+  combined: Decimal,
+  taxPercent: Decimal,
+  cessPercent: Decimal,
+): { totalTax: Decimal; cess: Decimal } {
+  const together = add(taxPercent, cessPercent);
+  if (isZero(together) || isZero(combined)) {
+    return { totalTax: money(0), cess: money(0) };
+  }
+
+  const cess = isZero(cessPercent)
+    ? money(0)
+    : round2(multiply(combined, divide(cessPercent, together)));
+
+  return { totalTax: subtract(combined, cess), cess };
+}
+
 export function computeLine(
   line: GstLineInput,
   supplyType: SupplyType,
@@ -127,12 +157,28 @@ export function computeLine(
 
   // A tax-inclusive price has to be unwound before anything else: the taxable
   // value is what remains once the tax already sitting inside it is removed.
+  const charged = round2(net);
   const taxable = line.priceIncludesTax
     ? round2(netFromInclusive(net, add(taxPercent, cessPercent)))
-    : round2(net);
+    : charged;
 
-  const totalTax = round2(percentOf(taxable, taxPercent));
-  const cess = round2(percentOf(taxable, cessPercent));
+  const { totalTax, cess } = line.priceIncludesTax
+    ? // What is left of the price once the taxable value is taken out of it.
+      //
+      // Applying the rate to the taxable value a second time is the obvious
+      // thing and it does not add back. A shelf price of ₹100 at 18% holds
+      // ₹84.7458 of value; rounded to ₹84.75 and charged 18% again that is
+      // ₹15.26, and the line comes to ₹100.01 — a paisa the customer never
+      // handed over, on a price a shop chose precisely because it is round.
+      // Roughly one price point in nine lands this way, in both directions.
+      //
+      // An inclusive price is the whole of what is paid, so the tax is the
+      // remainder by construction and the two add back to it always.
+      splitInclusiveTax(subtract(charged, taxable), taxPercent, cessPercent)
+    : {
+        totalTax: round2(percentOf(taxable, taxPercent)),
+        cess: round2(percentOf(taxable, cessPercent)),
+      };
 
   let cgst = money(0);
   let sgst = money(0);
