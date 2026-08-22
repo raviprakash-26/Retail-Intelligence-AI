@@ -12,6 +12,7 @@ import { createSale } from "@/server/sales/sale-service";
 import { createPayment } from "@/server/settlements/settlement-service";
 import { listAccountMeta } from "@/server/accounting/balances";
 import { createManualEntry } from "@/server/accounting/journal-service";
+import { createBranch } from "@/server/company/branch-service";
 import {
   assertLedgerBalances,
   differenceBetween,
@@ -24,8 +25,11 @@ import {
   ensurePlatformData,
   purgeTestCompany,
   purgeTestUsers,
+  testDb,
   uniqueSlug,
 } from "../helpers/test-db";
+
+const prisma = testDb();
 
 /**
  * The trial balance.
@@ -80,12 +84,20 @@ type Fixture = {
 };
 
 /** Registered and nothing else: no product, so not even an opening entry. */
-async function createBareCompany(): Promise<{ companyId: string }> {
+async function createBareCompany(): Promise<{
+  companyId: string;
+  userId: string;
+  actorEmail: string;
+}> {
   const email = `tb0-${uniqueSlug("x").replace(/-/g, "")}@example.com`;
   createdEmails.push(email);
   const result = await registerOwner(registrationInput(email));
   createdCompanies.push(result.companyId);
-  return { companyId: result.companyId };
+  return {
+    companyId: result.companyId,
+    userId: result.userId,
+    actorEmail: "owner@example.com",
+  };
 }
 
 async function createCompany(): Promise<Fixture> {
@@ -472,6 +484,216 @@ describe("the trial balance", () => {
     const trial = await getTrialBalance({ companyId: alpha.companyId });
     expect(trial.totalDebit).toBe(toStorageString(0));
     expect(trial.sections).toEqual([]);
+  });
+});
+
+/**
+ * One shutter at a time.
+ *
+ * A retailer with two shops wants to know which one is paying for itself, and
+ * the ledger already holds the answer: a member is assigned to a branch and
+ * every entry they post is stamped with it. The reports take a `branchId` and
+ * hand it down to the balance engine.
+ *
+ * The engine filtered on it through a relation named `entry`. The relation on a
+ * journal line is `journalEntry`, so Prisma refused the query and asking for one
+ * branch's figures raised a validation error instead of answering. Every
+ * branch-scoped read — trial balance, profit and loss, balance sheet — went the
+ * same way.
+ *
+ * It type-checked because the filter is assembled inside a conditional spread,
+ * and a key in that position is not excess-property checked: a wrong relation
+ * name compiles exactly like a right one. Only running it tells them apart, and
+ * nothing ran it. Hence these.
+ */
+describe("scoped to one branch", () => {
+  type TwoBranches = {
+    companyId: string;
+    userId: string;
+    actorEmail: string;
+    mainId: string;
+    secondId: string;
+    rentCode: string;
+    accruedCode: string;
+  };
+
+  /** A company with a second shop, and the codes its rent lands on. */
+  async function twoBranches(): Promise<TwoBranches> {
+    const fixture = await createBareCompany();
+
+    const main = await prisma.branch.findFirstOrThrow({
+      where: { companyId: fixture.companyId, isPrimary: true },
+      select: { id: true },
+    });
+
+    const second = await createBranch({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        code: "BLR2",
+        name: "Jayanagar",
+        addressLine1: "",
+        city: "",
+        stateCode: "",
+        pincode: "",
+        phone: "",
+      },
+    });
+
+    const meta = await listAccountMeta(fixture.companyId);
+    const rent = meta.find(
+      (entry) => entry.systemKey === SYSTEM_ACCOUNT.RENT_EXPENSE,
+    );
+    const accrued = meta.find(
+      (entry) => entry.systemKey === SYSTEM_ACCOUNT.ACCRUED_EXPENSES,
+    );
+    if (!rent || !accrued) throw new Error("Provisioning is incomplete");
+
+    return {
+      ...fixture,
+      mainId: main.id,
+      secondId: second.id,
+      rentCode: rent.code,
+      accruedCode: accrued.code,
+    };
+  }
+
+  /** Rent owed for a month, charged to the shop that occupies the premises. */
+  async function accrueRent(
+    fixture: TwoBranches,
+    branchId: string,
+    amount: number,
+    date: string,
+  ): Promise<void> {
+    const meta = await listAccountMeta(fixture.companyId);
+    const rent = meta.find((entry) => entry.code === fixture.rentCode)!;
+    const accrued = meta.find((entry) => entry.code === fixture.accruedCode)!;
+
+    await createManualEntry({
+      companyId: fixture.companyId,
+      branchId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        entryDate: date,
+        voucherType: "JOURNAL",
+        narration: "Shop rent owed for the month",
+        referenceNo: "",
+        lines: [
+          {
+            accountId: rent.id,
+            debit: amount,
+            credit: 0,
+            narration: "",
+            partyId: "",
+          },
+          {
+            accountId: accrued.id,
+            debit: 0,
+            credit: amount,
+            narration: "",
+            partyId: "",
+          },
+        ],
+      },
+    });
+  }
+
+  it("counts only what was posted at that branch", async () => {
+    const fixture = await twoBranches();
+    await accrueRent(fixture, fixture.mainId, 30000, "2026-06-05");
+    await accrueRent(fixture, fixture.secondId, 18000, "2026-06-05");
+
+    const main = await getTrialBalance({
+      companyId: fixture.companyId,
+      branchId: fixture.mainId,
+    });
+    const second = await getTrialBalance({
+      companyId: fixture.companyId,
+      branchId: fixture.secondId,
+    });
+
+    expect(rowFor(main, fixture.rentCode)?.closingDebit).toBe(
+      toStorageString(30000),
+    );
+    expect(rowFor(second, fixture.rentCode)?.closingDebit).toBe(
+      toStorageString(18000),
+    );
+
+    // Each still balances on its own. A filter that reached the expense but not
+    // the liability would leave a branch's columns lopsided.
+    expect(main.balanced).toBe(true);
+    expect(second.balanced).toBe(true);
+    expect(rowFor(main, fixture.accruedCode)?.closingCredit).toBe(
+      toStorageString(30000),
+    );
+  });
+
+  it("adds the branches up to the business", async () => {
+    // The invariant that catches a filter which is merely narrow rather than
+    // wrong: whatever the branches say separately has to come to what the
+    // company says together, because every entry sits at exactly one branch.
+    const fixture = await twoBranches();
+    await accrueRent(fixture, fixture.mainId, 30000, "2026-06-05");
+    await accrueRent(fixture, fixture.secondId, 18000, "2026-06-05");
+
+    const [whole, main, second] = await Promise.all([
+      getTrialBalance({ companyId: fixture.companyId }),
+      getTrialBalance({
+        companyId: fixture.companyId,
+        branchId: fixture.mainId,
+      }),
+      getTrialBalance({
+        companyId: fixture.companyId,
+        branchId: fixture.secondId,
+      }),
+    ]);
+
+    expect(Number(whole.totalDebit)).toBeCloseTo(
+      Number(main.totalDebit) + Number(second.totalDebit),
+      2,
+    );
+    expect(rowFor(whole, fixture.rentCode)?.closingDebit).toBe(
+      toStorageString(48000),
+    );
+  });
+
+  it("carries a branch's earlier entries into its opening column", async () => {
+    // The engine reads twice — everything before the window, then the window
+    // itself — and hands the branch to both. A fix applied to one read only
+    // would pass the cases above, where there is nothing before the window,
+    // and quietly report a branch as though it opened at nil.
+    const fixture = await twoBranches();
+    await accrueRent(fixture, fixture.secondId, 18000, "2026-05-05");
+    await accrueRent(fixture, fixture.secondId, 18000, "2026-06-05");
+    await accrueRent(fixture, fixture.mainId, 30000, "2026-05-05");
+
+    const second = await getTrialBalance({
+      companyId: fixture.companyId,
+      branchId: fixture.secondId,
+      from: "2026-06-01",
+      to: "2026-06-30",
+    });
+
+    const rent = rowFor(second, fixture.rentCode);
+    expect(rent?.openingDebit).toBe(toStorageString(18000));
+    expect(rent?.periodDebit).toBe(toStorageString(18000));
+    expect(rent?.closingDebit).toBe(toStorageString(36000));
+
+    // The other shop's rent belongs to neither column.
+    const main = await getTrialBalance({
+      companyId: fixture.companyId,
+      branchId: fixture.mainId,
+      from: "2026-06-01",
+      to: "2026-06-30",
+    });
+    expect(rowFor(main, fixture.rentCode)?.openingDebit).toBe(
+      toStorageString(30000),
+    );
+    expect(rowFor(main, fixture.rentCode)?.periodDebit).toBe(
+      toStorageString(0),
+    );
   });
 });
 

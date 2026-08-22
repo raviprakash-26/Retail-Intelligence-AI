@@ -118,8 +118,16 @@ async function movements(params: {
         }
       : {}),
     // A branch filter has to reach through to the entry: lines carry the date
-    // but not the location.
-    ...(params.branchId ? { entry: { branchId: params.branchId } } : {}),
+    // but not the location. The relation is `journalEntry` — it was written as
+    // `entry` here, which Prisma rejects at runtime, so every branch-scoped
+    // read threw instead of returning figures.
+    //
+    // Nothing caught it, and the reason is worth keeping: a key inside a
+    // conditional spread is not excess-property checked, so a wrong name in
+    // this position type-checks exactly like a right one. Only running the
+    // query tells the two apart, and no caller passed a branch, so nothing
+    // ever did. The trial balance and statements suites now do.
+    ...(params.branchId ? { journalEntry: { branchId: params.branchId } } : {}),
   };
 
   const rows = await prisma.journalLine.groupBy({
