@@ -21,10 +21,14 @@ import {
  * Three rules do most of the work, and all three are places a hand-rolled
  * spreadsheet usually goes wrong:
  *
- *   1. **Assets are pooled by rate, not tracked individually.** A block is one
- *      running balance. There is no per-asset written-down value in the Act,
+ *   1. **Assets are pooled into blocks, not tracked individually.** A block is
+ *      one running balance. There is no per-asset written-down value in the Act,
  *      and inventing one produces a different answer the moment anything is
- *      sold.
+ *      sold. A block is a *class* of assets — buildings, machinery, plant,
+ *      furniture, intangibles — sharing a prescribed rate, so it takes both to
+ *      identify one: buildings and furniture are each written down at 10% and
+ *      are still two blocks, while a delivery van and a chest freezer are both
+ *      machinery and plant at 15% and are genuinely one.
  *   2. **An asset put to use for less than 180 days in the year it was bought
  *      gets half the rate** — and only in that year.
  *   3. **Sale proceeds come off the block**, not off the asset. If they exceed
@@ -162,6 +166,31 @@ export const BLOCKS: readonly Block[] = [
 /** Where anything unrecognised goes. The general rate for plant and machinery. */
 export const DEFAULT_BLOCK: BlockKey = "PLANT_MACHINERY";
 
+/**
+ * The classes section 2(11) sorts assets into before the rate is looked at.
+ *
+ * A block is a class *and* a rate, not a rate alone. The tell is 10%: buildings
+ * other than residential and furniture and fittings are both written down at
+ * that rate and are two separate blocks, because a building is not furniture.
+ * Pooling them gave the same total every year until one of them was sold, and
+ * then the proceeds came off the wrong pool.
+ *
+ * Motor vehicles are not a class of their own — Appendix I puts them inside
+ * machinery and plant — so a delivery van and a chest freezer really are one
+ * block at 15%, and the entries below say so.
+ */
+type AssetClass = "BUILDING" | "FURNITURE" | "PLANT" | "INTANGIBLE";
+
+const CLASS_OF: Record<BlockKey, AssetClass> = {
+  BUILDING_RESIDENTIAL: "BUILDING",
+  BUILDING_OTHER: "BUILDING",
+  FURNITURE: "FURNITURE",
+  PLANT_MACHINERY: "PLANT",
+  MOTOR_VEHICLE: "PLANT",
+  COMPUTER: "PLANT",
+  INTANGIBLE: "INTANGIBLE",
+};
+
 export function blockByKey(key: BlockKey): Block {
   const found = BLOCKS.find((block) => block.key === key);
   // Every key in the union has an entry; the fallback keeps the type honest.
@@ -231,9 +260,10 @@ export type AssetPlacement = {
 
 export type BlockDepreciation = {
   /**
-   * What the block is called. A block under the Act is defined by its rate, so
-   * this is descriptive — taken from what most of the assets in it appear to
-   * be — while the rate below is what actually does the work.
+   * What the block is called. A block under the Act is a class of assets at a
+   * prescribed rate, and the class is what the pooling turns on; this label is
+   * descriptive within that — taken from what most of the assets in it appear
+   * to be, since one class can hold several of the kinds `BLOCKS` names.
    */
   label: string;
   ratePercent: number;
@@ -316,11 +346,11 @@ type PlacedAsset = {
 };
 
 /**
- * What to call a pool of assets that share a rate.
+ * What to call a block, once its members are settled.
  *
  * Whatever most of them look like, provided that guess carries the same rate.
- * A shop that has put a delivery van and a chest freezer in the same 15% block
- * gets a name for it rather than a bare percentage.
+ * A shop whose delivery van and chest freezer are both machinery and plant at
+ * 15% gets a name for that block rather than a bare percentage.
  */
 function labelForRate(members: readonly PlacedAsset[], rate: number): string {
   const counts = new Map<BlockKey, number>();
@@ -364,19 +394,24 @@ export function computeDepreciation(params: {
     };
   });
 
-  // Pooled by rate, because that is what a block is. Two assets the register
-  // calls different things but depreciates at the same percentage are one block
-  // under the Act, and keeping them apart would give the wrong answer as soon
-  // as one of them is sold.
-  const rates = [...new Set(placed.map((entry) => entry.ratePercent))].sort(
-    (a, b) => b - a,
-  );
+  // Pooled by class and rate together, because that is what a block is. Two
+  // assets the register calls different things but that share a class and a
+  // percentage are one block under the Act, and keeping them apart would give
+  // the wrong answer as soon as one of them is sold. Two that share only the
+  // percentage are not, and pooling them is wrong the same way for the same
+  // reason — see `CLASS_OF`.
+  const pools = new Map<string, PlacedAsset[]>();
+  for (const entry of placed) {
+    const key = `${CLASS_OF[entry.inferredKey]}:${entry.ratePercent}`;
+    pools.set(key, [...(pools.get(key) ?? []), entry]);
+  }
+
   const blocks: BlockDepreciation[] = [];
 
-  for (const ratePercent of rates) {
-    const members = placed.filter((entry) => entry.ratePercent === ratePercent);
+  for (const members of pools.values()) {
     const first = members[0];
     if (!first) continue;
+    const ratePercent = first.ratePercent;
     const label = labelForRate(members, ratePercent);
 
     const earliest = members.reduce(

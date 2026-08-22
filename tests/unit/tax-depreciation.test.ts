@@ -163,6 +163,96 @@ describe("blocks, not assets", () => {
     expect(schedule.depreciation.toFixed(2)).toBe("35000.00");
   });
 
+  it("keeps buildings and furniture apart, though both are rated at 10%", () => {
+    // Section 2(11) groups assets by *class* and then by rate: buildings,
+    // machinery, plant, furniture. Buildings other than residential and
+    // furniture and fittings are both written down at 10% and are still two
+    // blocks, because they are two classes. Sharing a rate is not the same as
+    // being the same block, and the difference shows the moment one is sold.
+    const schedule = computeDepreciation({
+      assets: [
+        asset({
+          id: "premises",
+          category: "Premises",
+          name: "Shop premises",
+          purchaseCost: 2_000_000,
+        }),
+        asset({
+          id: "shelving",
+          category: "Furniture",
+          name: "Display shelving",
+          purchaseCost: 200_000,
+        }),
+      ],
+      ...FY,
+    });
+
+    expect(schedule.blocks).toHaveLength(2);
+    expect(schedule.blocks.map((block) => block.label).sort()).toEqual([
+      "Buildings — other than residential",
+      "Furniture and fittings",
+    ]);
+    for (const block of schedule.blocks) {
+      expect(block.ratePercent).toBe(10);
+      expect(block.assets).toHaveLength(1);
+    }
+
+    // The total is unchanged while nothing has been sold — which is exactly why
+    // this went unnoticed.
+    expect(schedule.depreciation.toFixed(2)).toBe("220000.00");
+  });
+
+  it("does not let a sale out of one 10% block eat into the other", () => {
+    // The shelving is sold for more than it is worth. Its own block is
+    // exhausted and stops earning depreciation; the shop premises are a
+    // different block and carry on at 10% of their own written-down value.
+    //
+    // Pooled together, the excess proceeds would be absorbed by the building
+    // instead — understating the year's depreciation and quietly disposing of a
+    // short-term capital gain that section 50 says arises.
+    const bought = new Date(Date.UTC(2023, 3, 1));
+    const schedule = computeDepreciation({
+      assets: [
+        asset({
+          id: "premises",
+          category: "Premises",
+          name: "Shop premises",
+          purchaseDate: bought,
+          purchaseCost: 2_000_000,
+        }),
+        asset({
+          id: "shelving",
+          category: "Furniture",
+          name: "Display shelving",
+          purchaseDate: bought,
+          purchaseCost: 200_000,
+          disposedAt: new Date(Date.UTC(2025, 8, 1)),
+          disposalValue: 500_000,
+        }),
+      ],
+      ...FY,
+    });
+
+    const building = schedule.blocks.find((block) =>
+      block.label.startsWith("Buildings"),
+    );
+    const furniture = schedule.blocks.find((block) =>
+      block.label.startsWith("Furniture"),
+    );
+
+    // Two years at 10% on 20,00,000 leaves 16,20,000; 10% of that is 1,62,000.
+    expect(building?.openingWdv.toFixed(2)).toBe("1620000.00");
+    expect(building?.disposals.toFixed(2)).toBe("0.00");
+    expect(building?.depreciation.toFixed(2)).toBe("162000.00");
+
+    // The shelving's own block stood at 1,62,000 and fetched 5,00,000.
+    expect(furniture?.openingWdv.toFixed(2)).toBe("162000.00");
+    expect(furniture?.exhausted).toBe(true);
+    expect(furniture?.depreciation.toFixed(2)).toBe("0.00");
+
+    expect(schedule.depreciation.toFixed(2)).toBe("162000.00");
+  });
+
   it("honours a rate recorded against the asset over the guess", () => {
     const schedule = computeDepreciation({
       assets: [asset({ id: "a", category: "Computers", ratePercent: 15 })],
