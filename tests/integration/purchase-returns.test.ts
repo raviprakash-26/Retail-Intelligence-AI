@@ -146,7 +146,12 @@ async function createCompany(): Promise<Fixture> {
   return { ...base, productId: product.id, supplierId: supplier.id };
 }
 
-async function buy(fixture: Fixture, quantity: number, rate = 100) {
+async function buy(
+  fixture: Fixture,
+  quantity: number,
+  rate = 100,
+  claimInputCredit = true,
+) {
   return createPurchase({
     companyId: fixture.companyId,
     userId: fixture.userId,
@@ -158,7 +163,7 @@ async function buy(fixture: Fixture, quantity: number, rate = 100) {
       billDate: today,
       paymentMode: "CREDIT",
       priceIncludesTax: false,
-      claimInputCredit: true,
+      claimInputCredit,
       notes: "",
       lines: [
         {
@@ -318,6 +323,125 @@ describe("a debit note posts its own accounting", () => {
     expect(
       await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.ACCOUNTS_PAYABLE),
     ).toBe(toStorageString(-708));
+  }, 90_000);
+
+  /**
+   * A bill bought without claiming input credit, and then returned.
+   *
+   * The purchase side is careful about this and says so: input tax is an asset
+   * only when it can be set off, and otherwise it has already been landed onto
+   * the cost of the goods and "must not appear here as well, or the bill would
+   * be counted twice". Nothing was ever debited to the input accounts.
+   *
+   * The debit note gave it back anyway. It credited input tax that had never
+   * been claimed, which is a credit balance on an asset account arriving from
+   * nowhere, and the ₹180 of tax sitting inside the stock value then came out
+   * as a cost — so the same tax was given up twice, once as a phantom asset and
+   * once as a phantom expense.
+   *
+   * Reachable by every composition and unregistered business on every purchase
+   * return they ever make, because for them no purchase is ever eligible.
+   */
+  it("gives back nothing on a bill whose credit was never claimed", async () => {
+    const fixture = await createCompany();
+    const bill = await buy(fixture, 10, 100, false);
+    const line = await firstLine(fixture, bill.id);
+
+    // Nothing reached the input accounts on the way in.
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.GST_INPUT_CGST),
+    ).toBe(toStorageString(0));
+
+    await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: today,
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: line.lineId, quantity: 10 }],
+      },
+    });
+
+    // And nothing leaves them on the way out. There is no credit to give up.
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.GST_INPUT_CGST),
+    ).toBe(toStorageString(0));
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.GST_INPUT_SGST),
+    ).toBe(toStorageString(0));
+  }, 90_000);
+
+  it("charges nothing to cost when the tax that was in the stock goes back", async () => {
+    // The whole bill goes back at the price it came in at, so nothing has been
+    // lost: the shelf gives up exactly what the supplier refunds. The tax is
+    // part of both figures, because that is where an unclaimable tax lives.
+    const fixture = await createCompany();
+    const bill = await buy(fixture, 10, 100, false);
+    const line = await firstLine(fixture, bill.id);
+
+    await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: today,
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: line.lineId, quantity: 10 }],
+      },
+    });
+
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.DIRECT_EXPENSES),
+    ).toBe(toStorageString(0));
+    // Stock and the supplier both back to nothing, and the books still balance.
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.INVENTORY),
+    ).toBe(toStorageString(0));
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.ACCOUNTS_PAYABLE),
+    ).toBe(toStorageString(0));
+    await assertTrialBalances(fixture.companyId);
+  }, 90_000);
+
+  it("does not report unclaimable tax as credit the return gave up", async () => {
+    // The register is what the GST working paper reads, and a negative row
+    // marked eligible is credit being surrendered. Marking the reversal of a
+    // claim nobody made as eligible understates the month's claimable credit
+    // and overstates what is payable in cash.
+    const fixture = await createCompany();
+    const bill = await buy(fixture, 10, 100, false);
+    const line = await firstLine(fixture, bill.id);
+
+    await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: today,
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: line.lineId, quantity: 10 }],
+      },
+    });
+
+    const rows = await prisma.gstTransaction.findMany({
+      where: { companyId: fixture.companyId, documentType: "PurchaseReturn" },
+      select: { itcEligible: true, totalTax: true },
+    });
+
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.itcEligible).toBe(false);
+    }
   }, 90_000);
 
   it("recognises the gap between what the shelf gives up and what the supplier refunds", async () => {
