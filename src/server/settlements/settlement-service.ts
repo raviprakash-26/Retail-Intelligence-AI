@@ -1058,6 +1058,46 @@ export async function listPayments(params: {
   };
 }
 
+/**
+ * What each of these documents still owes, netted the way everything else nets.
+ *
+ * The voucher page shows a "still open" column against every document a receipt
+ * or payment was matched to, and it used to work that out on the client as
+ * total less paid. That is the definition of settled from before returns
+ * existed, so an invoice whose goods had all come back and been credited showed
+ * the whole of itself as still open, on the very page somebody opens to check
+ * what a payment did.
+ *
+ * The figure belongs on the server for the same reason it belongs in one
+ * function: it is a question about the ledger, not about two columns.
+ */
+async function withOutstanding<
+  T extends {
+    id: string;
+    totalAmount: Prisma.Decimal;
+    paidAmount: Prisma.Decimal;
+  },
+>(
+  documents: readonly T[],
+  params: { companyId: string; side: "RECEIVABLE" | "PAYABLE" },
+): Promise<Array<T & { outstanding: string }>> {
+  const settled = await settledByNotes(prisma, {
+    companyId: params.companyId,
+    documentIds: documents.map((document) => document.id),
+    side: params.side,
+  });
+
+  return documents.map((document) => ({
+    ...document,
+    outstanding: toStorageString(
+      subtract(
+        document.totalAmount,
+        add(document.paidAmount, settled.get(document.id) ?? money(0)),
+      ),
+    ),
+  }));
+}
+
 export async function getReceipt(params: {
   companyId: string;
   receiptId: string;
@@ -1126,7 +1166,14 @@ export async function getReceipt(params: {
       : Promise.resolve([]),
   ]);
 
-  return { receipt, entry, documents: sales };
+  return {
+    receipt,
+    entry,
+    documents: await withOutstanding(sales, {
+      companyId: params.companyId,
+      side: "RECEIVABLE",
+    }),
+  };
 }
 
 export async function getPayment(params: {
@@ -1197,5 +1244,12 @@ export async function getPayment(params: {
       : Promise.resolve([]),
   ]);
 
-  return { payment, entry, documents: purchases };
+  return {
+    payment,
+    entry,
+    documents: await withOutstanding(purchases, {
+      companyId: params.companyId,
+      side: "PAYABLE",
+    }),
+  };
 }

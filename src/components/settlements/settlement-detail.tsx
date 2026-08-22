@@ -41,7 +41,8 @@ export type SettlementAllocationRow = {
   /** What was matched to this document by this receipt or payment. */
   allocated: string;
   total: string;
-  paid: string;
+  /** What the document still owes, netted for credit and debit notes. */
+  outstanding: string;
 };
 
 export type SettlementEntryView = {
@@ -222,7 +223,7 @@ export function SettlementDetail({
                     </TableHeader>
                     <TableBody>
                       {allocations.map((row) => {
-                        const open = Number(row.total) - Number(row.paid);
+                        const open = Number(row.outstanding);
                         return (
                           <TableRow key={row.id}>
                             <TableCell className="pl-6">

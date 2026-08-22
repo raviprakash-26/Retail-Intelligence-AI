@@ -69,7 +69,7 @@ export default async function PaymentDetailPage({
         date: purchase.billDate,
         allocated: allocated.get(purchase.id) ?? "0",
         total: toStorageString(purchase.totalAmount),
-        paid: toStorageString(purchase.paidAmount),
+        outstanding: purchase.outstanding,
       }))}
       entry={entry}
       canVoid={context.permissions.has("payments.void")}
