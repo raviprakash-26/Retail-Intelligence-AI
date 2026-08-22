@@ -14,6 +14,7 @@ import { RULES, type RuleKey, type Severity } from "@/lib/auditor/rules";
 import { getTrialBalance } from "@/server/accounting/trial-balance-service";
 import { getGstWorkingPaper } from "@/server/gst/gst-return-service";
 import { reconcileStock } from "@/server/inventory/inventory-report";
+import { aggregateCashDays, cashOutflows } from "@/server/tax/cash-outflows";
 
 /**
  * The checks themselves.
@@ -454,55 +455,48 @@ async function checkGstRegister(context: CheckContext): Promise<Finding[]> {
 // Money
 // ---------------------------------------------------------------------------
 
-type CashDayRow = {
-  payee: string | null;
-  day: Date;
-  total: Prisma.Decimal;
-  vouchers: string[];
-};
-
+/**
+ * Cash paid to one person in one day, above the section 40A(3) limit.
+ *
+ * This used to be a query of its own over expenses and payment vouchers,
+ * grouped by whatever name was on the voucher. It missed the most ordinary way
+ * a shop pays cash to a supplier — a bill settled at the counter, which has no
+ * payment voucher because the amount sits on the bill itself. The rule's own
+ * example is that case: "a supplier who does not take bank transfers was paid
+ * for a large delivery". The income tax working paper had always counted it and
+ * disallowed it, so the two halves of the product disagreed about the same law:
+ * the computation took the deduction away, and the check that exists to warn
+ * about it before the year ends said nothing.
+ *
+ * It now asks the same code the computation does. Same three sources, and the
+ * same key — the party a payment went to rather than the spelling on a voucher,
+ * so two spellings of one supplier are one person and two unnamed payees are
+ * not.
+ *
+ * Capital payments are left out here and not there, deliberately: they are
+ * caught by the proviso to section 43(1), which denies them a place in the cost
+ * of the asset rather than disallowing a year's expenditure. Different
+ * provision, different consequence, and this rule names 40A(3).
+ */
 async function checkCashOverLimit(context: CheckContext): Promise<Finding[]> {
-  const rows = await prisma.$queryRaw<CashDayRow[]>`
-    SELECT payee, day, SUM(amount) AS total,
-           ARRAY_AGG(voucher ORDER BY voucher) AS vouchers
-    FROM (
-      SELECT COALESCE(e."payeeName", 'Unnamed payee') AS payee,
-             e."expenseDate" AS day, e."totalAmount" AS amount,
-             e."voucherNumber" AS voucher
-      FROM expenses e
-      WHERE e."companyId" = ${context.companyId}::uuid
-        AND e.status = ${DocumentStatus.POSTED}::"DocumentStatus"
-        AND e."paymentMode" = 'CASH'
-        AND e."isCapitalExpenditure" = false
-        AND e."expenseDate" BETWEEN ${context.from} AND ${context.to}
+  const outflows = await cashOutflows({
+    companyId: context.companyId,
+    from: context.from,
+    to: context.to,
+  });
 
-      UNION ALL
-
-      SELECT COALESCE(sup.name, p.purpose) AS payee,
-             p."paymentDate" AS day, p.amount, p."voucherNumber" AS voucher
-      FROM payments p
-      LEFT JOIN suppliers sup ON sup.id = p."supplierId"
-      WHERE p."companyId" = ${context.companyId}::uuid
-        AND p.status = ${DocumentStatus.POSTED}::"DocumentStatus"
-        AND p."paymentMode" = 'CASH'
-        AND p.purpose <> 'DRAWINGS'
-        AND p."paymentDate" BETWEEN ${context.from} AND ${context.to}
-    ) AS cash
-    GROUP BY payee, day
-    HAVING SUM(amount) > ${CASH_PAYMENT_LIMIT}
-    ORDER BY SUM(amount) DESC
-    LIMIT 20
-  `;
-
-  return rows.map((row) =>
-    finding("CASH_PAYMENT_OVER_LIMIT", {
-      paidTo: row.payee ?? "Unnamed payee",
-      date: isoDay(row.day),
-      total: row.total.toString(),
-      limit: CASH_PAYMENT_LIMIT,
-      vouchers: row.vouchers,
-    }),
-  );
+  return aggregateCashDays(outflows)
+    .filter((day) => !day.capital)
+    .slice(0, 20)
+    .map((day) =>
+      finding("CASH_PAYMENT_OVER_LIMIT", {
+        paidTo: day.partyName,
+        date: day.date,
+        total: day.amount,
+        limit: CASH_PAYMENT_LIMIT,
+        vouchers: day.vouchers,
+      }),
+    );
 }
 
 /** Days past due at which an unpaid invoice is worth surfacing. */

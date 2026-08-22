@@ -7,12 +7,14 @@ import type {
   ProductInput,
   SupplierInput,
 } from "@/lib/validation/master-data";
+import type { PurchaseInput } from "@/lib/validation/purchases";
 import type { SaleInput } from "@/lib/validation/sales";
 import type { PaymentInput } from "@/lib/validation/settlements";
 import { registerOwner } from "@/server/auth/registration";
 import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
+import { createPurchase } from "@/server/purchases/purchase-service";
 import { createSale } from "@/server/sales/sale-service";
 import { createPayment } from "@/server/settlements/settlement-service";
 import {
@@ -214,6 +216,48 @@ async function sell(
   });
 }
 
+/**
+ * A supplier bill paid for in cash across the counter.
+ *
+ * No payment voucher is created for one of these — the bill carries the
+ * settlement itself — which is what made it invisible to a check that read
+ * payment vouchers.
+ */
+async function buyForCash(fixture: Fixture, rate: number): Promise<number> {
+  const bill = await createPurchase({
+    companyId: fixture.companyId,
+    userId: fixture.userId,
+    actorEmail: fixture.actorEmail,
+    branchId: null,
+    input: {
+      supplierId: fixture.supplierId,
+      supplierBillNo: uniqueSlug("SB").toUpperCase(),
+      billDate: daysBefore(4),
+      paymentMode: "CASH",
+      priceIncludesTax: false,
+      claimInputCredit: true,
+      notes: "",
+      lines: [
+        {
+          productId: fixture.productId,
+          description: "",
+          quantity: 1,
+          rate,
+          discountPercent: 0,
+        },
+      ],
+    } satisfies PurchaseInput,
+  });
+
+  // What the bill came to, rather than what this helper guessed it would: the
+  // fixture's tax rate is provisioning's business, not this test's.
+  const posted = await prisma.purchase.findUniqueOrThrow({
+    where: { id: bill.id },
+    select: { totalAmount: true },
+  });
+  return Number(posted.totalAmount);
+}
+
 const audit = (fixture: Fixture) =>
   runAudit({ companyId: fixture.companyId, ...WINDOW });
 
@@ -346,6 +390,64 @@ describe("what the checks find", () => {
     expect(finding).toBeDefined();
     expect(finding?.evidence.paidTo).toBe("Metro Wholesale");
     expect(Number(finding?.evidence.total)).toBe(15_000);
+  });
+
+  /**
+   * A bill settled in cash at the counter.
+   *
+   * There is no payment voucher for one of these — the amount sits on the bill
+   * itself — so a check that reads expenses and payment vouchers cannot see it.
+   * That is the rule's own worked example: "a supplier who does not take bank
+   * transfers was paid for a large delivery". The income tax working paper has
+   * always counted it and disallowed the deduction, so the computation took the
+   * money away while the check meant to warn about it beforehand said nothing.
+   */
+  it("notices a supplier bill settled in cash at the counter", async () => {
+    const fixture = await createCompany();
+    const billTotal = await buyForCash(fixture, 15_000);
+    expect(billTotal).toBeGreaterThan(10_000);
+
+    const report = await audit(fixture);
+    const finding = report.findings.find(
+      (entry) => entry.ruleKey === "CASH_PAYMENT_OVER_LIMIT",
+    );
+
+    expect(finding).toBeDefined();
+    expect(finding?.evidence.paidTo).toBe("Metro Wholesale");
+    expect(Number(finding?.evidence.total)).toBe(billTotal);
+  });
+
+  it("adds a bill and a voucher to the same supplier on one day together", async () => {
+    // Neither is over the limit alone. Section 40A(3) is about the total to one
+    // person in one day, and splitting a payment across two kinds of document
+    // is exactly what the aggregation exists to defeat.
+    const fixture = await createCompany();
+    const billTotal = await buyForCash(fixture, 6_000);
+    expect(billTotal).toBeLessThan(10_000);
+    await createPayment({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        kind: "SUPPLIER",
+        partyId: fixture.supplierId,
+        date: daysBefore(4),
+        paymentMode: "CASH",
+        amount: 6_000,
+        referenceNo: "",
+        notes: "",
+        allocations: [],
+      } satisfies PaymentInput,
+    });
+
+    const report = await audit(fixture);
+    const finding = report.findings.find(
+      (entry) => entry.ruleKey === "CASH_PAYMENT_OVER_LIMIT",
+    );
+
+    expect(finding).toBeDefined();
+    expect(Number(finding?.evidence.total)).toBe(billTotal + 6_000);
+    expect((finding?.evidence.vouchers as string[]).length).toBe(2);
   });
 
   it("says nothing about cash paid within the limit", async () => {
