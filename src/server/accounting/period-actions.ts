@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { fail, ok, type ActionResult } from "@/server/auth/action-result";
 import { assertPermission } from "@/server/auth/context";
+import { billingRefusal } from "@/server/billing/guards";
 import { requireSameOrigin } from "@/server/security/request-context";
 import {
   closePeriod,
@@ -139,6 +140,13 @@ export async function closeFiscalYearAction(
 
   const context = await assertPermission("accounting.period.close");
 
+  // Closing a year writes a closing entry, so it is a posting and asks like
+  // one. Closing and reopening a *month* post nothing — they move a status —
+  // and are deliberately left open, which is why the gate is on these two
+  // actions rather than on the whole file.
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
+
   const parsed = closeYearSchema.safeParse(input);
   if (!parsed.success) {
     return fail(
@@ -169,6 +177,10 @@ export async function reopenFiscalYearAction(
   if (originError) return originError;
 
   const context = await assertPermission("accounting.period.close");
+
+  // Reopening reverses the closing entry, which is another posting.
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
 
   const parsed = reopenYearSchema.safeParse(input);
   if (!parsed.success) {

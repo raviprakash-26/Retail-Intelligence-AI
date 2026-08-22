@@ -16,6 +16,7 @@ import {
   type ActionResult,
 } from "@/server/auth/action-result";
 import { assertPermission } from "@/server/auth/context";
+import { billingRefusal } from "@/server/billing/guards";
 import {
   NoFiscalPeriodError,
   PeriodClosedError,
@@ -69,6 +70,13 @@ export async function createJournalEntryAction(
   if (originError) return originError;
 
   const context = await assertPermission("accounting.journal.create");
+
+  // A free-form entry reaches the ledger like any invoice does, so it passes
+  // the same gate. Without this a lapsed subscription refused a sale and
+  // allowed the debits and credits that sale would have posted.
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
+
   const parsed = journalEntrySchema.safeParse(input);
   if (!parsed.success) {
     return fail("Check the entry below.", {
@@ -101,6 +109,12 @@ export async function reverseJournalEntryAction(
   if (originError) return originError;
 
   const context = await assertPermission("accounting.journal.void");
+
+  // A reversal is a new entry, which is why every other void in the codebase
+  // asks too.
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
+
   const parsed = voidJournalEntrySchema.safeParse(input);
   if (!parsed.success) {
     return fail("A reason is required.", {
