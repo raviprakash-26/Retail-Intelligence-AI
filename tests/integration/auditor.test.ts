@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AuditFindingStatus } from "@prisma/client";
+import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
+import { subtract, toStorageString } from "@/lib/money";
 import { accuses, RULES_VERSION } from "@/lib/auditor/rules";
 import type { RegisterInput } from "@/lib/validation/auth";
 import type {
@@ -16,6 +18,10 @@ import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
 import { createPurchase } from "@/server/purchases/purchase-service";
 import { createSale } from "@/server/sales/sale-service";
+import {
+  createSalesReturn,
+  returnableLines,
+} from "@/server/returns/sales-return-service";
 import { createPayment } from "@/server/settlements/settlement-service";
 import {
   getLatestAudit,
@@ -256,6 +262,24 @@ async function buyForCash(fixture: Fixture, rate: number): Promise<number> {
     select: { totalAmount: true },
   });
   return Number(posted.totalAmount);
+}
+
+/** Net debit on a system account. Credit-natured accounts read negative. */
+async function accountBalance(
+  companyId: string,
+  systemKey: string,
+): Promise<string> {
+  const account = await prisma.account.findFirstOrThrow({
+    where: { companyId, systemKey },
+    select: { id: true },
+  });
+  const totals = await prisma.journalLine.aggregate({
+    where: { companyId, accountId: account.id, status: "POSTED" },
+    _sum: { debit: true, credit: true },
+  });
+  return toStorageString(
+    subtract(totals._sum.debit ?? 0, totals._sum.credit ?? 0),
+  );
 }
 
 const audit = (fixture: Fixture) =>
@@ -624,6 +648,101 @@ describe("tenant isolation", () => {
 });
 
 describe("figures a person might act on", () => {
+  /**
+   * An old invoice whose goods came back.
+   *
+   * The check asked whether `totalAmount > paidAmount` and totalled the
+   * difference, which is what settled meant before returns existed. A credit
+   * note settles an invoice as surely as a receipt does, so an invoice fully
+   * returned and credited still read as unpaid: counted among the invoices
+   * owed for more than ninety days, added into the total, and eligible to be
+   * named as the oldest — the auditor telling a shop to chase a customer for
+   * goods that customer had already sent back.
+   */
+  it("does not chase an old invoice the goods came back on", async () => {
+    const fixture = await createCompany();
+    const invoice = await sell(fixture, {
+      quantity: 10,
+      rate: 100,
+      date: daysBefore(1),
+    });
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: invoice.id,
+    });
+
+    await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: invoice.id,
+        returnDate: daysBefore(1),
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 10 }],
+      },
+    });
+
+    const report = await runAudit({
+      companyId: fixture.companyId,
+      from: WINDOW.from,
+      to: new Date(TODAY.getTime() + 200 * DAY),
+    });
+
+    expect(keysOf(report)).not.toContain("LONG_OVERDUE_RECEIVABLE");
+  }, 90_000);
+
+  it("counts only what is still owed after a part of it came back", async () => {
+    const fixture = await createCompany();
+    const invoice = await sell(fixture, {
+      quantity: 10,
+      rate: 100,
+      date: daysBefore(1),
+    });
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: invoice.id,
+    });
+
+    await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: invoice.id,
+        returnDate: daysBefore(1),
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+      },
+    });
+
+    const report = await runAudit({
+      companyId: fixture.companyId,
+      from: WINDOW.from,
+      to: new Date(TODAY.getTime() + 200 * DAY),
+    });
+    const overdue = report.findings.find(
+      (entry) => entry.ruleKey === "LONG_OVERDUE_RECEIVABLE",
+    );
+    expect(overdue).toBeDefined();
+
+    // Against the receivable account, which is what the credit note moved and
+    // what the ageing report and the receipt form both read.
+    const receivable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+    );
+    expect(Number(overdue!.evidence.outstanding)).toBeCloseTo(
+      Number(receivable),
+      2,
+    );
+    expect(overdue!.evidence.invoices).toBe(1);
+  }, 90_000);
+
   it("totals every overdue invoice, not the page of them it fetched", async () => {
     // The defect this replaces: the check took the first fifty overdue
     // invoices and added those up, then presented the result as the amount
