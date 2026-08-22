@@ -691,6 +691,114 @@ describe("matching", () => {
 });
 
 describe("the reconciliation statement", () => {
+  /**
+   * A cheque written before the period being reconciled, still unpresented.
+   *
+   * The most ordinary item on any reconciliation: a cheque issued near a month
+   * end that the bank pays out in the next one. Looking at May, that cheque is
+   * in the book balance as at 31 May — the balances are read cumulatively —
+   * and not in the unmatched set, which is only the movements inside May. So
+   * the identity was being computed from two different spans, and the page
+   * reported the whole of that cheque as an unexplained gap.
+   *
+   * Unexplained is not a soft word here. The module says zero means reconciled
+   * and anything else is a real gap, so this is the reconciliation accusing a
+   * shop of a discrepancy it does not have, on the item most likely to be
+   * there.
+   */
+  it("absorbs a cheque written before the period it is asked about", async () => {
+    const fixture = await createCompanyWithBank();
+
+    // Written in April, still not presented at the end of May.
+    await postBankPayment(fixture, {
+      date: "2026-04-28",
+      amount: "7000",
+      narration: "Cheque to supplier",
+    });
+    // A May movement both sides agree on.
+    const cleared = await postBankPayment(fixture, {
+      date: "2026-05-07",
+      amount: "18000",
+      narration: "May rent",
+    });
+
+    await importFor(
+      fixture,
+      statementCsv([
+        { date: "07/05/2026", description: "Rent paid", out: "18000.00" },
+      ]),
+    );
+
+    const may = await viewFor(fixture, "2026-05-01", "2026-05-31");
+    await matchTransaction({
+      companyId: fixture.companyId,
+      bankTransactionId: may!.statement[0]!.id,
+      journalEntryId: cleared.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+
+    const after = await viewFor(fixture, "2026-05-01", "2026-05-31");
+    expect(after?.difference.unexplained.toString()).toBe("0");
+  }, 90_000);
+
+  it("offers the April cheque against the May statement line that cleared it", async () => {
+    // The worse half of the same fault. If the unmatched book side is only the
+    // movements inside the window, an April cheque presented in May is absent
+    // from May's view — and the May statement line is absent from April's — so
+    // there is no view from which the two can be put together. The item is not
+    // merely mis-reported, it is unreconcilable.
+    const fixture = await createCompanyWithBank();
+
+    const cheque = await postBankPayment(fixture, {
+      date: "2026-04-28",
+      amount: "7000",
+      narration: "Cheque 456789 to supplier",
+    });
+
+    // The bank pays it out in May.
+    await importFor(
+      fixture,
+      statementCsv([
+        { date: "05/05/2026", description: "Cheque 456789", out: "7000.00" },
+      ]),
+    );
+
+    const may = await viewFor(fixture, "2026-05-01", "2026-05-31");
+    expect(may?.unmatchedBook.map((row) => row.journalEntryId)).toContain(
+      cheque.id,
+    );
+  }, 90_000);
+
+  it("lists the period's own activity, while counting everything still open", async () => {
+    // The two spans that were one. What the page shows as this month's
+    // activity is this month's; what it shows as outstanding is everything not
+    // yet cleared, whenever it happened. Both are needed and they are not the
+    // same list.
+    const fixture = await createCompanyWithBank();
+
+    await postBankPayment(fixture, {
+      date: "2026-04-28",
+      amount: "7000",
+      narration: "April cheque",
+    });
+    await postBankPayment(fixture, {
+      date: "2026-05-07",
+      amount: "18000",
+      narration: "May rent",
+    });
+
+    const may = await viewFor(fixture, "2026-05-01", "2026-05-31");
+
+    // Activity: May only.
+    expect(may?.book.map((row) => row.narration)).toEqual(["May rent"]);
+
+    // Outstanding: both, because neither has been matched to anything.
+    expect(may?.unmatchedBook.map((row) => row.narration)).toEqual(
+      expect.arrayContaining(["April cheque", "May rent"]),
+    );
+  }, 90_000);
+
   it("balances when every difference is a timing difference", async () => {
     // The identity the whole module rests on: books minus what the bank has not
     // seen equals statement minus what the books have not seen.
