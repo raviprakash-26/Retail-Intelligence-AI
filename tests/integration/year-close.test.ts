@@ -7,6 +7,12 @@ import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import { registerOwner } from "@/server/auth/registration";
 import { provisionCompany } from "@/server/provisioning/company-provisioner";
 import { postJournalEntry } from "@/server/accounting/post-journal-entry";
+import {
+  assignableGroups,
+  createAccount,
+  setAccountActive,
+} from "@/server/accounting/account-service";
+import { accountBalances } from "@/server/accounting/balances";
 import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
@@ -801,5 +807,215 @@ describe("months inside a closed year", () => {
       reason: "A supplier bill arrived late",
     });
     expect(reopened.status).toBe("OPEN");
+  }, 120_000);
+});
+
+/**
+ * An account retired between one close and the next.
+ *
+ * Closing the year brings every income and expense account to nil — that is what
+ * it is for. Which makes the moment after a close exactly when somebody tidies
+ * the chart and puts away the accounts they no longer use: they all read zero,
+ * and retiring one is allowed precisely because it does.
+ *
+ * Then something turns up that means the year has to be reopened and closed
+ * again, which the system supports and expects. The second closing entry was
+ * built from the active accounts only, so whatever the retired one was carrying
+ * at the year end was left out of the year's result — while the profit and loss
+ * account, which reads inactive accounts too, went on showing it.
+ *
+ * That is two reports disagreeing about one year's profit, and the one that is
+ * wrong is the one that gets posted. Retained earnings ends up crediting a
+ * figure the statements never reported, the retired account keeps a balance no
+ * close will ever clear, and the expense lands in whichever year it is finally
+ * noticed in. The books balance throughout, so nothing complains.
+ *
+ * The guard on retiring an account is not what is at fault: it asks whether the
+ * account is carrying anything *now*, which is the right question for putting an
+ * account away. Closing asks what it was carrying *at the year end*. Two
+ * different questions, and the close is the one that has to read every account.
+ */
+describe("an account retired between one close and the next", () => {
+  async function shopWithARetirableExpense() {
+    const shop = await shopReadyToClose();
+
+    const groups = await assignableGroups({
+      companyId: shop.companyId,
+      type: "EXPENSE",
+    });
+    const group = groups.find((entry) => entry.code === "6100") ?? groups[0]!;
+
+    const account = await createAccount({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      input: {
+        // Clear of the standard chart, which grows as the product does.
+        code: "6907",
+        name: "Diwali promotion",
+        groupId: group.id,
+        type: "EXPENSE",
+        subType: "INDIRECT_EXPENSE",
+        description: "",
+      },
+    });
+
+    const cash = await prisma.account.findFirstOrThrow({
+      where: { companyId: shop.companyId, systemKey: SYSTEM_ACCOUNT.CASH },
+      select: { id: true },
+    });
+
+    await prisma.$transaction((tx) =>
+      postJournalEntry(tx, {
+        companyId: shop.companyId,
+        entryDate: new Date(),
+        voucherType: VoucherType.JOURNAL,
+        createdById: shop.userId,
+        narration: "Lights and sweets for the festival window",
+        lines: [
+          { accountId: account.id, debit: 4000 },
+          { accountId: cash.id, credit: 4000 },
+        ],
+      }),
+    );
+
+    return { shop, accountId: account.id };
+  }
+
+  const statementsFor = (shop: Shop) =>
+    getFinancialStatements({
+      companyId: shop.companyId,
+      from: isoDay(shop.from),
+      to: isoDay(shop.to),
+    });
+
+  const retainedEarningsMovement = async (companyId: string) => {
+    const retained = await prisma.account.findFirstOrThrow({
+      where: { companyId, systemKey: SYSTEM_ACCOUNT.RETAINED_EARNINGS },
+      select: { id: true },
+    });
+    const lines = await prisma.journalLine.groupBy({
+      by: ["accountId"],
+      where: {
+        companyId,
+        accountId: retained.id,
+        status: JournalStatus.POSTED,
+      },
+      _sum: { debit: true, credit: true },
+    });
+    return (
+      Number(lines[0]?._sum.credit ?? 0) - Number(lines[0]?._sum.debit ?? 0)
+    );
+  };
+
+  async function closeYear(shop: Shop) {
+    await closeFiscalYear({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      fiscalYearId: shop.yearId,
+    });
+  }
+
+  it("still counts what it was carrying when the year ended", async () => {
+    const { shop, accountId } = await shopWithARetirableExpense();
+
+    const profit = Number((await statementsFor(shop)).profitAndLoss.netProfit);
+
+    await closeEveryMonth(shop);
+    await closeYear(shop);
+
+    // The close has zeroed it, so putting it away is allowed — and this is
+    // exactly when somebody would.
+    await setAccountActive({
+      companyId: shop.companyId,
+      accountId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      isActive: false,
+    });
+
+    await reopenFiscalYear({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      fiscalYearId: shop.yearId,
+      reason: "The festival spend was billed to the wrong year",
+    });
+    await closeYear(shop);
+
+    // Retained earnings must carry the year's result, and the year's result is
+    // what the profit and loss account said it was — retiring an account does
+    // not change what the business earned.
+    expect(await retainedEarningsMovement(shop.companyId)).toBeCloseTo(
+      profit,
+      2,
+    );
+  }, 120_000);
+
+  it("leaves nothing behind in it either", async () => {
+    // The other half of the same promise. A close that skips an account leaves
+    // a balance sitting in the year it has just declared settled, and every
+    // later reading of that year still shows the expense.
+    const { shop, accountId } = await shopWithARetirableExpense();
+
+    await closeEveryMonth(shop);
+    await closeYear(shop);
+    await setAccountActive({
+      companyId: shop.companyId,
+      accountId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      isActive: false,
+    });
+    await reopenFiscalYear({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      fiscalYearId: shop.yearId,
+      reason: "The festival spend was billed to the wrong year",
+    });
+    await closeYear(shop);
+
+    const after = await statementsFor(shop);
+    expect(Number(after.profitAndLoss.expensesTotal)).toBe(0);
+    expect(Number(after.balanceSheet.earningsToDate)).toBe(0);
+    expect(after.balanceSheet.balanced).toBe(true);
+  }, 120_000);
+
+  it("brings the retired account itself to nil", async () => {
+    // Said of the account rather than of a total, because a total can come out
+    // right for the wrong reason. Closing a year means every account that
+    // measures it reads nil at its end — the retired one included, since it is
+    // the only reason the year's figures moved at all.
+    const { shop, accountId } = await shopWithARetirableExpense();
+
+    await closeEveryMonth(shop);
+    await closeYear(shop);
+    await setAccountActive({
+      companyId: shop.companyId,
+      accountId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      isActive: false,
+    });
+    await reopenFiscalYear({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      fiscalYearId: shop.yearId,
+      reason: "The festival spend was billed to the wrong year",
+    });
+    await closeYear(shop);
+
+    const balances = await accountBalances({
+      companyId: shop.companyId,
+      to: shop.to,
+      includeInactive: true,
+    });
+    const retiredAccount = balances.find((entry) => entry.id === accountId);
+
+    expect(retiredAccount).toBeDefined();
+    expect(retiredAccount!.balance.toFixed(2)).toBe("0.00");
   }, 120_000);
 });
