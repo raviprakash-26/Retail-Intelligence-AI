@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { add } from "@/lib/money";
 import {
   chargesTax,
   computeLine,
@@ -164,6 +165,71 @@ describe("computeLine", () => {
     expect(line.cgstAmount.toString()).toBe("9");
     expect(line.sgstAmount.toString()).toBe("9");
     expect(line.lineTotal.toString()).toBe("118");
+  });
+
+  it("comes back to the price it was sold at", () => {
+    // ₹118 above divides exactly, which is why it never showed this. A shelf
+    // price of ₹100 at 18% does not: the taxable value is ₹84.7458, and once
+    // that is rounded to ₹84.75 the rate applied to it a second time gives
+    // ₹15.26 — a paisa more than the ₹15.25 actually inside the price.
+    //
+    // An inclusive price is the whole of what the customer hands over. The tax
+    // is the part of it that belongs to the government, so the two have to add
+    // back to the price; anything else is an invoice that disagrees with the
+    // shelf and a tax figure a paisa above what was collected.
+    const line = computeLine(
+      { quantity: 1, rate: 100, taxPercent: 18, priceIncludesTax: true },
+      "INTRA_STATE",
+    );
+
+    expect(line.taxableAmount.toFixed(2)).toBe("84.75");
+    expect(line.lineTotal.toFixed(2)).toBe("100.00");
+    // The odd paisa sits in one half, as it does everywhere else the halves
+    // are taken.
+    expect(add(line.cgstAmount, line.sgstAmount).toFixed(2)).toBe("15.25");
+  });
+
+  it("comes back to the price at every rate a shop actually charges", () => {
+    // Stated as the property, because the failing case above is one price
+    // point and the rule is about all of them.
+    const off: string[] = [];
+
+    // Cess is in the sweep because the tax inside the price has to be divided
+    // between two heads, and dividing it by rounding both is the same mistake
+    // one level down: the parts stop adding to the whole.
+    for (const taxPercent of [0, 3, 5, 12, 18, 28]) {
+      for (const cessPercent of [0, 1, 12, 60]) {
+        for (const paise of [0, 1, 25, 49, 50, 75, 99]) {
+          for (const rupees of [1, 49, 100, 249, 999]) {
+            const rate = Number(`${rupees}.${String(paise).padStart(2, "0")}`);
+            for (const supply of ["INTRA_STATE", "INTER_STATE"] as const) {
+              const line = computeLine(
+                {
+                  quantity: 1,
+                  rate,
+                  taxPercent,
+                  cessPercent,
+                  priceIncludesTax: true,
+                },
+                supply,
+              );
+              if (line.lineTotal.toFixed(2) !== rate.toFixed(2)) {
+                off.push(
+                  `${supply} ₹${rate.toFixed(2)} at ${taxPercent}%${
+                    cessPercent > 0 ? ` plus ${cessPercent}% cess` : ""
+                  } came to ₹${line.lineTotal.toFixed(2)}`,
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+
+    expect(
+      off,
+      `these inclusive prices did not add back to themselves:\n${off.slice(0, 12).join("\n")}`,
+    ).toEqual([]);
   });
 
   it("charges no tax when the supply is not taxable, whatever the product rate", () => {
