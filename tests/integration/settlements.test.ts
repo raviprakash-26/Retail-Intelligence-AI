@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import { trialBalanceIsBalanced } from "@/lib/accounting/double-entry";
 import { subtract, toStorageString } from "@/lib/money";
+import { bucketFor } from "@/lib/settlements/ageing";
 import type { RegisterInput } from "@/lib/validation/auth";
 import type {
   CustomerInput,
@@ -1686,5 +1687,130 @@ describe("the ageing against the control account", () => {
     );
     expect(Number(ageing.summary.total)).toBeCloseTo(Number(receivable), 2);
     expect(ageing.parties).toHaveLength(1);
+  }, 90_000);
+});
+
+/**
+ * How late the open-document lists say a document is.
+ *
+ * These two lists are what the till shows when somebody is deciding which
+ * invoice a customer's money should go against, and `openInvoices` is what the
+ * payment reminder is built from. Both worked lateness out by subtracting the
+ * due date from the current instant and rounding, so a document rounded up to
+ * a day late once the clock passed midday UTC — half past five in the evening
+ * where the shop is, which is when the books get done.
+ *
+ * The ageing report beside them counts the same thing correctly, through
+ * `daysOverdue` in `lib/settlements/ageing`, which truncates both dates to the
+ * day first and carries a comment saying why. So the two disagreed about the
+ * same invoice for the second half of every day.
+ *
+ * The hours below are the two the shared unit test already pins, asserted here
+ * through the readers that reach a customer.
+ */
+describe("how late the open-document lists say a document is", () => {
+  const midnightToday = () => {
+    const now = new Date();
+    return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  };
+
+  /** A date `days` before today, as the yyyy-mm-dd the forms submit. */
+  const daysBack = (days: number) =>
+    new Date(midnightToday() - days * 86_400_000).toISOString().slice(0, 10);
+
+  const at = (hours: number, minutes: number, dayOffset = 0) =>
+    new Date(
+      midnightToday() +
+        dayOffset * 86_400_000 +
+        hours * 3_600_000 +
+        minutes * 60_000,
+    );
+
+  it("does not call an invoice late on the day it falls due", async () => {
+    // Thirty days' credit, raised thirty days ago: due today.
+    const fixture = await createCompany();
+    await raiseInvoice(fixture, { invoiceDate: daysBack(30) });
+
+    const open = await openInvoices(prisma, {
+      companyId: fixture.companyId,
+      customerId: fixture.customerId,
+      asOf: at(16, 30),
+    });
+
+    expect(open).toHaveLength(1);
+    expect(open[0]!.dueDate).toBe(daysBack(0));
+    expect(open[0]!.daysOverdue).toBe(0);
+  }, 90_000);
+
+  it("does not call a bill late on the day it falls due", async () => {
+    // The same reader on the paying side. Fixing one and not the other left
+    // the supplier list still a day out.
+    const fixture = await createCompany();
+    await raiseBill(fixture, { billDate: daysBack(30) });
+
+    const open = await openBills(prisma, {
+      companyId: fixture.companyId,
+      supplierId: fixture.supplierId,
+      asOf: at(16, 30),
+    });
+
+    expect(open).toHaveLength(1);
+    expect(open[0]!.dueDate).toBe(daysBack(0));
+    expect(open[0]!.daysOverdue).toBe(0);
+  }, 90_000);
+
+  it("reports nothing rather than a negative on an invoice not yet due", async () => {
+    // `daysOverdue` in the shared module counts backwards before the due date,
+    // which is what the ageing buckets want. This field does not: it is read
+    // as "days overdue" by the till, the reminder and the settlement form,
+    // and every one of them tests it against nil.
+    const fixture = await createCompany();
+    await raiseInvoice(fixture);
+
+    const open = await openInvoices(prisma, {
+      companyId: fixture.companyId,
+      customerId: fixture.customerId,
+      asOf: at(16, 30),
+    });
+
+    expect(open[0]!.dueDate).toBe(daysBack(-30));
+    expect(open[0]!.daysOverdue).toBe(0);
+  }, 90_000);
+
+  it("calls it a day late the next morning", async () => {
+    // The other side of the boundary, so that simply reporting nil would fail.
+    const fixture = await createCompany();
+    await raiseInvoice(fixture, { invoiceDate: daysBack(30) });
+
+    const open = await openInvoices(prisma, {
+      companyId: fixture.companyId,
+      customerId: fixture.customerId,
+      asOf: at(0, 5, 1),
+    });
+
+    expect(open[0]!.daysOverdue).toBe(1);
+  }, 90_000);
+
+  it("agrees with the ageing report about an invoice a month late", async () => {
+    // One rule, two readers. The ageing report has always truncated to the
+    // day; this asserts the list reaches the same bucket rather than trusting
+    // that it does.
+    const fixture = await createCompany();
+    await raiseInvoice(fixture, { invoiceDate: daysBack(60) });
+
+    const open = await openInvoices(prisma, {
+      companyId: fixture.companyId,
+      customerId: fixture.customerId,
+      asOf: at(16, 30),
+    });
+
+    expect(open[0]!.daysOverdue).toBe(30);
+    expect(bucketFor(open[0]!.daysOverdue)).toBe("d1_30");
+
+    const ageing = await receivablesAgeing(fixture.companyId);
+    expect(Number(ageing.summary.buckets.d1_30)).toBeCloseTo(
+      Number(open[0]!.outstanding),
+      2,
+    );
   }, 90_000);
 });

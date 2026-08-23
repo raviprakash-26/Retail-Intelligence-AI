@@ -7,7 +7,10 @@ import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
 import { createSale } from "@/server/sales/sale-service";
-import { reminderPreview } from "@/server/settlements/payment-reminder";
+import {
+  paymentReminderEmail,
+  reminderPreview,
+} from "@/server/settlements/payment-reminder";
 import {
   disconnectTestDb,
   ensurePlatformData,
@@ -199,7 +202,7 @@ describe("what the shop would be sending", () => {
       customerId: shop.customerId,
     });
 
-    expect(preview?.oldestOverdueDays).toBeGreaterThanOrEqual(39);
+    expect(preview?.oldestOverdueDays).toBe(40);
     expect(Number(preview?.totalOverdue)).toBeGreaterThan(0);
   }, 120_000);
 
@@ -231,6 +234,102 @@ describe("what the shop would be sending", () => {
       customerId: shop.customerId,
     });
     expect(preview?.lastRemindedAt).toBeNull();
+  }, 120_000);
+});
+
+/**
+ * The day an invoice falls due, read in the evening.
+ *
+ * "It states facts and nothing else" is the first promise this module makes,
+ * and the fact most easily got wrong is the one in the subject line. Lateness
+ * was worked out by subtracting two instants and rounding, so once the clock
+ * passed midday UTC — half past five in the evening in the shop — an invoice
+ * due that day rounded up to one day late. A retailer does the books after the
+ * shutters come down, which is exactly when this was wrong.
+ *
+ * What went out was not a statement of account with a wrong number in it. The
+ * subject changed to "Payment reminder", the first line said money was past its
+ * due date, and the invoice was listed as a day overdue on the day it fell due.
+ * The customer has their own copy of that invoice, and the shop cannot defend
+ * the claim — which is precisely what the module says it exists to avoid.
+ *
+ * The ageing report never had this: `daysOverdue` in `lib/settlements/ageing`
+ * truncates to the day and is tested on this very hour. The reminder took a
+ * different route to the same question and got a different answer.
+ */
+describe("what the reminder says on the due date itself", () => {
+  /** Half past four in the afternoon UTC, on the day the invoice falls due. */
+  function thatAfternoon(): Date {
+    const today = new Date();
+    return new Date(
+      Date.UTC(
+        today.getUTCFullYear(),
+        today.getUTCMonth(),
+        today.getUTCDate(),
+        16,
+        30,
+      ),
+    );
+  }
+
+  it("does not call an invoice late on the day it falls due", async () => {
+    const shop = await shopWithDebt(0);
+    const preview = await reminderPreview({
+      companyId: shop.companyId,
+      customerId: shop.customerId,
+      asOf: thatAfternoon(),
+    });
+
+    expect(preview?.invoices).toHaveLength(1);
+    expect(preview?.invoices[0]?.daysOverdue).toBe(0);
+    expect(preview?.oldestOverdueDays).toBe(0);
+    // The figure the subject line and the opening sentence are chosen from.
+    expect(Number(preview?.totalOverdue)).toBe(0);
+  }, 120_000);
+
+  it("sends a statement rather than a demand", async () => {
+    const shop = await shopWithDebt(0);
+    const preview = await reminderPreview({
+      companyId: shop.companyId,
+      customerId: shop.customerId,
+      asOf: thatAfternoon(),
+    });
+    if (!preview) throw new Error("The customer should have been found");
+
+    const email = paymentReminderEmail({
+      to: "accounts@sharma.example",
+      supplierName: "Remind Mart",
+      preview,
+    });
+
+    expect(email.subject).toContain("Statement of account");
+    expect(email.subject).not.toContain("Payment reminder");
+    expect(email.text).toContain("not yet due");
+    expect(email.text).not.toContain("past its due date");
+  }, 120_000);
+
+  it("calls it a day late the following morning", async () => {
+    // The other side of the same boundary: five past midnight is one day, and
+    // a fix that simply stopped counting would pass the two cases above.
+    const shop = await shopWithDebt(0);
+    const today = new Date();
+    const preview = await reminderPreview({
+      companyId: shop.companyId,
+      customerId: shop.customerId,
+      asOf: new Date(
+        Date.UTC(
+          today.getUTCFullYear(),
+          today.getUTCMonth(),
+          today.getUTCDate() + 1,
+          0,
+          5,
+        ),
+      ),
+    });
+
+    expect(preview?.invoices[0]?.daysOverdue).toBe(1);
+    expect(preview?.oldestOverdueDays).toBe(1);
+    expect(Number(preview?.totalOverdue)).toBeGreaterThan(0);
   }, 120_000);
 });
 
