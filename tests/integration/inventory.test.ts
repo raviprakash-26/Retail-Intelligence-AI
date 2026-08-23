@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { StockMovementType } from "@prisma/client";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
+import { recordInward, recordOutward } from "@/server/inventory/stock-service";
 import { toStorageString } from "@/lib/money";
 import type { RegisterInput } from "@/lib/validation/auth";
 import type { CustomerInput, ProductInput } from "@/lib/validation/master-data";
@@ -836,4 +838,174 @@ describe("turning stock tracking off", () => {
     expect(Number(summary.totalValue)).toBeCloseTo(Number(ledger), 2);
     expect(Number(summary.totalValue)).toBeGreaterThan(0);
   }, 90_000);
+});
+
+/**
+ * Two things happening to one product at the same time.
+ *
+ * A position is held twice by design — as a cached balance on the product and
+ * as the append-only movement ledger it is built from — and `reconcileStock`
+ * exists to notice when the two stop agreeing. This is how they stopped.
+ *
+ * Recording a movement reads the balance, works out the new one in JavaScript
+ * and writes it back. Under the default isolation a second transaction reads
+ * the same starting figure before the first has committed, so it computes its
+ * own answer from a number that is already stale and overwrites it. The
+ * movement rows are inserts and all of them survive; only the cached balance
+ * loses them, so the ledger is right and the position is wrong.
+ *
+ * Two *sales* cannot do this to each other, which is worth saying because it
+ * is the obvious guess: every sale allocates an invoice number, that takes a
+ * row lock on the company's sale sequence, and the second sale waits there
+ * until the first has finished. It is the paths that do not share a sequence
+ * that race — a sale against a delivery being booked in, either against a
+ * stock adjustment, which takes no document number at all.
+ *
+ * The lock is taken per company rather than per product. It sits between the
+ * document number and the journal number, which is where every path already
+ * touches stock, so the order is the same everywhere and nothing can deadlock
+ * against anything else. Per product would be finer and would need every
+ * caller to take its lines in a fixed order to stay safe; a shop posts a
+ * handful of stock movements a minute, and serialising those is not a cost it
+ * can measure.
+ */
+describe("two movements at once", () => {
+  it("keeps the cached position and the ledger in step", async () => {
+    const fixture = await createCompany();
+    const branch = await prisma.branch.findFirstOrThrow({
+      where: { companyId: fixture.companyId },
+      select: { id: true },
+    });
+
+    const take = () =>
+      prisma.$transaction(
+        (tx) =>
+          recordOutward(tx, {
+            companyId: fixture.companyId,
+            productId: fixture.productId,
+            branchId: branch.id,
+            method: "WEIGHTED_AVERAGE",
+            quantity: 1,
+            movementType: StockMovementType.SALE,
+            movementDate: new Date(),
+            sourceType: "CONCURRENCY_TEST",
+            sourceId: fixture.productId,
+          }),
+        { timeout: 30_000 },
+      );
+
+    // Eight at once. One or two survived before the lock; the rest were
+    // computed from a stale figure and written over each other.
+    await Promise.all(Array.from({ length: 8 }, take));
+
+    const balance = await prisma.inventoryBalance.findFirstOrThrow({
+      where: { companyId: fixture.companyId, productId: fixture.productId },
+      select: { quantity: true },
+    });
+    const ledger = await prisma.inventoryMovement.aggregate({
+      where: { companyId: fixture.companyId, productId: fixture.productId },
+      _sum: { quantity: true },
+    });
+
+    // Opened at 100, eight taken out.
+    expect(Number(balance.quantity)).toBe(92);
+    expect(Number(ledger._sum.quantity)).toBe(92);
+  }, 200_000);
+
+  it("leaves nothing for the reconciliation to find", async () => {
+    // Said through the check that exists for this, because a drift the
+    // reconciliation cannot see is worse than one it reports.
+    const fixture = await createCompany();
+    const branch = await prisma.branch.findFirstOrThrow({
+      where: { companyId: fixture.companyId },
+      select: { id: true },
+    });
+
+    await Promise.all(
+      Array.from({ length: 6 }, () =>
+        prisma.$transaction(
+          (tx) =>
+            recordOutward(tx, {
+              companyId: fixture.companyId,
+              productId: fixture.productId,
+              branchId: branch.id,
+              method: "WEIGHTED_AVERAGE",
+              quantity: 2,
+              movementType: StockMovementType.SALE,
+              movementDate: new Date(),
+              sourceType: "CONCURRENCY_TEST",
+              sourceId: fixture.productId,
+            }),
+          { timeout: 30_000 },
+        ),
+      ),
+    );
+
+    const check = await reconcileStock(fixture.companyId);
+    expect(check.cacheDifference).toBe(toStorageString(0));
+    expect(check.drifted).toEqual([]);
+  }, 200_000);
+
+  it("holds when stock is going out and coming in at once", async () => {
+    // The realistic shape of it, and the one the outward-only cases miss: a
+    // sale at the counter while a delivery is being booked in. Both directions
+    // read the same position and write it back, so both have to wait on the
+    // same lock or the pair drift against each other.
+    const fixture = await createCompany();
+    const branch = await prisma.branch.findFirstOrThrow({
+      where: { companyId: fixture.companyId },
+      select: { id: true },
+    });
+    const shared = {
+      companyId: fixture.companyId,
+      productId: fixture.productId,
+      branchId: branch.id,
+      method: "WEIGHTED_AVERAGE" as const,
+      movementDate: new Date(),
+      sourceType: "CONCURRENCY_TEST",
+      sourceId: fixture.productId,
+    };
+
+    await Promise.all([
+      ...Array.from({ length: 4 }, () =>
+        prisma.$transaction(
+          (tx) =>
+            recordOutward(tx, {
+              ...shared,
+              quantity: 1,
+              movementType: StockMovementType.SALE,
+            }),
+          { timeout: 30_000 },
+        ),
+      ),
+      ...Array.from({ length: 4 }, () =>
+        prisma.$transaction(
+          (tx) =>
+            recordInward(tx, {
+              ...shared,
+              quantity: 1,
+              unitCost: 60,
+              movementType: StockMovementType.PURCHASE,
+            }),
+          { timeout: 30_000 },
+        ),
+      ),
+    ]);
+
+    const balance = await prisma.inventoryBalance.findFirstOrThrow({
+      where: { companyId: fixture.companyId, productId: fixture.productId },
+      select: { quantity: true },
+    });
+    const ledger = await prisma.inventoryMovement.aggregate({
+      where: { companyId: fixture.companyId, productId: fixture.productId },
+      _sum: { quantity: true },
+    });
+
+    // Four out and four in against an opening hundred leaves it where it was.
+    expect(Number(balance.quantity)).toBe(100);
+    expect(Number(ledger._sum.quantity)).toBe(100);
+
+    const check = await reconcileStock(fixture.companyId);
+    expect(check.cacheDifference).toBe(toStorageString(0));
+  }, 200_000);
 });

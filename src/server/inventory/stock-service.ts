@@ -113,6 +113,43 @@ async function rebuildLayers(
   return layers;
 }
 
+/**
+ * Holds the company's stock still for the rest of the transaction.
+ *
+ * Recording a movement reads the balance, works the new one out here and writes
+ * it back. Under the default isolation a second transaction reads the same
+ * starting figure before the first has committed, computes its answer from a
+ * number already stale, and overwrites it. The movement rows are inserts and
+ * every one of them survives, so the ledger stays right and only the cached
+ * position loses them — which is precisely the disagreement `reconcileStock`
+ * exists to report, arriving with nothing to explain it.
+ *
+ * Two sales cannot do this to each other, which is worth saying because it is
+ * the obvious guess: a sale allocates an invoice number first, that takes a row
+ * lock on the company's sale sequence, and the second sale waits there. It is
+ * the paths that share no sequence that race — a sale against a delivery being
+ * booked in, either against an adjustment, which takes no document number.
+ *
+ * Per company rather than per product, and deliberately. Every path touches
+ * stock after its document number and before its journal number, so one lock
+ * taken at that point gives a single order — document sequence, then stock,
+ * then journal sequence — that no path can take the other way round, and
+ * nothing here can deadlock against anything else. A per-product lock would be
+ * finer and would oblige every caller to take a document's lines in a fixed
+ * order to stay safe; a shop posts a handful of stock movements a minute, and
+ * serialising those is not a cost it can measure.
+ *
+ * Transaction-scoped, so it is released on commit or rollback without anything
+ * having to remember to.
+ */
+async function lockStock(tx: DbClient, companyId: string): Promise<void> {
+  // `$executeRaw` rather than `$queryRaw`: the lock function returns void, and
+  // asking for rows back from it fails to deserialise.
+  await tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(hashtextextended(${`stock:${companyId}`}, 0))
+  `;
+}
+
 export async function readPosition(
   tx: DbClient,
   params: {
@@ -224,6 +261,7 @@ export async function recordOutward(
     createdById?: string | null;
   },
 ): Promise<MovementResult> {
+  await lockStock(tx, params.companyId);
   const position = await readPosition(tx, params);
 
   const consumption = consume(params.method, {
@@ -300,6 +338,7 @@ export async function recordInward(
     createdById?: string | null;
   },
 ): Promise<MovementResult> {
+  await lockStock(tx, params.companyId);
   const position = await readPosition(tx, params);
 
   const value = multiply(params.quantity, params.unitCost);
