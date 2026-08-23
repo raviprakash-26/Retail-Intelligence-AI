@@ -378,8 +378,26 @@ function applyRebate(
  * Marginal relief on surcharge.
  *
  * Crossing a surcharge threshold must never leave the assessee worse off than
- * stopping at it. The relief is the amount by which the extra tax exceeds the
- * extra income.
+ * stopping at it. The Finance Act says it as a ceiling: income-tax and
+ * surcharge on the actual income shall not exceed income-tax **and surcharge**
+ * on a total income of the threshold, by more than the income above it.
+ *
+ * The words "and surcharge" are the whole of this. Only the lowest threshold
+ * has no surcharge sitting at it — fifty lakh is the point where surcharge
+ * begins — so a ceiling built from the slabs alone is right there and nowhere
+ * else. At a crore the ceiling has to carry the 10% that a crore already
+ * attracts, at two crore the 15%, and so on.
+ *
+ * Left out, the relief overshot by exactly the surcharge at the threshold, and
+ * it overshot in the direction that reads as a reward: at ten lakh of tax on a
+ * crore, earning ₹100 more took ₹2,92,396 *off* the bill. Relief that pays the
+ * assessee to cross a threshold is not relief, and a working paper showing tax
+ * falling as income rises is one an assessing officer will ask about.
+ *
+ * The ceiling is therefore the whole computation run again at the threshold,
+ * not the slabs alone. That is recursive by nature — the figure at a crore is
+ * itself after the relief owed at fifty lakh — and it terminates because each
+ * call is made at a strictly lower band.
  */
 function surchargeMarginalRelief(params: {
   income: Decimal;
@@ -390,18 +408,90 @@ function surchargeMarginalRelief(params: {
   regime: TaxRegime;
   ageBand: AgeBand;
 }): Decimal {
-  const atThreshold = baseTax(
+  const atThreshold = taxAndSurcharge(
     money(params.threshold),
     params.table,
     params.assessee,
     params.regime,
     params.ageBand,
-  ).tax;
+  ).beforeCess;
 
   const excessIncome = subtract(params.income, params.threshold);
   const ceiling = add(atThreshold, excessIncome);
   const relief = subtract(params.taxPlusSurcharge, ceiling);
   return compare(relief, 0) > 0 ? relief : money(0);
+}
+
+type TaxAndSurcharge = {
+  bands: BandResult[];
+  flatRatePercent: number | null;
+  taxOnIncome: Decimal;
+  rebate: Decimal;
+  rebateNote: string | null;
+  taxAfterRebate: Decimal;
+  surchargeRatePercent: number;
+  surcharge: Decimal;
+  marginalRelief: Decimal;
+  /** Income-tax and surcharge after both reliefs, before cess. */
+  beforeCess: Decimal;
+};
+
+/**
+ * Everything up to but not including cess, at a given total income.
+ *
+ * Split out from `computeIncomeTax` because the surcharge ceiling above needs
+ * exactly this figure at the threshold, and needs it to be the same arithmetic
+ * rather than a second reading of the same rule.
+ */
+function taxAndSurcharge(
+  income: Decimal,
+  table: RateTable,
+  assessee: Assessee,
+  regime: TaxRegime,
+  ageBand: AgeBand,
+): TaxAndSurcharge {
+  const base = baseTax(income, table, assessee, regime, ageBand);
+  const { rebate, note } = applyRebate(
+    income,
+    base.tax,
+    table.rebate[regime],
+    assessee,
+  );
+  const taxAfterRebate = subtract(base.tax, rebate);
+
+  const bands = surchargeBandsFor(table, assessee, regime);
+  const applicable = bands.find((band) => compare(income, band.above) > 0);
+  const surcharge = applicable
+    ? percentOf(taxAfterRebate, applicable.ratePercent)
+    : money(0);
+
+  const marginalRelief = applicable
+    ? surchargeMarginalRelief({
+        income,
+        taxPlusSurcharge: add(taxAfterRebate, surcharge),
+        threshold: applicable.above,
+        table,
+        assessee,
+        regime,
+        ageBand,
+      })
+    : money(0);
+
+  return {
+    bands: base.bands,
+    flatRatePercent: base.flatRatePercent,
+    taxOnIncome: base.tax,
+    rebate,
+    rebateNote: note,
+    taxAfterRebate,
+    surchargeRatePercent: applicable?.ratePercent ?? 0,
+    surcharge,
+    marginalRelief,
+    beforeCess: max(
+      subtract(add(taxAfterRebate, surcharge), marginalRelief),
+      0,
+    ),
+  };
 }
 
 /** Section 288B: the final liability is rounded to the nearest ten rupees. */
@@ -426,39 +516,15 @@ export function computeIncomeTax(params: {
   // loss itself is carried forward, which is outside what this computes.
   const totalIncome = max(money(params.totalIncome), 0);
 
-  const base = baseTax(totalIncome, table, assessee, regime, ageBand);
-  const { rebate, note } = applyRebate(
+  const computed = taxAndSurcharge(
     totalIncome,
-    base.tax,
-    table.rebate[regime],
+    table,
     assessee,
+    regime,
+    ageBand,
   );
-  const taxAfterRebate = subtract(base.tax, rebate);
-
-  const bands = surchargeBandsFor(table, assessee, regime);
-  const applicable = bands.find((band) => compare(totalIncome, band.above) > 0);
-  const surcharge = applicable
-    ? percentOf(taxAfterRebate, applicable.ratePercent)
-    : money(0);
-
-  const marginalRelief = applicable
-    ? surchargeMarginalRelief({
-        income: totalIncome,
-        taxPlusSurcharge: add(taxAfterRebate, surcharge),
-        threshold: applicable.above,
-        table,
-        assessee,
-        regime,
-        ageBand,
-      })
-    : money(0);
-
-  const beforeCess = max(
-    subtract(add(taxAfterRebate, surcharge), marginalRelief),
-    0,
-  );
-  const cess = percentOf(beforeCess, table.cessPercent);
-  const totalTax = add(beforeCess, cess);
+  const cess = percentOf(computed.beforeCess, table.cessPercent);
+  const totalTax = add(computed.beforeCess, cess);
 
   return {
     assessmentYear: table.assessmentYear,
@@ -469,15 +535,15 @@ export function computeIncomeTax(params: {
     regime,
     ageBand,
     totalIncome,
-    bands: base.bands,
-    flatRatePercent: base.flatRatePercent,
-    taxOnIncome: base.tax,
-    rebate,
-    rebateNote: note,
-    taxAfterRebate,
-    surchargeRatePercent: applicable?.ratePercent ?? 0,
-    surcharge,
-    marginalRelief,
+    bands: computed.bands,
+    flatRatePercent: computed.flatRatePercent,
+    taxOnIncome: computed.taxOnIncome,
+    rebate: computed.rebate,
+    rebateNote: computed.rebateNote,
+    taxAfterRebate: computed.taxAfterRebate,
+    surchargeRatePercent: computed.surchargeRatePercent,
+    surcharge: computed.surcharge,
+    marginalRelief: computed.marginalRelief,
     cessPercent: table.cessPercent,
     cess,
     totalTax,
