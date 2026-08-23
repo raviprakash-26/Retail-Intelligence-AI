@@ -165,16 +165,32 @@ export async function productPerformance(params: {
 }): Promise<ProductPerformance[]> {
   const rows = await prisma.$queryRaw<ProductRow[]>`
     SELECT p.id, p.sku, p.name,
-           SUM(si.quantity)                     AS quantity,
-           SUM(si."taxableAmount")               AS revenue,
-           SUM(si.quantity * si."unitCost")      AS cost
-    FROM sale_items si
-    JOIN sales s    ON s.id = si."saleId"
-    JOIN products p ON p.id = si."productId"
-    WHERE si."companyId" = ${params.companyId}::uuid
-      AND s.status = 'POSTED'
-      AND s."invoiceDate" >= ${params.from}
-      AND s."invoiceDate" <= ${params.to}
+           SUM(m.quantity)                  AS quantity,
+           SUM(m.taxable)                   AS revenue,
+           SUM(m.quantity * m."unitCost")   AS cost
+    FROM (
+      SELECT si."productId", si.quantity, si."taxableAmount" AS taxable,
+             si."unitCost"
+        FROM sale_items si
+        JOIN sales s ON s.id = si."saleId"
+       WHERE si."companyId" = ${params.companyId}::uuid
+         AND s.status = 'POSTED'
+         AND s."invoiceDate" >= ${params.from}
+         AND s."invoiceDate" <= ${params.to}
+      UNION ALL
+      -- Negated rather than filtered out: what came back is not a sale that
+      -- never happened, it is a sale partly undone, and the difference is
+      -- visible whenever only some of a line is returned.
+      SELECT ri."productId", -ri.quantity, -ri."taxableAmount",
+             ri."unitCost"
+        FROM sales_return_items ri
+        JOIN sales_returns r ON r.id = ri."salesReturnId"
+       WHERE ri."companyId" = ${params.companyId}::uuid
+         AND r.status = 'POSTED'
+         AND r."returnDate" >= ${params.from}
+         AND r."returnDate" <= ${params.to}
+    ) m
+    JOIN products p ON p.id = m."productId"
     GROUP BY p.id, p.sku, p.name
   `;
 
@@ -222,15 +238,28 @@ export async function customerPerformance(params: {
   to: Date;
 }): Promise<CustomerPerformance[]> {
   const rows = await prisma.$queryRaw<CustomerRow[]>`
-    SELECT s."customerId", c.name,
-           SUM(s."taxableAmount") AS revenue,
-           COUNT(*)::int          AS bills
-    FROM sales s
-    LEFT JOIN customers c ON c.id = s."customerId"
-    WHERE s."companyId" = ${params.companyId}::uuid
-      AND s.status = 'POSTED'
-      AND s."invoiceDate" >= ${params.from}
-      AND s."invoiceDate" <= ${params.to}
+    SELECT m."customerId", c.name,
+           SUM(m.taxable)      AS revenue,
+           SUM(m.bill)::int    AS bills
+    FROM (
+      SELECT s."customerId", s."taxableAmount" AS taxable, 1 AS bill
+        FROM sales s
+       WHERE s."companyId" = ${params.companyId}::uuid
+         AND s.status = 'POSTED'
+         AND s."invoiceDate" >= ${params.from}
+         AND s."invoiceDate" <= ${params.to}
+      UNION ALL
+      -- Revenue comes off; the bill does not. The customer was invoiced, and a
+      -- count of bills that fell when goods came back would say a shop had
+      -- served somebody fewer times than it did.
+      SELECT r."customerId", -r."taxableAmount", 0
+        FROM sales_returns r
+       WHERE r."companyId" = ${params.companyId}::uuid
+         AND r.status = 'POSTED'
+         AND r."returnDate" >= ${params.from}
+         AND r."returnDate" <= ${params.to}
+    ) m
+    LEFT JOIN customers c ON c.id = m."customerId"
     GROUP BY 1, 2
   `;
 
@@ -268,15 +297,26 @@ export async function categoryMix(params: {
 }): Promise<CategoryMix[]> {
   const rows = await prisma.$queryRaw<CategoryRow[]>`
     SELECT p."categoryId", cat.name,
-           SUM(si."taxableAmount") AS revenue
-    FROM sale_items si
-    JOIN sales s        ON s.id = si."saleId"
-    JOIN products p     ON p.id = si."productId"
+           SUM(m.taxable) AS revenue
+    FROM (
+      SELECT si."productId", si."taxableAmount" AS taxable
+        FROM sale_items si
+        JOIN sales s ON s.id = si."saleId"
+       WHERE si."companyId" = ${params.companyId}::uuid
+         AND s.status = 'POSTED'
+         AND s."invoiceDate" >= ${params.from}
+         AND s."invoiceDate" <= ${params.to}
+      UNION ALL
+      SELECT ri."productId", -ri."taxableAmount"
+        FROM sales_return_items ri
+        JOIN sales_returns r ON r.id = ri."salesReturnId"
+       WHERE ri."companyId" = ${params.companyId}::uuid
+         AND r.status = 'POSTED'
+         AND r."returnDate" >= ${params.from}
+         AND r."returnDate" <= ${params.to}
+    ) m
+    JOIN products p          ON p.id = m."productId"
     LEFT JOIN categories cat ON cat.id = p."categoryId"
-    WHERE si."companyId" = ${params.companyId}::uuid
-      AND s.status = 'POSTED'
-      AND s."invoiceDate" >= ${params.from}
-      AND s."invoiceDate" <= ${params.to}
     GROUP BY 1, 2
   `;
 
