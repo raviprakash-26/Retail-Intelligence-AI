@@ -116,6 +116,37 @@ export function periodLabel(year: number, month: number): string {
   return `${MONTHS[month - 1] ?? "Unknown"} ${year}`;
 }
 
+/**
+ * Who was on the payroll for a month.
+ *
+ * The period is whichever the caller asks for — the validation allows any month
+ * from 2000 to 2100, and rightly, because a shop that has fallen behind catches
+ * up by running the months it missed. Employees were selected by status alone,
+ * so somebody hired last week appeared on a payroll for a month before they
+ * joined: paid, deducted from, and posted to the ledger as a cost of a month
+ * they had nothing to do with. Every employee carries a joining date and most
+ * carry an exit date; both were recorded and neither was read.
+ *
+ * The exit date matters for the same reason from the other end. It is entered
+ * when notice is given, which is before anybody moves the status off ACTIVE, so
+ * for a stretch the record says both things at once.
+ *
+ * Joining or leaving *during* the month still puts somebody on the run. What
+ * they are owed for a part-month is a proration question this does not answer
+ * and should not silently decide by dropping them.
+ */
+function employedDuring(year: number, month: number) {
+  const monthStart = new Date(Date.UTC(year, month - 1, 1));
+  // Day zero of the following month is the last day of this one, which saves
+  // knowing which months have thirty days and which Februaries have twenty-nine.
+  const monthEnd = new Date(Date.UTC(year, month, 0));
+
+  return {
+    joiningDate: { lte: monthEnd },
+    OR: [{ exitDate: null }, { exitDate: { gte: monthStart } }],
+  };
+}
+
 /** The company's scheme registrations, which are facts it tells us. */
 export async function payrollPolicy(companyId: string): Promise<PayrollPolicy> {
   const company = await prisma.company.findUniqueOrThrow({
@@ -182,7 +213,7 @@ export async function previewPayroll(params: {
   const [policy, employees, existing] = await Promise.all([
     payrollPolicy(companyId),
     prisma.employee.findMany({
-      where: { companyId, status: "ACTIVE" },
+      where: { companyId, status: "ACTIVE", ...employedDuring(year, month) },
       select: {
         id: true,
         employeeCode: true,
@@ -285,7 +316,7 @@ export async function createPayrollRun(params: {
 
       const policy = await payrollPolicy(companyId);
       const employees = await tx.employee.findMany({
-        where: { companyId, status: "ACTIVE" },
+        where: { companyId, status: "ACTIVE", ...employedDuring(year, month) },
         select: {
           id: true,
           basicSalary: true,

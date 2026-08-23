@@ -108,6 +108,7 @@ async function hire(
   name: string,
   basicSalary: number,
   allowances = 0,
+  dates: { joiningDate?: string; exitDate?: string } = {},
 ) {
   return createEmployee({
     companyId: fixture.companyId,
@@ -119,8 +120,8 @@ async function hire(
       phone: "",
       department: "",
       designation: "Sales assistant",
-      joiningDate: "2025-04-01",
-      exitDate: "",
+      joiningDate: dates.joiningDate ?? "2025-04-01",
+      exitDate: dates.exitDate ?? "",
       status: "ACTIVE",
       basicSalary,
       allowances,
@@ -450,5 +451,80 @@ describe("professional tax outside Karnataka", () => {
       month: 6,
     });
     expect(Number(preview.totals.professionalTax)).toBe(0);
+  }, 90_000);
+});
+
+/**
+ * Who was actually on the payroll that month.
+ *
+ * The period is chosen by whoever runs it, and the validation allows any month
+ * from 2000 to 2100 — which is right, because a shop that has fallen behind
+ * catches up by running the months it missed. The employees were selected by
+ * status alone.
+ *
+ * So somebody hired last week appeared on a payroll for a month before they
+ * joined: paid, deducted from, and posted to the ledger as a cost of a month
+ * they had nothing to do with. `joiningDate` is required on every employee and
+ * `exitDate` is kept beside it; both were recorded and neither was read.
+ *
+ * The dates decide who is on the run. Joining or leaving *during* the month
+ * still puts somebody on it — what they are owed for a part-month is a
+ * proration question, which this does not answer and does not pretend to.
+ */
+describe("who is on a run", () => {
+  it("leaves out somebody who had not joined yet", async () => {
+    const fixture = await createCompany({ providentFund: true });
+    await hire(fixture, "Priya Nair", 10_000, 0, {
+      joiningDate: "2026-07-15",
+    });
+
+    const preview = await previewPayroll({
+      companyId: fixture.companyId,
+      year: 2026,
+      month: 6,
+    });
+
+    expect(preview.payslips).toHaveLength(0);
+    expect(Number(preview.totals.gross)).toBe(0);
+  }, 90_000);
+
+  it("leaves out somebody who had already left", async () => {
+    // The exit date is recorded when notice is given, which is before the
+    // status is moved off ACTIVE — so for a while both are true of the record.
+    const fixture = await createCompany({ providentFund: true });
+    await hire(fixture, "Ramesh Gowda", 10_000, 0, {
+      joiningDate: "2025-04-01",
+      exitDate: "2026-05-20",
+    });
+
+    const preview = await previewPayroll({
+      companyId: fixture.companyId,
+      year: 2026,
+      month: 6,
+    });
+
+    expect(preview.payslips).toHaveLength(0);
+  }, 90_000);
+
+  it("still pays somebody who joined or left during the month", async () => {
+    // The other half. A guard on the dates that excluded a part-month would
+    // drop the joiner's first pay and the leaver's last, which is worse than
+    // the thing it fixes and would not be noticed until somebody complained.
+    const fixture = await createCompany({ providentFund: true });
+    await hire(fixture, "Joined Midway", 10_000, 0, {
+      joiningDate: "2026-06-15",
+    });
+    await hire(fixture, "Left Midway", 10_000, 0, {
+      joiningDate: "2025-04-01",
+      exitDate: "2026-06-10",
+    });
+
+    const preview = await previewPayroll({
+      companyId: fixture.companyId,
+      year: 2026,
+      month: 6,
+    });
+
+    expect(preview.payslips).toHaveLength(2);
   }, 90_000);
 });
