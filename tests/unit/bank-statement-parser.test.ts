@@ -168,6 +168,62 @@ describe("a statement with one amount column", () => {
     expect(rows[0]?.amount.toString()).toBe("18000");
   });
 
+  it("reads the Dr or Cr written onto the amount itself", () => {
+    // A passbook-style export puts the direction in the cell rather than in a
+    // column of its own. `parseAmount` has to strip the marker to read the
+    // number, and stripping it threw away the only thing on the row that said
+    // which way the money went — so every withdrawal came through as a deposit,
+    // with no error against the row to say so.
+    const { rows, errors } = parseBankStatement(
+      [
+        "Date,Particulars,Amount",
+        '01/04/2026,ATM cash withdrawal,"5,000.00 Dr"',
+        '02/04/2026,Card settlement,"4,200.00 Cr"',
+      ].join("\n"),
+    );
+    expect(errors).toEqual([]);
+    expect(rows[0]?.direction).toBe("OUT");
+    expect(rows[0]?.amount.toString()).toBe("5000");
+    expect(rows[1]?.direction).toBe("IN");
+    expect(rows[1]?.amount.toString()).toBe("4200");
+  });
+
+  it("reads the marker whichever end of the number it sits", () => {
+    const { rows, errors } = parseBankStatement(
+      [
+        "Date,Particulars,Amount",
+        "01/04/2026,Rent paid,18000 Dr",
+        "02/04/2026,Cheque deposited,Cr 9000",
+      ].join("\n"),
+    );
+    expect(errors).toEqual([]);
+    expect(rows[0]?.direction).toBe("OUT");
+    expect(rows[1]?.direction).toBe("IN");
+  });
+
+  it("reports a marker jammed against the digits rather than guessing", () => {
+    // "18000Dr" is a cell neither the amount reader nor the marker reader can
+    // take apart with certainty, and they have to agree about that: a marker
+    // seen here but not stripped there would leave a direction with no
+    // readable amount.
+    const { rows, errors } = parseBankStatement(
+      ["Date,Particulars,Amount", "01/04/2026,Rent paid,18000Dr"].join("\n"),
+    );
+    expect(rows).toHaveLength(0);
+    expect(errors).toHaveLength(1);
+  });
+
+  it("refuses a row where the marker and the indicator disagree", () => {
+    // One of the two is wrong and there is nothing here that can say which.
+    const { rows, errors } = parseBankStatement(
+      ["Date,Particulars,Amount,Dr/Cr", "01/04/2026,Something,5000 Dr,Cr"].join(
+        "\n",
+      ),
+    );
+    expect(rows).toHaveLength(0);
+    expect(errors[0]?.message).toMatch(/money in or money out/i);
+  });
+
   it("refuses a row whose direction cannot be told, instead of guessing", () => {
     // An unsigned amount with no indicator could be either way round. Assuming
     // one would put the reconciliation out by twice the amount — the worst kind

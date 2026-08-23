@@ -275,6 +275,44 @@ function parseAmount(raw: string): Decimal | null {
   return negative ? value.negated() : value;
 }
 
+/**
+ * The Dr or Cr a bank writes onto the amount itself.
+ *
+ * `parseAmount` strips this, and has to: "5,000.00 Dr" is not a number until
+ * the marker comes off. But stripping it threw away the only thing on the row
+ * that said which way the money went. A file with a single amount column and
+ * the direction written into the cell — which is how a passbook-style export
+ * reads, and how several Indian banks export by default — came through with
+ * every withdrawal recorded as a deposit, silently and with no error against
+ * the row.
+ *
+ * That is the failure this module says is the worst one it can have: the
+ * reconciliation then differs by twice the withdrawals, and the difference
+ * looks like a discrepancy somewhere else in the books.
+ *
+ * Only at one end or the other, so a stray "dr" inside a description-like cell
+ * cannot become a direction. Paired withdrawal and deposit columns do not
+ * consult this: the column heading has already said which way the row goes, and
+ * a marker there can only repeat it.
+ *
+ * The marker has to stand apart from the digits, which is the same boundary
+ * `parseAmount` requires before it will strip one. The two have to agree: a
+ * marker recognised here that `parseAmount` cannot strip would leave a row with
+ * a direction and no readable amount, and one it strips but this does not see
+ * is the bug above. So "5,000.00 Dr" is a marker and "18000Dr" is a cell
+ * neither of them can read — which is reported against the row, as it was
+ * before.
+ */
+function amountMarker(raw: string): StatementDirection | null {
+  const text = raw.trim().toLowerCase();
+  if (text === "") return null;
+  const suffix = /(?:^|[^a-z0-9])(dr|cr)\.?$/.exec(text);
+  const prefix = /^(dr|cr)\.?(?:[^a-z0-9]|$)/.exec(text);
+  const token = suffix?.[1] ?? prefix?.[1];
+  if (!token) return null;
+  return token === "dr" ? "OUT" : "IN";
+}
+
 const DATE_PATTERNS: ReadonlyArray<{
   pattern: RegExp;
   order: "dmy" | "ymd";
@@ -553,17 +591,28 @@ function resolveDirection(
   }
   if (isZero(amount)) return { kind: "zero" };
 
+  const marker = amountMarker(cell(raw, columns.amount));
   const indicator = cell(raw, columns.drcr).toLowerCase();
+
   if (indicator !== "") {
     // The indicator is the bank's own vocabulary: it debits your account when
     // money leaves it.
-    if (/^d(r|ebit|b)?\b|withdraw|paid out/.test(indicator)) {
-      return { kind: "ok", direction: "OUT", amount: amount.abs() };
-    }
-    if (/^c(r|redit)?\b|deposit|paid in/.test(indicator)) {
-      return { kind: "ok", direction: "IN", amount: amount.abs() };
-    }
-    return { kind: "unknown" };
+    const fromIndicator: StatementDirection | null =
+      /^d(r|ebit|b)?\b|withdraw|paid out/.test(indicator)
+        ? "OUT"
+        : /^c(r|redit)?\b|deposit|paid in/.test(indicator)
+          ? "IN"
+          : null;
+    if (fromIndicator === null) return { kind: "unknown" };
+    // A file that says one thing in its indicator column and the opposite on
+    // the amount is a file this does not understand. Picking either would be
+    // the guess the module exists not to make.
+    if (marker !== null && marker !== fromIndicator) return { kind: "unknown" };
+    return { kind: "ok", direction: fromIndicator, amount: amount.abs() };
+  }
+
+  if (marker !== null) {
+    return { kind: "ok", direction: marker, amount: amount.abs() };
   }
 
   if (amount.isNegative()) {
