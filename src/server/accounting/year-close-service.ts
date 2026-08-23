@@ -283,7 +283,6 @@ async function postClosingEntry(
   const balances = await accountBalances({
     companyId: params.companyId,
     to: params.year.endDate,
-    includeInactive: true,
   });
 
   const lines: Array<{

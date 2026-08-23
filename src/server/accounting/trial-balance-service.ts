@@ -112,7 +112,6 @@ export async function getTrialBalance(params: {
     from,
     to,
     branchId: params.branchId ?? null,
-    includeInactive: true,
   });
 
   const kept = params.includeEmpty
@@ -202,7 +201,6 @@ export async function assertLedgerBalances(params: {
     companyId: params.companyId,
     to: params.to ? new Date(`${params.to}T00:00:00.000Z`) : null,
     branchId: params.branchId ?? null,
-    includeInactive: true,
   });
 
   const totals = trialBalanceIsBalanced(

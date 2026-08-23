@@ -180,13 +180,11 @@ async function loadBalances(params: {
       from: params.from,
       to: params.to,
       branchId: params.branchId ?? null,
-      includeInactive: true,
     }),
     accountBalances({
       companyId: params.companyId,
       to: params.to,
       branchId: params.branchId ?? null,
-      includeInactive: true,
     }),
   ]);
 

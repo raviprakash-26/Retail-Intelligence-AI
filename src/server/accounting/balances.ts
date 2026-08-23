@@ -200,10 +200,29 @@ export async function listAccountMeta(
  * is always derivable from the lines themselves.
  */
 export async function accountBalances(
-  window: BalanceWindow & { includeInactive?: boolean },
+  window: BalanceWindow,
 ): Promise<AccountBalance[]> {
+  // Every account, retired ones included, and not optionally.
+  //
+  // This took an `includeInactive` flag defaulting to false, so a caller that
+  // did not think about it got the active chart. Every financial reader here
+  // wants the whole of it: an account holds a balance and a history whether or
+  // not somebody has since put it away, and retiring one is allowed *because*
+  // its balance is nil today, which says nothing about what went through it
+  // last year.
+  //
+  // Six callers passed `true` and the flag was silent noise; two did not and
+  // were wrong for it. The year's close left a retired account's balance out of
+  // the result it transferred, and the income-tax cash mix lost a closed bank
+  // account's receipts out of the figure that decides a presumptive ceiling.
+  // A default that is right six times in eight is a trap rather than a default,
+  // so there is no longer one to get wrong.
+  //
+  // `listAccountMeta` keeps its own flag: a picker offering accounts to post to
+  // genuinely does want the active ones, which is a different question from
+  // what an account is worth.
   const meta = await listAccountMeta(window.companyId, {
-    includeInactive: window.includeInactive,
+    includeInactive: true,
   });
 
   const [opening, period] = await Promise.all([
