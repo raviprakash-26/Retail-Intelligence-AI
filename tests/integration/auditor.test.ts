@@ -195,6 +195,12 @@ async function sell(
     rate: number;
     date?: string;
     paymentMode?: "CREDIT" | "CASH";
+    /** Taken off the rate, which is how a shop actually clears old stock. */
+    discountPercent?: number;
+    /** A shelf price with the tax already in it. */
+    priceIncludesTax?: boolean;
+    /** Defaults to the fixture's own product, which carries no tax. */
+    productId?: string;
   },
 ) {
   return createSale({
@@ -207,19 +213,57 @@ async function sell(
       invoiceDate: options.date ?? daysBefore(1),
       paymentMode: options.paymentMode ?? "CREDIT",
       placeOfSupply: "",
-      priceIncludesTax: false,
+      priceIncludesTax: options.priceIncludesTax ?? false,
       notes: "",
       lines: [
         {
-          productId: fixture.productId,
+          productId: options.productId ?? fixture.productId,
           description: "",
           quantity: options.quantity,
           rate: options.rate,
-          discountPercent: 0,
+          discountPercent: options.discountPercent ?? 0,
         },
       ],
     } satisfies SaleInput,
   });
+}
+
+/**
+ * A second product, on a real GST rate rather than the fixture's nil one.
+ *
+ * The taxonomy hands back rates cheapest first, so the shop's own product is
+ * tax-free and an inclusive shelf price on it would be the same figure either
+ * way. Costing the same ₹60 keeps the arithmetic next to the case above it.
+ */
+async function taxedProduct(fixture: Fixture): Promise<string> {
+  const taxonomy = await getProductTaxonomy(fixture.companyId);
+  const unit = taxonomy.units.find((entry) => entry.code === "PCS");
+  const gst18 = taxonomy.taxRates.find((entry) => entry.code === "GST18");
+  if (!unit || !gst18) throw new Error("Provisioning is incomplete");
+
+  const product = await createProduct({
+    companyId: fixture.companyId,
+    userId: fixture.userId,
+    actorEmail: fixture.actorEmail,
+    input: {
+      sku: "TAXED",
+      name: "Taxed widget",
+      description: "",
+      barcode: "",
+      hsnCode: "1006",
+      categoryId: "",
+      unitId: unit.id,
+      taxRateId: gst18.id,
+      purchasePrice: 60,
+      sellingPrice: 100,
+      mrp: 0,
+      isStockTracked: true,
+      openingQuantity: 5_000,
+      openingRate: 60,
+      minStockLevel: 0,
+    } satisfies ProductInput,
+  });
+  return product.id;
 }
 
 /**
@@ -387,6 +431,58 @@ describe("what the checks find", () => {
     expect(Number(finding?.evidence.soldAt)).toBeLessThan(
       Number(finding?.evidence.cost),
     );
+  });
+
+  it("notices a discount that took the price below cost", async () => {
+    // The rule's own text offers "a promotion or a bulk discount priced an
+    // item below cost" as one of three explanations for this finding, and the
+    // check could not see a discount at all: it compared the rate before
+    // anything came off it. ₹100 at half price is ₹50 against a ₹60 cost, and
+    // comparing ₹100 to ₹60 said the shop was fine. Clearing old stock is the
+    // whole reason a shopkeeper wants to be told.
+    const fixture = await createCompany();
+    await sell(fixture, { quantity: 10, rate: 100, discountPercent: 50 });
+
+    const report = await audit(fixture);
+    const finding = report.findings.find(
+      (entry) => entry.ruleKey === "SALE_BELOW_COST",
+    );
+    expect(finding).toBeDefined();
+    // And the evidence is the price actually charged, not the one struck out.
+    expect(Number(finding?.evidence.soldAt)).toBeCloseTo(50, 2);
+    expect(Number(finding?.evidence.cost)).toBeCloseTo(60, 2);
+  });
+
+  it("leaves a discount alone that still clears cost", async () => {
+    // The other half of reading the discount: ₹100 at 10% off is ₹90 against
+    // ₹60, which is an ordinary margin. A check that flagged every discounted
+    // line would be ignored within a week.
+    const fixture = await createCompany();
+    await sell(fixture, { quantity: 10, rate: 100, discountPercent: 10 });
+
+    const report = await audit(fixture);
+    expect(keysOf(report)).not.toContain("SALE_BELOW_COST");
+  });
+
+  it("notices a shelf price that is below cost once the tax comes out", async () => {
+    // A price with the tax already in it is not the shop's to keep. ₹70 at 18%
+    // holds ₹59.32 of value against a ₹60 cost, so the line loses money — and
+    // comparing the ₹70 on the label to the ₹60 cost said otherwise.
+    const fixture = await createCompany();
+    const productId = await taxedProduct(fixture);
+    await sell(fixture, {
+      quantity: 10,
+      rate: 70,
+      priceIncludesTax: true,
+      productId,
+    });
+
+    const report = await audit(fixture);
+    const finding = report.findings.find(
+      (entry) => entry.ruleKey === "SALE_BELOW_COST",
+    );
+    expect(finding).toBeDefined();
+    expect(Number(finding?.evidence.soldAt)).toBeCloseTo(59.32, 1);
   });
 
   it("notices cash paid over the section 40A(3) limit", async () => {
