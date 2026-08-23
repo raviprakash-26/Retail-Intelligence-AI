@@ -261,14 +261,37 @@ type BelowCostRow = {
   invoiceDate: Date;
   saleId: string;
   name: string;
-  rate: Prisma.Decimal;
+  soldAt: Prisma.Decimal;
   unitCost: Prisma.Decimal;
 };
 
+/**
+ * Lines that went out for less than the stock they consumed had cost.
+ *
+ * Compared against `taxableAmount` rather than `rate`, which is the difference
+ * between a check that works and one that cannot see the case it names. `rate`
+ * is the price before anything is taken off it; `taxableAmount` is what the
+ * line actually earned — gross less the discount, and less the tax where the
+ * shop prices inclusive of it.
+ *
+ * Reading `rate` left this blind to the two ordinary ways a sale ends up below
+ * cost. A discount is the first, and this rule's own text offers "a promotion
+ * or a bulk discount priced an item below cost" as one of three explanations
+ * for the finding: ₹100 at 40% off is ₹60 against a ₹75 cost, and comparing
+ * ₹100 to ₹75 says everything is fine. Clearing old stock is the whole reason
+ * a shopkeeper would want to be told. The second is inclusive pricing, where a
+ * ₹118 shelf price holds ₹100 of value and the ₹18 of tax was never the shop's
+ * to keep.
+ *
+ * Per unit on both sides, so the finding reads as a price against a price. A
+ * line of nil quantity is left alone: it earned nothing and cost nothing, and
+ * dividing by it is not a question.
+ */
 async function checkSalesBelowCost(context: CheckContext): Promise<Finding[]> {
   const rows = await prisma.$queryRaw<BelowCostRow[]>`
     SELECT s."invoiceNumber", s."invoiceDate", s.id AS "saleId",
-           p.name, si.rate, si."unitCost"
+           p.name, si."unitCost",
+           ROUND(si."taxableAmount" / si.quantity, 4) AS "soldAt"
     FROM sale_items si
     JOIN sales s    ON s.id = si."saleId"
     JOIN products p ON p.id = si."productId"
@@ -277,8 +300,9 @@ async function checkSalesBelowCost(context: CheckContext): Promise<Finding[]> {
       AND s."invoiceDate" >= ${context.from}
       AND s."invoiceDate" <= ${context.to}
       AND si."unitCost" > 0
-      AND si.rate < si."unitCost"
-    ORDER BY (si."unitCost" - si.rate) DESC
+      AND si.quantity > 0
+      AND si."taxableAmount" < si."unitCost" * si.quantity
+    ORDER BY (si."unitCost" * si.quantity - si."taxableAmount") DESC
     LIMIT 20
   `;
 
@@ -289,7 +313,7 @@ async function checkSalesBelowCost(context: CheckContext): Promise<Finding[]> {
         invoice: row.invoiceNumber,
         date: isoDay(row.invoiceDate),
         product: row.name,
-        soldAt: row.rate.toString(),
+        soldAt: row.soldAt.toString(),
         cost: row.unitCost.toString(),
       },
       { type: "sale", id: row.saleId },
