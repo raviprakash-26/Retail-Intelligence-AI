@@ -1008,3 +1008,154 @@ describe("a bank account retired mid-year", () => {
     expect(paper.cashMix.cashReceiptSharePercent).toBe(4);
   });
 });
+
+/**
+ * Cash banked, counted as though it had been earned twice.
+ *
+ * The manual entry form offers Contra and describes it in so many words —
+ * "Money between your own accounts — cash banked, or drawn from the bank" — and
+ * banking the day's takings is the single most ordinary thing an Indian shop
+ * does with its money.
+ *
+ * The cash mix summed every debit and credit on a cash or bank account and
+ * excluded only opening balances and closing entries. A deposit is a debit to
+ * the bank and a credit to the till, so it was counted twice over: once as
+ * money the business received, when it already had it, and once as money it
+ * paid, when it had paid nobody. The same rupee appeared on both sides of a
+ * test about how the business is paid.
+ *
+ * Both figures the page turns on move. The 6%/8% split under section 44AD is
+ * taken from the receipt mix, so a shop whose every sale was in cash was shown
+ * half its turnover as banked and its deemed income understated. The 5% tests
+ * in sections 44AD and 44AB are taken from the same mix.
+ *
+ * A transfer within the business is not a receipt and not a payment, whatever
+ * it is labelled: an entry whose every leg lands on a cash or bank account has
+ * no counterparty outside the business, and there is no other kind of entry
+ * that looks like that.
+ */
+describe("cash banked during the year", () => {
+  function accountsOf(fixture: Awaited<ReturnType<typeof createCompany>>) {
+    return listAccountMeta(fixture.companyId);
+  }
+
+  async function poster(
+    fixture: Awaited<ReturnType<typeof createCompany>>,
+    voucherType: "JOURNAL" | "CONTRA",
+  ) {
+    const meta = await accountsOf(fixture);
+    const idOf = (key: string) => {
+      const found = meta.find((entry) => entry.systemKey === key);
+      if (!found) throw new Error(`No ${key} account`);
+      return found.id;
+    };
+    const post = (
+      narration: string,
+      lines: { accountId: string; debit?: number; credit?: number }[],
+    ) =>
+      prisma.$transaction((tx) =>
+        postJournalEntry(tx, {
+          companyId: fixture.companyId,
+          entryDate: new Date(`${IN_YEAR}T00:00:00.000Z`),
+          voucherType,
+          createdById: fixture.userId,
+          narration,
+          lines,
+        }),
+      );
+    return { idOf, post };
+  }
+
+  async function shopThatBanksItsTakings() {
+    const fixture = await createCompany();
+    const takings = await poster(fixture, "JOURNAL");
+    // Every sale over the counter, in cash.
+    await takings.post("Counter takings for the year", [
+      { accountId: takings.idOf(SYSTEM_ACCOUNT.CASH), debit: 1_000_000 },
+      { accountId: takings.idOf(SYSTEM_ACCOUNT.SALES), credit: 1_000_000 },
+    ]);
+    // And banked, which is what the shop is told to record as a contra.
+    const banking = await poster(fixture, "CONTRA");
+    await banking.post("Cash banked", [
+      { accountId: banking.idOf(SYSTEM_ACCOUNT.BANK), debit: 1_000_000 },
+      { accountId: banking.idOf(SYSTEM_ACCOUNT.CASH), credit: 1_000_000 },
+    ]);
+    return fixture;
+  }
+
+  it("does not count a deposit as money received", async () => {
+    const fixture = await shopThatBanksItsTakings();
+    const paper = await paperFor(fixture);
+
+    // Ten lakh came into this business, not twenty.
+    expect(Number(paper.cashMix.receipts)).toBe(1_000_000);
+    expect(Number(paper.cashMix.cashReceipts)).toBe(1_000_000);
+    expect(Number(paper.cashMix.bankReceipts)).toBe(0);
+    expect(paper.cashMix.cashReceiptSharePercent).toBe(100);
+  });
+
+  it("does not count a deposit as money paid", async () => {
+    const fixture = await shopThatBanksItsTakings();
+    const paper = await paperFor(fixture);
+
+    expect(Number(paper.cashMix.cashPayments)).toBe(0);
+    expect(Number(paper.cashMix.payments)).toBe(0);
+  });
+
+  it("charges the full presumptive rate on turnover that was taken in cash", async () => {
+    // Nothing was received through banking channels, so none of the turnover
+    // earns the 6% rate. Counting the deposit as a bank receipt made it look
+    // like half, and took ₹1,00,000 off the income the section deems.
+    const fixture = await shopThatBanksItsTakings();
+    const paper = await paperFor(fixture);
+
+    expect(paper.presumptive.digitalSharePercent).toBe(0);
+    expect(paper.presumptive.incomeAtSplitRate).toBe(toStorageString(80_000));
+    expect(paper.presumptive.incomeAtFullRate).toBe(toStorageString(80_000));
+  });
+
+  it("reads the entry rather than the label on it", async () => {
+    // The form lets a manual entry be typed as Journal, Contra or
+    // Depreciation, and nothing stops a shopkeeper choosing the first for a
+    // deposit. Excluding by voucher type would take the label's word for it
+    // and let the same double count back in under a different name.
+    const fixture = await createCompany();
+    const { idOf, post } = await poster(fixture, "JOURNAL");
+
+    await post("Counter takings", [
+      { accountId: idOf(SYSTEM_ACCOUNT.CASH), debit: 1_000_000 },
+      { accountId: idOf(SYSTEM_ACCOUNT.SALES), credit: 1_000_000 },
+    ]);
+    await post("Cash banked, typed as a journal", [
+      { accountId: idOf(SYSTEM_ACCOUNT.BANK), debit: 1_000_000 },
+      { accountId: idOf(SYSTEM_ACCOUNT.CASH), credit: 1_000_000 },
+    ]);
+
+    const paper = await paperFor(fixture);
+    expect(Number(paper.cashMix.receipts)).toBe(1_000_000);
+    expect(Number(paper.cashMix.bankReceipts)).toBe(0);
+    expect(Number(paper.cashMix.cashPayments)).toBe(0);
+  });
+
+  it("does not count a withdrawal as cash taken over the counter", async () => {
+    // The other direction of the same entry. Drawing cash from the bank to pay
+    // wages is not a cash receipt, and counting it as one is what pushes a
+    // shop that banks everything over the 5% line it is entitled to be under.
+    const fixture = await createCompany();
+    const sales = await poster(fixture, "JOURNAL");
+    await sales.post("Everything through the bank", [
+      { accountId: sales.idOf(SYSTEM_ACCOUNT.BANK), debit: 1_000_000 },
+      { accountId: sales.idOf(SYSTEM_ACCOUNT.SALES), credit: 1_000_000 },
+    ]);
+    const drawing = await poster(fixture, "CONTRA");
+    await drawing.post("Drawn for wages", [
+      { accountId: drawing.idOf(SYSTEM_ACCOUNT.CASH), debit: 20_000 },
+      { accountId: drawing.idOf(SYSTEM_ACCOUNT.BANK), credit: 20_000 },
+    ]);
+
+    const paper = await paperFor(fixture);
+    expect(Number(paper.cashMix.cashReceipts)).toBe(0);
+    expect(paper.cashMix.cashReceiptSharePercent).toBe(0);
+    expect(paper.audit.lowCash).toBe(true);
+  });
+});
