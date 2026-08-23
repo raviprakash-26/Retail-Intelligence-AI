@@ -317,6 +317,27 @@ function sumSubType(
  * make a shop that started the year with cash in the drawer look like a shop
  * that took cash over the counter. That distinction decides whether the
  * presumptive ceiling is ₹2 crore or ₹3 crore, so it is not a rounding matter.
+ *
+ * So are transfers the business makes to itself, for the same reason and more
+ * often. Banking the day's takings is the most ordinary thing a shop does with
+ * its money, and the manual entry form names it — Contra, "money between your
+ * own accounts — cash banked, or drawn from the bank". A deposit debits the
+ * bank and credits the till, so summing both sides counted it twice: once as
+ * money received, when the business already had it, and once as money paid,
+ * when it had paid nobody. A shop whose every sale was in cash saw half its
+ * turnover reported as banked, and the deemed income under section 44AD came
+ * out at 6% on that half instead of 8% on the whole.
+ *
+ * The test is what the entry does rather than what it is called: an entry with
+ * no leg outside the cash and bank accounts has no counterparty outside the
+ * business, and nothing else has that shape. Reading the substance rather than
+ * the voucher type is what catches the shopkeeper who typed a deposit as an
+ * ordinary journal — which the form permits, and which is the same event.
+ *
+ * An entry that is part transfer and part something else — a deposit posted
+ * together with the bank's charge for it — still counts in full, because
+ * splitting one leg against another is a guess about which pairs with which.
+ * That is a rarer shape than the plain deposit this exists for.
  */
 async function cashMix(params: {
   companyId: string;
@@ -350,6 +371,10 @@ async function cashMix(params: {
         voucherType: {
           notIn: [VoucherType.OPENING_BALANCE, VoucherType.CLOSING_ENTRY],
         },
+        // At least one leg outside the till and the bank, or the entry moved
+        // the business's own money to itself and is neither a receipt nor a
+        // payment.
+        lines: { some: { accountId: { notIn: [...cashIds, ...bankIds] } } },
       },
     },
     _sum: { debit: true, credit: true },
