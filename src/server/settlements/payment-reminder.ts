@@ -51,6 +51,8 @@ export type ReminderPreview = {
 export async function reminderPreview(params: {
   companyId: string;
   customerId: string;
+  /** The instant to age against. Defaults to now; pinned by the tests. */
+  asOf?: Date;
 }): Promise<ReminderPreview | null> {
   const customer = await prisma.customer.findFirst({
     where: { id: params.customerId, companyId: params.companyId },
@@ -61,6 +63,7 @@ export async function reminderPreview(params: {
   const invoices = await openInvoices(prisma, {
     companyId: params.companyId,
     customerId: params.customerId,
+    asOf: params.asOf,
   });
 
   let outstanding = "0";

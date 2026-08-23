@@ -9,7 +9,11 @@ import {
   toStorageString,
   type Decimal,
 } from "@/lib/money";
-import { summariseAgeing, type AgeingSummary } from "@/lib/settlements/ageing";
+import {
+  daysOverdue,
+  summariseAgeing,
+  type AgeingSummary,
+} from "@/lib/settlements/ageing";
 
 /**
  * What is owed, and for how long.
@@ -32,6 +36,26 @@ export type OpenDocument = {
 };
 
 const isoDay = (date: Date) => date.toISOString().slice(0, 10);
+
+/**
+ * How late a document is, counted the way the ageing report counts it.
+ *
+ * `daysOverdue` in `lib/settlements/ageing` truncates both dates to the day
+ * before subtracting, and says why: an invoice due today is not one second
+ * overdue at four in the afternoon. These two readers did the subtraction
+ * themselves, on the raw instants, and rounded — so from midday UTC, which is
+ * half past five in the evening here, every figure came out a day high. The
+ * ageing report and the invoice list, looking at the same invoice, disagreed
+ * for the second half of every working day.
+ *
+ * `asOf` is threaded in rather than read here so that one call ages every
+ * document against a single instant, which is what `summariseAgeing` already
+ * asks of its caller, and so a test can pin the hour that used to decide the
+ * answer.
+ */
+function lateness(dueDate: Date, asOf: Date): number {
+  return Math.max(0, daysOverdue(dueDate, asOf));
+}
 
 /**
  * What credit and debit notes have already taken off each document.
@@ -159,7 +183,7 @@ export async function settledByNotes(
 /** Invoices a customer has not fully paid, oldest due first. */
 export async function openInvoices(
   client: DbClient,
-  params: { companyId: string; customerId: string },
+  params: { companyId: string; customerId: string; asOf?: Date },
 ): Promise<OpenDocument[]> {
   const sales = await client.sale.findMany({
     where: {
@@ -184,7 +208,7 @@ export async function openInvoices(
     side: "RECEIVABLE",
   });
 
-  const now = new Date();
+  const now = params.asOf ?? new Date();
   return sales
     .map((sale) => {
       const due = sale.dueDate ?? sale.invoiceDate;
@@ -198,10 +222,7 @@ export async function openInvoices(
         total: toStorageString(sale.totalAmount),
         paid: toStorageString(sale.paidAmount),
         outstanding: toStorageString(outstanding),
-        daysOverdue: Math.max(
-          0,
-          Math.round((now.getTime() - due.getTime()) / 86_400_000),
-        ),
+        daysOverdue: lateness(due, now),
       };
     })
     .filter((document) => Number(document.outstanding) > 0);
@@ -210,7 +231,7 @@ export async function openInvoices(
 /** Bills not fully paid, oldest due first. */
 export async function openBills(
   client: DbClient,
-  params: { companyId: string; supplierId: string },
+  params: { companyId: string; supplierId: string; asOf?: Date },
 ): Promise<OpenDocument[]> {
   const purchases = await client.purchase.findMany({
     where: {
@@ -236,7 +257,7 @@ export async function openBills(
     side: "PAYABLE",
   });
 
-  const now = new Date();
+  const now = params.asOf ?? new Date();
   return purchases
     .map((purchase) => {
       const due = purchase.dueDate ?? purchase.billDate;
@@ -255,10 +276,7 @@ export async function openBills(
         total: toStorageString(purchase.totalAmount),
         paid: toStorageString(purchase.paidAmount),
         outstanding: toStorageString(outstanding),
-        daysOverdue: Math.max(
-          0,
-          Math.round((now.getTime() - due.getTime()) / 86_400_000),
-        ),
+        daysOverdue: lateness(due, now),
       };
     })
     .filter((document) => Number(document.outstanding) > 0);
