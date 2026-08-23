@@ -643,3 +643,73 @@ describe("the cash projection against credit notes", () => {
     expect(receiptsDue(await cashFor(fixture))).toBeCloseTo(10_000, 2);
   }, 90_000);
 });
+
+/**
+ * A shop younger than the window it is being averaged over.
+ *
+ * The running cost is thirteen weeks of spending divided by thirteen, and the
+ * revenue projection two blocks up refuses to guess from three weeks of history
+ * rather than doing the equivalent. The cash side divided by thirteen whatever
+ * the books held.
+ *
+ * So a shop two weeks old with ₹2,000 of rent behind it was told its running
+ * cost was ₹154 a week rather than ₹1,000 — and the week it runs out of money,
+ * which is the whole output of this page, moved months into the future. The
+ * error is in the dangerous direction, on the businesses least able to absorb
+ * it: a shop that has just opened is the one that most needs to know when the
+ * cash runs out, and is the one this told it never would.
+ *
+ * The advisor makes the same guard next door and says why — a shop that
+ * registered this morning being told its stock has sat still for four months is
+ * how somebody learns to ignore the page. This is that, with money.
+ */
+describe("running costs on books younger than the window", () => {
+  async function shopOpenedTwoWeeksAgo() {
+    const fixture = await createCompany();
+
+    for (const week of [1, 2]) {
+      await createExpense({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        branchId: null,
+        input: {
+          categoryId: fixture.rentCategoryId,
+          expenseDate: daysBefore(week * 7),
+          paymentMode: "BANK",
+          supplierId: "",
+          payeeName: "Landlord",
+          amount: 1_000,
+          taxPercent: 0,
+          amountIncludesTax: true,
+          claimInputCredit: false,
+          isCapitalExpenditure: false,
+          assetName: "",
+          assetUsefulLifeMonths: 60,
+          referenceNo: "",
+          notes: "",
+        } satisfies ExpenseInput,
+      });
+    }
+
+    return fixture;
+  }
+
+  it("averages over the weeks the books cover, not the weeks in the window", async () => {
+    const fixture = await shopOpenedTwoWeeksAgo();
+    const cash = await cashFor(fixture);
+
+    // ₹2,000 over the two weeks this shop has existed is ₹1,000 a week.
+    expect(Number(cash.weeklyRunningCost)).toBeCloseTo(1_000, 0);
+  });
+
+  it("says how far back it actually looked", async () => {
+    // The sentence under the figure claimed thirteen weeks whatever the books
+    // held, which is the part a person would have checked it against.
+    const fixture = await shopOpenedTwoWeeksAgo();
+    const cash = await cashFor(fixture);
+
+    expect(cash.runningCostBasis).not.toMatch(/13 weeks/);
+    expect(cash.runningCostBasis).toMatch(/2 weeks/);
+  });
+});

@@ -1,5 +1,10 @@
 import "server-only";
-import { DocumentStatus, type Prisma } from "@prisma/client";
+import {
+  DocumentStatus,
+  JournalStatus,
+  VoucherType,
+  type Prisma,
+} from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { signedBalance } from "@/lib/accounting/double-entry";
 import {
@@ -267,8 +272,23 @@ export async function getCashProjection(params: {
   const horizonEnd = new Date(today.getTime() + params.weeks * WEEK - DAY);
   const costWindowFrom = new Date(today.getTime() - RUNNING_COST_WEEKS * WEEK);
 
-  const [position, costWindow, receivables, payables, lateness] =
+  const [firstEntry, position, costWindow, receivables, payables, lateness] =
     await Promise.all([
+      // The earliest thing these books actually record, opening and closing
+      // entries aside: those are positions carried in and settled up, not
+      // trading, and a shop that registered in August with its opening balances
+      // dated to the start of the year has not been running since April.
+      prisma.journalEntry.findFirst({
+        where: {
+          companyId: params.companyId,
+          status: JournalStatus.POSTED,
+          voucherType: {
+            notIn: [VoucherType.OPENING_BALANCE, VoucherType.CLOSING_ENTRY],
+          },
+        },
+        orderBy: { entryDate: "asc" },
+        select: { entryDate: true },
+      }),
       accountBalances({ companyId: params.companyId, to: today }),
       accountBalances({
         companyId: params.companyId,
@@ -308,7 +328,30 @@ export async function getCashProjection(params: {
         ),
       ),
   );
-  const weeklyRunningCost = divide(cashExpenses, RUNNING_COST_WEEKS);
+  // Divided by however much of the window these books actually cover.
+  //
+  // Thirteen weeks of spending over thirteen weeks is an average. Two weeks of
+  // spending over thirteen is not, and dividing it by thirteen told a shop a
+  // fortnight old that its running cost was a seventh of what it was paying —
+  // which moved the week it runs out of money months into the future. The
+  // error runs in the dangerous direction and lands on the businesses least
+  // able to absorb it: a shop that has just opened is the one that most needs
+  // to know when the cash runs out.
+  //
+  // The revenue projection beside this one already refuses to guess from three
+  // weeks of history, and the advisor makes the same guard against its stale
+  // stock window. This is that, with money.
+  const booksStart =
+    firstEntry && firstEntry.entryDate.getTime() > costWindowFrom.getTime()
+      ? firstEntry.entryDate
+      : costWindowFrom;
+  const weeksOfBooks = Math.max(
+    // At least one: a shop that opened this morning has a week's worth of costs
+    // at most, and dividing by nought is not an average of anything.
+    1,
+    Math.round((today.getTime() - booksStart.getTime()) / WEEK),
+  );
+  const weeklyRunningCost = divide(cashExpenses, weeksOfBooks);
 
   const weekStarts = Array.from(
     { length: params.weeks },
@@ -394,7 +437,7 @@ export async function getCashProjection(params: {
     firstShortfall,
     firstShortfallIfLate,
     weeklyRunningCost: toStorageString(weeklyRunningCost),
-    runningCostBasis: `An average of the last ${RUNNING_COST_WEEKS} weeks: ${toStorageString(cashExpenses)} of running costs, excluding depreciation.`,
+    runningCostBasis: `An average of the last ${weeksOfBooks} weeks: ${toStorageString(cashExpenses)} of running costs, excluding depreciation.`,
     latenessDays: lateness.days,
     latenessBasis: lateness.basis,
     overdueReceivables: toStorageString(overdueBefore(receivables, today)),
