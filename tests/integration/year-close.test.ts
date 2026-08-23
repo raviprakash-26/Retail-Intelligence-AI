@@ -1011,7 +1011,6 @@ describe("an account retired between one close and the next", () => {
     const balances = await accountBalances({
       companyId: shop.companyId,
       to: shop.to,
-      includeInactive: true,
     });
     const retiredAccount = balances.find((entry) => entry.id === accountId);
 

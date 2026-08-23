@@ -23,6 +23,14 @@ import { createSale, voidSale } from "@/server/sales/sale-service";
 import { createPayment } from "@/server/settlements/settlement-service";
 import { getFinancialStatements } from "@/server/accounting/statements-service";
 import { getTaxWorkingPaper } from "@/server/tax/income-tax-service";
+import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
+import {
+  assignableGroups,
+  createAccount,
+  setAccountActive,
+} from "@/server/accounting/account-service";
+import { listAccountMeta } from "@/server/accounting/balances";
+import { postJournalEntry } from "@/server/accounting/post-journal-entry";
 import {
   disconnectTestDb,
   ensurePlatformData,
@@ -888,5 +896,115 @@ describe("tenant isolation", () => {
       fiscalYearId: theirs.fiscalYearId,
     });
     expect(paper).toBeNull();
+  });
+});
+
+/**
+ * A bank account that was closed during the year.
+ *
+ * The cash share decides which presumptive ceiling a business gets — ₹2 crore
+ * or ₹3 crore under section 44AD — and which audit threshold applies under
+ * section 44AB. It is measured as cash receipts over all receipts, and the
+ * denominator is built by finding the cash and bank accounts and adding up what
+ * was debited to them.
+ *
+ * Those accounts were found with a read that returns only the active ones. A
+ * shop that closed a bank account during the year, swept it to nil and retired
+ * it from the chart — which is exactly what retiring is for, and is allowed
+ * precisely because the balance is nil — lost every rupee that had gone through
+ * it from the denominator. The cash it took over the counter stayed. So the
+ * share rose, and it rose on the figure that decides the ceiling.
+ *
+ * The account is inactive today. It was not inactive when the money went
+ * through it, and the question the working paper asks is about the year.
+ */
+describe("a bank account retired mid-year", () => {
+  async function shopWithAClosedBankAccount() {
+    const fixture = await createCompany();
+
+    const groups = await assignableGroups({
+      companyId: fixture.companyId,
+      type: "ASSET",
+    });
+    const group = groups.find((entry) => entry.code === "1110") ?? groups[0]!;
+
+    const second = await createAccount({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        code: "1119",
+        name: "HDFC current account",
+        groupId: group.id,
+        type: "ASSET",
+        subType: "CASH_AND_BANK",
+        description: "",
+      },
+    });
+
+    const meta = await listAccountMeta(fixture.companyId);
+    const idOf = (key: string) => {
+      const found = meta.find((entry) => entry.systemKey === key);
+      if (!found) throw new Error(`No ${key} account`);
+      return found.id;
+    };
+
+    const post = (
+      lines: { accountId: string; debit?: number; credit?: number }[],
+    ) =>
+      prisma.$transaction((tx) =>
+        postJournalEntry(tx, {
+          companyId: fixture.companyId,
+          entryDate: new Date(`${IN_YEAR}T00:00:00.000Z`),
+          voucherType: "JOURNAL",
+          createdById: fixture.userId,
+          narration: "Trading through the second bank account",
+          lines,
+        }),
+      );
+
+    // ₹40,000 over the counter, and ₹9,60,000 through the second bank account.
+    await post([
+      { accountId: idOf(SYSTEM_ACCOUNT.CASH), debit: 40_000 },
+      { accountId: idOf(SYSTEM_ACCOUNT.SALES), credit: 40_000 },
+    ]);
+    await post([
+      { accountId: second.id, debit: 960_000 },
+      { accountId: idOf(SYSTEM_ACCOUNT.SALES), credit: 960_000 },
+    ]);
+    // Emptied and closed, which is what makes retiring it allowed.
+    await post([
+      { accountId: idOf(SYSTEM_ACCOUNT.PURCHASES), debit: 960_000 },
+      { accountId: second.id, credit: 960_000 },
+    ]);
+
+    await setAccountActive({
+      companyId: fixture.companyId,
+      accountId: second.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      isActive: false,
+    });
+
+    return fixture;
+  }
+
+  it("still counts what went through it", async () => {
+    const fixture = await shopWithAClosedBankAccount();
+    const paper = await paperFor(fixture);
+
+    expect(Number(paper.cashMix.bankReceipts)).toBe(960_000);
+    expect(Number(paper.cashMix.cashReceipts)).toBe(40_000);
+    expect(Number(paper.cashMix.receipts)).toBe(1_000_000);
+  });
+
+  it("does not let the cash share rise because an account was retired", async () => {
+    // 40,000 of 10,00,000 is 4% — under the 5% line that section 44AD turns on.
+    // With the closed account's receipts missing the same shop reads as 100%
+    // cash, which is the difference between the two ceilings.
+    const fixture = await shopWithAClosedBankAccount();
+    const paper = await paperFor(fixture);
+
+    expect(paper.cashMix.cashReceiptSharePercent).toBe(4);
   });
 });

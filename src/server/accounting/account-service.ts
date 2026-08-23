@@ -129,7 +129,6 @@ export async function getChartOfAccounts(params: {
     accountBalances({
       companyId: params.companyId,
       to: params.asOf ?? null,
-      includeInactive: true,
     }),
     prisma.account.findMany({
       where: { companyId: params.companyId },
@@ -393,7 +392,6 @@ export async function setAccountActive(params: {
     const balance = (
       await accountBalances({
         companyId: params.companyId,
-        includeInactive: true,
       })
     ).find((entry) => entry.id === account.id);
 

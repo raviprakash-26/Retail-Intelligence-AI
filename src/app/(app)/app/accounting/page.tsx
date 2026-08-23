@@ -38,7 +38,7 @@ export default async function AccountingPage({
       companyId: context.company.id,
       includeInactive: showInactive,
     }),
-    accountBalances({ companyId: context.company.id, includeInactive: true }),
+    accountBalances({ companyId: context.company.id }),
   ]);
 
   const equation = accountingEquation(balances);
