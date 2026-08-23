@@ -8,6 +8,7 @@ import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
 import { createSale } from "@/server/sales/sale-service";
+import { createSalesReturn } from "@/server/returns/sales-return-service";
 import { getFinancialStatements } from "@/server/accounting/statements-service";
 import {
   getAnalytics,
@@ -714,5 +715,119 @@ describe("tenant isolation", () => {
     const other = await analyticsFor(theirs);
     expect(other.products).toHaveLength(2);
     expect(Number(other.revenue.current)).toBe(126_000);
+  });
+});
+
+/**
+ * What the breakdowns say a product earned.
+ *
+ * The first block in this file holds the trend to the statements, and it holds
+ * because the trend is read from the ledger: a sales return debits Sales
+ * Returns, which is an income account of debit nature in the trading section,
+ * so it comes off revenue on its own.
+ *
+ * The breakdowns underneath it are read from the documents instead — sale items
+ * for products and categories, sale headers for customers. A void is excluded
+ * by the sale's status, so that much is handled. A return is not a status: it
+ * is a separate document, and none of the three subtracted it.
+ *
+ * So a shop that sold and was given goods back saw one revenue in the chart at
+ * the top of the page and a larger one in the tables underneath, on the same
+ * page for the same period. The tables were the gross figure — what went out of
+ * the door, not what the business kept — and the product that was returned most
+ * looked like the one that sold best.
+ */
+describe("the breakdowns cannot disagree with the trend either", () => {
+  async function soldAndPartlyReturned() {
+    const fixture = await createCompany();
+
+    const sale = await sell(fixture, {
+      productId: fixture.riceId,
+      quantity: 10,
+      rate: 1_000,
+      date: "2026-05-10",
+    });
+
+    const line = await prisma.saleItem.findFirstOrThrow({
+      where: { saleId: sale.id },
+      select: { id: true },
+    });
+
+    await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: sale.id,
+        returnDate: "2026-05-20",
+        reason: "Four bags were damaged in transit",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: line.id, quantity: 4 }],
+      },
+    });
+
+    return fixture;
+  }
+
+  it("takes a return off what the product earned", async () => {
+    const fixture = await soldAndPartlyReturned();
+    const analytics = await analyticsFor(fixture);
+
+    const rice = analytics.products.find(
+      (product) => product.productId === fixture.riceId,
+    );
+
+    // Ten bags out at ₹1,000, four back: six kept, ₹6,000 earned.
+    expect(Number(rice?.quantity)).toBe(6);
+    expect(Number(rice?.revenue)).toBe(6_000);
+  });
+
+  it("adds the products up to the revenue the trend reports", async () => {
+    // The invariant the first block in this file asserts for the trend, asked
+    // of the tables that sit under it. Two revenues on one page for one period
+    // is one revenue too many.
+    const fixture = await soldAndPartlyReturned();
+    const analytics = await analyticsFor(fixture);
+
+    const fromTrend = analytics.trend.reduce(
+      (running, point) => running + Number(point.revenue),
+      0,
+    );
+    const fromProducts = analytics.products.reduce(
+      (running, product) => running + Number(product.revenue),
+      0,
+    );
+
+    expect(fromProducts).toBeCloseTo(fromTrend, 2);
+  });
+
+  it("takes it off the customer and the category as well", async () => {
+    // Same documents, sliced three ways. A fix that reached the product table
+    // and not the other two would leave the page disagreeing with itself in a
+    // quieter place.
+    const fixture = await soldAndPartlyReturned();
+    const analytics = await analyticsFor(fixture);
+
+    const customers = analytics.customers.reduce(
+      (running, customer) => running + Number(customer.revenue),
+      0,
+    );
+    const categories = analytics.categories.reduce(
+      (running, category) => running + Number(category.revenue),
+      0,
+    );
+
+    expect(customers).toBeCloseTo(6_000, 2);
+    expect(categories).toBeCloseTo(6_000, 2);
+
+    // The revenue comes off; the bill does not. The customer was invoiced, and
+    // a count that fell when the goods came back would say the shop had served
+    // them fewer times than it did.
+    const served = analytics.customers.reduce(
+      (running, customer) => running + customer.bills,
+      0,
+    );
+    expect(served).toBe(1);
   });
 });
