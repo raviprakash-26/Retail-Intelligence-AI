@@ -279,6 +279,84 @@ describe("surcharge", () => {
     );
   });
 
+  it("does not pay an assessee to cross the second threshold", () => {
+    // The headline. Marginal relief exists so that crossing a threshold never
+    // costs more than it earned; left half-built it did the opposite, and
+    // ₹100 of extra income took ₹2,92,396 off the bill.
+    const below = tax(10_000_000, { regime: "OLD" });
+    const above = tax(10_000_100, { regime: "OLD" });
+    expect(Number(above.totalTax)).toBeGreaterThan(Number(below.totalTax));
+  });
+
+  it("builds the ceiling from tax and surcharge at the threshold", () => {
+    // At a crore: tax ₹28,12,500, surcharge at 10% ₹2,81,250 — ₹30,93,750, and
+    // ₹100 more income may add ₹100 before cess and no more. Times 1.04 for
+    // cess, that is ₹32,17,604 against ₹32,17,500 at the threshold itself.
+    //
+    // Taking the slabs alone as the ceiling leaves out the ₹2,81,250 a crore
+    // already attracts, and the relief overshoots by exactly that.
+    const below = tax(10_000_000, { regime: "OLD" });
+    const above = tax(10_000_100, { regime: "OLD" });
+
+    expect(below.totalTax.toFixed(2)).toBe("3217500.00");
+    expect(above.totalTax.toFixed(2)).toBe("3217604.00");
+    expect(Number(above.marginalRelief)).toBeCloseTo(140_559.5, 2);
+  });
+
+  it("carries the relief up through every band", () => {
+    // Two crore under the old regime moves 15% to 25%, and five crore 25% to
+    // 37%. Each ceiling has to carry the band below it, so a fix that reached
+    // only for the crore threshold still fails here.
+    for (const threshold of [20_000_000, 50_000_000]) {
+      const below = tax(threshold, { regime: "OLD" });
+      const above = tax(threshold + 100, { regime: "OLD" });
+      expect(Number(above.totalTax)).toBeGreaterThan(Number(below.totalTax));
+      expect(Number(above.totalTax) - Number(below.totalTax)).toBeCloseTo(
+        104,
+        2,
+      );
+    }
+  });
+
+  it("holds for a company crossing ten crore", () => {
+    // A company's bands are 7% above a crore and 12% above ten crore, so the
+    // ten-crore ceiling carries 7%. Individuals are not the only assessee this
+    // reached.
+    const below = tax(100_000_000, { assessee: "COMPANY" });
+    const above = tax(100_000_100, { assessee: "COMPANY" });
+    expect(Number(above.totalTax)).toBeGreaterThan(Number(below.totalTax));
+    expect(Number(above.totalTax) - Number(below.totalTax)).toBeCloseTo(104, 2);
+  });
+
+  it("never lets tax fall as income rises", () => {
+    // The invariant the thresholds exist inside. Stepping either side of every
+    // surcharge threshold, for both regimes and a company, tax must never come
+    // down — which is the property a working paper showing the opposite would
+    // have been asked about.
+    const cases: Array<{ assessee: Assessee; regime: TaxRegime }> = [
+      { assessee: "INDIVIDUAL", regime: "OLD" },
+      { assessee: "INDIVIDUAL", regime: "NEW" },
+      { assessee: "COMPANY", regime: "NEW" },
+      { assessee: "FIRM", regime: "NEW" },
+    ];
+    const thresholds = [
+      5_000_000, 10_000_000, 20_000_000, 50_000_000, 100_000_000,
+    ];
+
+    for (const options of cases) {
+      for (const threshold of thresholds) {
+        for (const step of [1, 100, 10_000]) {
+          const below = Number(tax(threshold, options).totalTax);
+          const above = Number(tax(threshold + step, options).totalTax);
+          expect(
+            above,
+            `${options.assessee}/${options.regime} at ${threshold}+${step}`,
+          ).toBeGreaterThanOrEqual(below);
+        }
+      }
+    }
+  });
+
   it("caps the new regime at 25% where the old one goes to 37%", () => {
     const newRegime = tax(60_000_000, { regime: "NEW" });
     const oldRegime = tax(60_000_000, { regime: "OLD" });
