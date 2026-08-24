@@ -65,7 +65,15 @@ async function rebuildLayers(
     where: {
       companyId: params.companyId,
       productId: params.productId,
-      ...(params.branchId ? { branchId: params.branchId } : {}),
+      // The branch as given, null included. Null is a position of its own —
+      // the balance is looked up on it exactly, opening stock is placed on the
+      // primary branch, and a member invited without one posts here — so a
+      // query that dropped the filter when it was null pooled every branch's
+      // movements into it. One function then answered "what is here" two ways:
+      // the balance from this branch and the layers from all of them, which is
+      // how a sale came to be allowed against stock another branch was
+      // holding.
+      branchId: params.branchId,
     },
     select: {
       movementType: true,

@@ -1009,3 +1009,144 @@ describe("two movements at once", () => {
     expect(check.cacheDifference).toBe(toStorageString(0));
   }, 200_000);
 });
+
+/**
+ * Which branch's stock a FIFO sale is allowed to reach.
+ *
+ * A position is kept per branch: the cached balance is looked up on
+ * `branchId` exactly, opening stock is placed on the primary branch, and every
+ * movement is written with the branch it happened at. Null is its own bucket —
+ * a member invited without a branch creates documents that sit there.
+ *
+ * The FIFO layers were rebuilt from a query that filtered on the branch only
+ * when one was given, so a null branch matched every movement in the company.
+ * One function then answered "what is here" two different ways: the balance
+ * from this branch, the layers from all of them.
+ *
+ * That is not a reporting nicety. `recordOutward` promises to refuse to go
+ * negative — stock the business does not have cannot have a cost, and posting
+ * one puts a fabricated cost of goods sold in the accounts and a negative asset
+ * on the balance sheet. Under FIFO the guard read the pooled quantity, so it
+ * let the sale through, took the cost from another branch's layers, and wrote
+ * the shortfall onto a branch that never had the goods.
+ *
+ * Under weighted average the same sale is refused, because that path reads the
+ * balance. Two methods disagreeing about whether a sale is possible at all is
+ * how somebody discovers this in their year-end accounts.
+ */
+describe("stock at one branch and a sale at another", () => {
+  async function shopWithStockAtTheBranchOnly(): Promise<{
+    fixture: Fixture;
+    branchId: string;
+  }> {
+    const fixture = await createCompany();
+    const branch = await prisma.branch.findFirstOrThrow({
+      where: { companyId: fixture.companyId },
+      select: { id: true },
+    });
+    // Opening stock always lands on the primary branch, so head office — the
+    // null bucket — holds nothing at all.
+    return { fixture, branchId: branch.id };
+  }
+
+  it("refuses a FIFO sale from a branch that holds none of it", async () => {
+    const { fixture } = await shopWithStockAtTheBranchOnly();
+
+    await expect(
+      prisma.$transaction((tx) =>
+        recordOutward(tx, {
+          companyId: fixture.companyId,
+          productId: fixture.productId,
+          branchId: null,
+          method: "FIFO",
+          quantity: 5,
+          movementType: StockMovementType.SALE,
+          movementDate: new Date(),
+          sourceType: "BRANCH_SCOPE_TEST",
+          sourceId: fixture.productId,
+        }),
+      ),
+    ).rejects.toThrow(/in stock/i);
+  }, 90_000);
+
+  it("does not leave a branch holding negative stock", async () => {
+    // The consequence, said in the books rather than in an exception: the
+    // sale that should not have happened wrote its shortfall somewhere.
+    const { fixture } = await shopWithStockAtTheBranchOnly();
+
+    await prisma
+      .$transaction((tx) =>
+        recordOutward(tx, {
+          companyId: fixture.companyId,
+          productId: fixture.productId,
+          branchId: null,
+          method: "FIFO",
+          quantity: 5,
+          movementType: StockMovementType.SALE,
+          movementDate: new Date(),
+          sourceType: "BRANCH_SCOPE_TEST",
+          sourceId: fixture.productId,
+        }),
+      )
+      .catch(() => undefined);
+
+    const balances = await prisma.inventoryBalance.findMany({
+      where: { companyId: fixture.companyId, productId: fixture.productId },
+      select: { branchId: true, quantity: true },
+    });
+    for (const balance of balances) {
+      expect(Number(balance.quantity)).toBeGreaterThanOrEqual(0);
+    }
+  }, 90_000);
+
+  it("agrees with weighted average about whether the sale is possible", async () => {
+    // The same call on the same stock, one method each. Whether a shop can
+    // sell what it does not have is not a question its valuation method gets
+    // to answer differently.
+    const { fixture } = await shopWithStockAtTheBranchOnly();
+
+    const attempt = (method: "FIFO" | "WEIGHTED_AVERAGE") =>
+      prisma
+        .$transaction((tx) =>
+          recordOutward(tx, {
+            companyId: fixture.companyId,
+            productId: fixture.productId,
+            branchId: null,
+            method,
+            quantity: 5,
+            movementType: StockMovementType.SALE,
+            movementDate: new Date(),
+            sourceType: "BRANCH_SCOPE_TEST",
+            sourceId: fixture.productId,
+          }),
+        )
+        .then(() => "allowed" as const)
+        .catch(() => "refused" as const);
+
+    expect(await attempt("WEIGHTED_AVERAGE")).toBe("refused");
+    expect(await attempt("FIFO")).toBe("refused");
+  }, 90_000);
+
+  it("still sells from the branch that does hold the stock", async () => {
+    // The fix must not scope the layers so tightly that an ordinary sale at
+    // the branch stops finding its own goods.
+    const { fixture, branchId } = await shopWithStockAtTheBranchOnly();
+
+    const result = await prisma.$transaction((tx) =>
+      recordOutward(tx, {
+        companyId: fixture.companyId,
+        productId: fixture.productId,
+        branchId,
+        method: "FIFO",
+        quantity: 5,
+        movementType: StockMovementType.SALE,
+        movementDate: new Date(),
+        sourceType: "BRANCH_SCOPE_TEST",
+        sourceId: fixture.productId,
+      }),
+    );
+
+    expect(Number(result.quantityAfter)).toBe(95);
+    expect(Number(result.unitCost)).toBeGreaterThan(0);
+  }, 90_000);
+});
