@@ -29,7 +29,7 @@ import { writeGstRows } from "@/server/documents/gst-register";
 import { recordInward } from "@/server/inventory/stock-service";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
-import { ReturnError } from "@/server/returns/errors";
+import { assertNoRepeatedLines, ReturnError } from "@/server/returns/errors";
 import type { ReturnableLine } from "@/server/returns/return-queries";
 
 /**
@@ -152,6 +152,8 @@ export async function createSalesReturn(params: {
           "DATE_BEFORE_INVOICE",
         );
       }
+
+      assertNoRepeatedLines(input.lines, "invoice");
 
       const itemById = new Map(sale.items.map((item) => [item.id, item]));
       const already = await returnedSoFar(tx, sale.id);
