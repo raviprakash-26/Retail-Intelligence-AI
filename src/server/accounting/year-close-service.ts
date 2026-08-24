@@ -391,7 +391,13 @@ export async function reopenFiscalYear(params: {
 }): Promise<YearCloseView> {
   const year = await prisma.fiscalYear.findFirst({
     where: { id: params.fiscalYearId, companyId: params.companyId },
-    select: { id: true, label: true, endDate: true, closedAt: true },
+    select: {
+      id: true,
+      label: true,
+      startDate: true,
+      endDate: true,
+      closedAt: true,
+    },
   });
   if (!year) {
     throw new YearCloseError(
@@ -401,6 +407,40 @@ export async function reopenFiscalYear(params: {
   }
   if (!year.closedAt) {
     throw new YearCloseError(`${year.label} is not closed.`, "NOT_CLOSED");
+  }
+
+  // The ordering rule, read backwards.
+  //
+  // Closing refuses to shut a year while an earlier one is open, because the
+  // entry clears whatever is sitting in the income accounts on the closing
+  // date and would sweep the earlier year's earnings into the later one.
+  // `postClosingEntry` leans on that in so many words: earlier years are
+  // already closed, so nothing older is left in there.
+  //
+  // Reopening can reach the same forbidden state from the other end. Reopen a
+  // year underneath a closed one and the later year is still marked settled
+  // while its income accounts hold the reopened year's figures again — a
+  // closing entry that no longer closes anything, and no way to recompute it
+  // without reopening the year it belongs to. On the fixture that is a
+  // thousand rupees of sales standing at the end of a year the books call
+  // shut.
+  //
+  // So a year is reopened newest first, which is the order they were closed
+  // in, reversed.
+  const laterClosed = await prisma.fiscalYear.findFirst({
+    where: {
+      companyId: params.companyId,
+      startDate: { gt: year.startDate },
+      closedAt: { not: null },
+    },
+    select: { label: true },
+    orderBy: { startDate: "desc" },
+  });
+  if (laterClosed) {
+    throw new YearCloseError(
+      `${laterClosed.label} comes after ${year.label} and is still closed. Reopen it first — a settled year cannot sit on top of one that is taking entries again.`,
+      "ORDER",
+    );
   }
 
   await prisma.$transaction(async (tx) => {
