@@ -320,6 +320,7 @@ export async function inviteMemberAction(
       invitedById: context.user.id,
       invitedByEmail: context.user.email,
       inviterEmailVerified: Boolean(context.user.emailVerifiedAt),
+      holder: context.permissions,
       input: parsed.data,
       ipAddress: request.ipAddress,
       userAgent: request.userAgent,
@@ -392,6 +393,7 @@ export async function changeMemberRoleAction(
       branchId: parsed.data.branchId || null,
       actingUserId: context.user.id,
       actorEmail: context.user.email,
+      holder: context.permissions,
       ipAddress: request.ipAddress,
       userAgent: request.userAgent,
     });
