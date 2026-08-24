@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { RegisterInput } from "@/lib/validation/auth";
 import { registerOwner } from "@/server/auth/registration";
 import { getTrialBalance } from "@/server/accounting/trial-balance-service";
+import { resolveSupplyType } from "@/lib/tax/gst";
 import {
   commitImport,
   previewImport,
@@ -471,4 +472,88 @@ CAP-3,Third,PCS,100
     const result = await run(fixture, "products", threeProducts);
     expect(result.created).toBe(3);
   }, 90_000);
+});
+
+/**
+ * The state a spreadsheet gives back.
+ *
+ * The column is offered under the synonyms "state code" and "state", and the
+ * value goes into the customer as typed: `stateCode: raw.stateCode ?? ""`,
+ * checked only for length. Two digits or fewer passes.
+ *
+ * Excel renders 07 as the number 7 and writes it back to CSV that way. So a
+ * Delhi shop importing its Delhi customers stores "7" against a company whose
+ * own code is "07", and `resolveSupplyType` compares the two as strings: not
+ * equal, so inter-state, so IGST on every invoice to that customer instead of
+ * CGST and SGST.
+ *
+ * That is the wrong tax head rather than a wrong total. It goes on the invoice,
+ * into the wrong table of GSTR-1, and the customer cannot match it in their own
+ * GSTR-2B. Nothing about it is visible on the screen the shopkeeper is looking
+ * at — the customer simply has a state, and it looks right.
+ */
+describe("the state a spreadsheet gives back", () => {
+  it("reads a code the spreadsheet stripped the leading zero from", async () => {
+    const fixture = await createCompany();
+    await run(fixture, "customers", "Name,State\nSharma Provision Store,7\n");
+
+    const customer = await prisma.customer.findFirstOrThrow({
+      where: { companyId: fixture.companyId, name: "Sharma Provision Store" },
+      select: { stateCode: true },
+    });
+    expect(customer.stateCode).toBe("07");
+  }, 120_000);
+
+  it("leaves a supply in the shop's own state intra-state", async () => {
+    // The consequence, said the way the invoice says it. A Delhi shop and a
+    // Delhi customer is CGST and SGST; the same pair with one side reading "7"
+    // is IGST.
+    const fixture = await createCompany();
+    await run(fixture, "customers", "Name,State\nSharma Provision Store,7\n");
+
+    const customer = await prisma.customer.findFirstOrThrow({
+      where: { companyId: fixture.companyId, name: "Sharma Provision Store" },
+      select: { stateCode: true },
+    });
+    expect(
+      resolveSupplyType({
+        registration: "REGULAR",
+        sellerStateCode: "07",
+        placeOfSupplyStateCode: customer.stateCode,
+      }),
+    ).toBe("INTRA_STATE");
+  }, 120_000);
+
+  it("reads a state written out by name", async () => {
+    // "State" is one of the column's own synonyms, and a column headed State
+    // usually holds a name. Two characters is not a name, so every such row
+    // used to fail on a length rule that says nothing about states.
+    const fixture = await createCompany();
+    await run(
+      fixture,
+      "customers",
+      "Name,State\nSharma Provision Store,Delhi\n",
+    );
+
+    const customer = await prisma.customer.findFirstOrThrow({
+      where: { companyId: fixture.companyId, name: "Sharma Provision Store" },
+      select: { stateCode: true },
+    });
+    expect(customer.stateCode).toBe("07");
+  }, 120_000);
+
+  it("refuses a state it cannot place, naming the column", async () => {
+    // Loudly, rather than storing something that will quietly decide a tax
+    // head later.
+    const fixture = await createCompany();
+    const preview = await look(
+      fixture,
+      "customers",
+      "Name,State\nSharma Provision Store,ZZ\n",
+    );
+
+    expect(preview.issues).toHaveLength(1);
+    expect(preview.issues[0]?.column).toBe("stateCode");
+    expect(preview.issues[0]?.message).toMatch(/state/i);
+  }, 120_000);
 });

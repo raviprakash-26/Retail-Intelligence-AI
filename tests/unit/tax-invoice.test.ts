@@ -59,6 +59,37 @@ describe("the amount in words", () => {
     );
     expect(amountInWords(1_04_522.4)).toContain("Forty Paise");
   });
+
+  it("carries a fraction that rounds up into the rupees", () => {
+    // Money is carried at four decimal places and a settlement amount is taken
+    // from the form without a decimal constraint, so this figure reaches the
+    // line. Split before rounding, the rupees stayed at 1,180 and the
+    // remainder rounded to 100 paise — which a reader that knows nought to
+    // ninety-nine renders as nothing at all. A rupee short, with a hole where
+    // the paise belong, on the one line that exists so the figure is written
+    // twice.
+    expect(amountInWords(1_180.995)).toBe(
+      "One Thousand One Hundred and Eighty One Rupees only",
+    );
+    expect(amountInWords(99.999)).toBe("One Hundred Rupees only");
+  });
+
+  it("leaves a fraction that rounds down where it is", () => {
+    // The other side of the same rounding, so the fix cannot simply round
+    // everything up.
+    expect(amountInWords(1_180.994)).toBe(
+      "One Thousand One Hundred and Eighty Rupees and Ninety Nine Paise only",
+    );
+  });
+
+  it("says a crore count of a hundred or more", () => {
+    // Every group but the first is taken modulo the one above it, so none of
+    // them can exceed ninety-nine. The crore count is whatever is left.
+    expect(amountInWords(1_000_000_000)).toBe("One Hundred Crore Rupees only");
+    expect(amountInWords(1_010_000_000)).toBe(
+      "One Hundred One Crore Rupees only",
+    );
+  });
 });
 
 describe("the particulars an invoice must carry", () => {

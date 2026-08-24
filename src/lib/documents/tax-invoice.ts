@@ -1,4 +1,4 @@
-import { money, type MoneyInput } from "@/lib/money";
+import { money, round2, type MoneyInput } from "@/lib/money";
 
 /**
  * What a tax invoice has to say.
@@ -245,6 +245,23 @@ function twoDigits(value: number): string {
 }
 
 /**
+ * Nought to nine hundred and ninety-nine.
+ *
+ * Every group but the first is a hundred or less by construction — lakh,
+ * thousand and hundred are all taken modulo the group above them. The crore
+ * count is not: it is whatever is left, so a hundred crore fed to a
+ * two-digit reader came back empty and the amount vanished from the line.
+ */
+function underThousand(value: number): string {
+  const hundreds = Math.floor(value / 100);
+  const rest = value % 100;
+  const parts: string[] = [];
+  if (hundreds > 0) parts.push(`${ONES[hundreds] ?? ""} Hundred`);
+  if (rest > 0) parts.push(twoDigits(rest));
+  return parts.join(" ");
+}
+
+/**
  * The amount written out, the way an Indian invoice writes it.
  *
  * Crore, lakh, thousand, hundred — not million and billion. Every printed
@@ -255,7 +272,17 @@ function twoDigits(value: number): string {
  * rupee amount is spoken.
  */
 export function amountInWords(value: MoneyInput): string {
-  const amount = money(value);
+  // To the paisa before it is split, not after.
+  //
+  // Money is carried at four decimal places, and a settlement amount is taken
+  // from the form without a decimal constraint, so ₹1,180.9950 reaches here.
+  // Splitting first left the rupees at 1,180 and rounded the remainder to 100
+  // paise — a hundred, which a reader that only knows nought to ninety-nine
+  // renders as nothing. The line read "One Thousand One Hundred and Eighty
+  // Rupees and  Paise only": a rupee short, with a hole where the paise
+  // belong, on the one line an invoice carries precisely so the figure is
+  // written twice and harder to alter.
+  const amount = round2(money(value));
   const negative = amount.isNegative();
   const absolute = amount.abs();
 
@@ -264,7 +291,7 @@ export function amountInWords(value: MoneyInput): string {
 
   const parts: string[] = [];
   const push = (count: number, label: string) => {
-    if (count > 0) parts.push(`${twoDigits(count)} ${label}`);
+    if (count > 0) parts.push(`${underThousand(count)} ${label}`);
   };
 
   push(Math.floor(rupees / 10_000_000), "Crore");

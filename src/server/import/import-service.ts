@@ -18,6 +18,7 @@ import {
   entitlementsFor,
   getUsage,
 } from "@/server/billing/entitlement-service";
+import { findStateByCode, findStateByName } from "@/lib/constants/india";
 import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
@@ -476,8 +477,50 @@ function buildProduct(
   return { key: input.sku, label: `${input.sku} — ${input.name}`, input };
 }
 
+/**
+ * The state cell, as a spreadsheet is likely to have left it.
+ *
+ * The column is offered under "state code" and "state", and the value used to
+ * go through as typed, checked only for being two characters or fewer. That
+ * accepted three things it should not have.
+ *
+ * A code whose leading zero has gone. Excel reads 07 as the number seven and
+ * writes it back that way, so a Delhi shop's Delhi customers arrive as "7"
+ * against a company whose own code is "07". `resolveSupplyType` compares the
+ * two as strings, finds them different, and charges IGST on every invoice to
+ * that customer instead of CGST and SGST — the wrong tax head, on the invoice
+ * and in the wrong table of GSTR-1, where the customer cannot match it.
+ *
+ * A name. A column headed "State" usually holds one, and a name is longer than
+ * two characters, so every such row failed on a length rule that says nothing
+ * about states.
+ *
+ * A code for no state at all. "ZZ" is two characters and went straight in.
+ *
+ * Returns the canonical two-digit code, or null where the cell names nothing.
+ */
+function stateCodeFrom(value: string): string | null {
+  const text = value.trim();
+  if (text === "") return "";
+
+  if (/^\d{1,2}$/.test(text)) {
+    const padded = text.padStart(2, "0");
+    return findStateByCode(padded) ? padded : null;
+  }
+
+  return findStateByName(text)?.code ?? null;
+}
+
 function buildParty(raw: Record<string, string>, dataset: DatasetKey): Built {
   const opening = parseNumber(raw.openingBalance ?? "") ?? 0;
+
+  const stateCode = stateCodeFrom(raw.stateCode ?? "");
+  if (stateCode === null) {
+    return {
+      error: `There is no Indian state called "${raw.stateCode}". Use the two-digit GST state code, or the state's name.`,
+      column: "stateCode",
+    };
+  }
 
   const input: Record<string, unknown> = {
     name: raw.name ?? "",
@@ -487,7 +530,7 @@ function buildParty(raw: Record<string, string>, dataset: DatasetKey): Built {
     pan: (raw.pan ?? "").toUpperCase(),
     addressLine1: raw.addressLine1 ?? "",
     city: raw.city ?? "",
-    stateCode: raw.stateCode ?? "",
+    stateCode,
     pincode: raw.pincode ?? "",
     creditDays: parseNumber(raw.creditDays ?? "") ?? 0,
     // A negative opening is the other side of the ledger, which the form
