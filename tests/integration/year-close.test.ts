@@ -547,6 +547,117 @@ describe("two years, closed in order", () => {
       expect(Number(entry.totalDebit)).toBe(1000);
     }
   }, 180_000);
+
+  /**
+   * The same ordering rule, approached from the other end.
+   *
+   * Closing refuses to shut a year while an earlier one is open, and says why:
+   * the entry clears whatever is sitting in the income accounts on the closing
+   * date, so closing out of order sweeps the earlier year's earnings into the
+   * later one. `postClosingEntry` leans on that guarantee in so many words —
+   * earlier years are already closed, so nothing older is left in there.
+   *
+   * Reopening never learned the rule. It checks that the year exists and is
+   * closed, and nothing else, so the state the close path refuses to create
+   * can be reached by reopening an earlier year underneath a closed one. The
+   * later year is then settled by an entry that no longer settles anything:
+   * its income accounts hold the reopened year's figures again, and every
+   * cumulative read past it carries them.
+   *
+   * This is the year-level twin of the month-level gap below, where
+   * `reopenPeriod` was written before anything could close a year and never
+   * learned about it either.
+   */
+  async function bothYearsClosed() {
+    const { shop, earlier, later } = await twoYearShop();
+    for (const year of [earlier, later]) {
+      await closeFiscalYear({
+        companyId: shop.companyId,
+        userId: shop.userId,
+        actorEmail: "owner@example.com",
+        fiscalYearId: year.id,
+      });
+    }
+    return { shop, earlier, later };
+  }
+
+  it("refuses to reopen the earlier year while the later one is closed", async () => {
+    const { shop, earlier, later } = await bothYearsClosed();
+
+    await expect(
+      reopenFiscalYear({
+        companyId: shop.companyId,
+        userId: shop.userId,
+        actorEmail: "owner@example.com",
+        fiscalYearId: earlier.id,
+        reason: "Correcting a supplier bill",
+      }),
+    ).rejects.toThrow(/comes after|reopen .*first/i);
+
+    // And nothing moved: a refusal that had already reversed the entry would
+    // be worse than no guard at all.
+    const stillClosed = await prisma.fiscalYear.count({
+      where: { companyId: shop.companyId, closedAt: { not: null } },
+    });
+    expect(stillClosed).toBe(2);
+    expect(later.id).not.toBe(earlier.id);
+  }, 180_000);
+
+  it("leaves the later year's books settled", async () => {
+    // The consequence in figures. A closed year's income accounts read nil at
+    // its own year end — that is what closing means — and reopening the year
+    // underneath it puts a thousand back into them.
+    const { shop, earlier, later } = await bothYearsClosed();
+
+    await reopenFiscalYear({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      fiscalYearId: earlier.id,
+      reason: "Correcting a supplier bill",
+    }).catch(() => undefined);
+
+    const laterYear = await prisma.fiscalYear.findFirstOrThrow({
+      where: { id: later.id },
+      select: { endDate: true, closedAt: true },
+    });
+    if (!laterYear.closedAt) return; // Reopened in order; nothing to check.
+
+    const balances = await accountBalances({
+      companyId: shop.companyId,
+      to: laterYear.endDate,
+    });
+    const earned = balances.filter(
+      (account) => account.type === "INCOME" || account.type === "EXPENSE",
+    );
+    for (const account of earned) {
+      expect(
+        Number(account.closingDebit) - Number(account.closingCredit),
+        `${account.name} at the end of a closed year`,
+      ).toBe(0);
+    }
+  }, 180_000);
+
+  it("reopens them in order, the later year first", async () => {
+    // The legitimate path has to stay open, or the guard has simply made a
+    // closed year permanent.
+    const { shop, earlier, later } = await bothYearsClosed();
+
+    for (const year of [later, earlier]) {
+      await reopenFiscalYear({
+        companyId: shop.companyId,
+        userId: shop.userId,
+        actorEmail: "owner@example.com",
+        fiscalYearId: year.id,
+        reason: "Correcting a supplier bill",
+      });
+    }
+
+    const open = await prisma.fiscalYear.count({
+      where: { companyId: shop.companyId, closedAt: null },
+    });
+    expect(open).toBe(2);
+  }, 180_000);
 });
 
 describe("reopening a closed year", () => {
