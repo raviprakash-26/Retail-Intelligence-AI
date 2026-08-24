@@ -248,7 +248,6 @@ export async function getAnalytics(params: {
   const [
     statements,
     previousStatements,
-    periodBalances,
     closingBalances,
     trend,
     products,
@@ -268,7 +267,6 @@ export async function getAnalytics(params: {
       from: isoDay(previousFrom),
       to: isoDay(previousTo),
     }),
-    accountBalances({ companyId: params.companyId, from, to }),
     accountBalances({ companyId: params.companyId, to }),
     revenueTrend({ companyId: params.companyId, from, to, granularity }),
     productPerformance({ companyId: params.companyId, from, to }),
@@ -310,13 +308,46 @@ export async function getAnalytics(params: {
   const previousAverageBill =
     previousBills > 0 ? divide(previousRevenue, previousBills) : money(0);
 
-  // Purchases as the payable-days denominator: goods bought in, which under
-  // perpetual inventory is the movement on the Inventory account's debit side
-  // rather than a Purchases expense account.
-  const purchases = add(
-    ...periodBalances
-      .filter((balance) => balance.subType === "INVENTORY")
-      .map((balance) => balance.periodDebit),
+  // Purchases as the payable-days denominator: what suppliers billed the shop
+  // in the window, less what went back to them.
+  //
+  // Read from the bills rather than from the Inventory account's debit side,
+  // which is what this used and which is not the same question. Three things
+  // debit Inventory: a purchase, a sales return — goods a customer brought
+  // back — and a stock adjustment in, stock found on a count. Only the first
+  // was bought from anybody, and payable days measures how long the shop takes
+  // to pay its suppliers.
+  //
+  // The consequence is not a figure slightly out. `payableDays` is guarded to
+  // read null where nothing was bought, because this module's rule is that a
+  // ratio it cannot compute honestly is null rather than zero. A shop that had
+  // never bought anything and took one return had that guard silently
+  // satisfied, and the page told it that it pays its suppliers in nil days.
+  //
+  // Bill totals rather than taxable values, because the payables balance this
+  // is divided into carries the tax too. Returns are netted for the reason
+  // everything else in this file nets them: a debit note reduces what is owed.
+  const [billed, returned] = await Promise.all([
+    prisma.purchase.aggregate({
+      where: {
+        companyId: params.companyId,
+        status: "POSTED",
+        billDate: { gte: from, lte: to },
+      },
+      _sum: { totalAmount: true },
+    }),
+    prisma.purchaseReturn.aggregate({
+      where: {
+        companyId: params.companyId,
+        status: "POSTED",
+        returnDate: { gte: from, lte: to },
+      },
+      _sum: { totalAmount: true },
+    }),
+  ]);
+  const purchases = subtract(
+    billed._sum.totalAmount ?? 0,
+    returned._sum.totalAmount ?? 0,
   );
 
   const ratios = computeRatios({

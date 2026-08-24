@@ -9,6 +9,9 @@ import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
 import { createSale } from "@/server/sales/sale-service";
 import { createSalesReturn } from "@/server/returns/sales-return-service";
+import { createPurchase } from "@/server/purchases/purchase-service";
+import { createPurchaseReturn } from "@/server/returns/purchase-return-service";
+import type { PurchaseInput } from "@/lib/validation/purchases";
 import { getFinancialStatements } from "@/server/accounting/statements-service";
 import {
   getAnalytics,
@@ -769,6 +772,124 @@ describe("the breakdowns cannot disagree with the trend either", () => {
 
     return fixture;
   }
+
+  /**
+   * Payment days, on a shop that has never bought anything.
+   *
+   * This module's rule is stated at the top of `lib/analytics/ratios`: a ratio
+   * it cannot compute honestly is null, not zero, and every null carries the
+   * reason instead of a number. Payment days is guarded exactly that way —
+   * nothing bought in the period, no basis to measure against.
+   *
+   * The guard could not fire, because the figure fed to it was every debit to
+   * the Inventory account rather than what suppliers had billed. Three things
+   * debit Inventory: a purchase, a sales return, and a stock adjustment in.
+   * Only the first was bought from anybody. So one credit note from a customer
+   * was enough to make the denominator non-zero, and the page told a shop with
+   * no suppliers that it pays them in nil days.
+   */
+  it("has nothing to say about paying suppliers it never had", async () => {
+    const fixture = await soldAndPartlyReturned();
+    const analytics = await analyticsFor(fixture);
+
+    const payable = analytics.ratios.find(
+      (ratio) => ratio.key === "payableDays",
+    );
+    expect(payable?.value).toBeNull();
+    expect(payable?.unavailable).toMatch(/nothing was bought/i);
+  });
+
+  it("does not let a return stand in for a cash cycle", async () => {
+    // Cash cycle is stock days plus collection days less payment days, so a
+    // payment-days figure conjured out of a credit note carries straight into
+    // it. Better to say which leg is missing.
+    const fixture = await soldAndPartlyReturned();
+    const analytics = await analyticsFor(fixture);
+
+    const cycle = analytics.ratios.find((ratio) => ratio.key === "cashCycle");
+    expect(cycle?.value).toBeNull();
+    expect(cycle?.unavailable).not.toBeNull();
+  });
+
+  it("counts what the supplier is owed, net of what went back", async () => {
+    // A bill and a debit note for the whole of it leaves the shop owing
+    // nothing and having bought nothing on balance. Counting the bill and
+    // ignoring the note would put a denominator under payment days that the
+    // supplier account does not carry.
+    const fixture = await createCompany();
+    const supplier = await createParty({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      kind: "SUPPLIER",
+      input: {
+        name: "Metro Wholesale",
+        phone: "",
+        email: "",
+        gstin: "",
+        pan: "",
+        addressLine1: "",
+        city: "",
+        stateCode: "29",
+        pincode: "",
+        creditDays: 30,
+        openingBalance: 0,
+        openingNature: "CREDIT",
+        notes: "",
+      } as never,
+    });
+
+    const bill = await createPurchase({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        supplierId: supplier.id,
+        supplierBillNo: "SB-NET-1",
+        billDate: MID,
+        paymentMode: "CREDIT",
+        priceIncludesTax: false,
+        claimInputCredit: true,
+        notes: "",
+        lines: [
+          {
+            productId: fixture.riceId,
+            description: "",
+            quantity: 10,
+            rate: 500,
+            discountPercent: 0,
+          },
+        ],
+      } satisfies PurchaseInput,
+    });
+
+    const line = await prisma.purchaseItem.findFirstOrThrow({
+      where: { purchaseId: bill.id },
+      select: { id: true },
+    });
+
+    await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: MID,
+        reason: "The whole consignment was wrong",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: line.id, quantity: 10 }],
+      } as never,
+    });
+
+    const analytics = await analyticsFor(fixture);
+    const payable = analytics.ratios.find(
+      (ratio) => ratio.key === "payableDays",
+    );
+    expect(payable?.value).toBeNull();
+    expect(payable?.unavailable).toMatch(/nothing was bought/i);
+  });
 
   it("takes a return off what the product earned", async () => {
     const fixture = await soldAndPartlyReturned();
