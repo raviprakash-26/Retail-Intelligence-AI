@@ -21,7 +21,10 @@ import { RULES, type RuleKey, type Severity } from "@/lib/auditor/rules";
 import { getTrialBalance } from "@/server/accounting/trial-balance-service";
 import { getGstWorkingPaper } from "@/server/gst/gst-return-service";
 import { reconcileStock } from "@/server/inventory/inventory-report";
-import { settledByNotes } from "@/server/settlements/outstanding";
+import {
+  settledByNotes,
+  unappliedCreditByParty,
+} from "@/server/settlements/outstanding";
 import { aggregateCashDays, cashOutflows } from "@/server/tax/cash-outflows";
 
 /**
@@ -537,7 +540,7 @@ const LONG_OVERDUE_DAYS = 90;
 /**
  * Money owed for a long time.
  *
- * Two things this has to get right, and it used to get neither.
+ * Three things this has to get right, and it used to get none of them.
  *
  * **Every matching invoice, not a page of them.** It once took the first fifty
  * overdue invoices and added those up, so a shop with two hundred was shown the
@@ -559,24 +562,39 @@ const LONG_OVERDUE_DAYS = 90;
  * document lists already share, and it answers from the movement the return
  * posted to the receivable account — which is what tells a return credited to
  * the account apart from one refunded over the counter.
+ *
+ * **Money paid without an invoice named for it.** The same fault as the
+ * previous one, arrived at from the other side. A customer who sends ₹1,000
+ * against three invoices without saying which has paid ₹1,000: the receipt
+ * credits the receivable account, and `paidAmount` on every one of those
+ * invoices stays where it was, because there was nothing to move it against.
+ * Reading the invoices alone said the whole debt was still outstanding, and
+ * the shop was told to chase somebody whose money was already in the bank.
+ *
+ * That is a fact about the customer rather than about any one document, so it
+ * cannot be worked out from the overdue invoices alone — hence every open
+ * invoice is read here, and the credit comes off oldest first, which is what
+ * the ageing report and the payment reminder both do with it.
  */
 async function checkLongOverdue(context: CheckContext): Promise<Finding[]> {
   const cutoff = new Date(
     context.to.getTime() - LONG_OVERDUE_DAYS * 86_400_000,
   );
 
-  const overdue = await prisma.sale.findMany({
+  // Every open invoice, not only the overdue ones. What is owed on the overdue
+  // ones can only be known once the whole account is in view: money paid
+  // without an invoice named for it is a fact about the customer rather than
+  // about any one document, and working out how much of it is unapplied needs
+  // everything it could have been applied to.
+  const invoices = await prisma.sale.findMany({
     where: {
       companyId: context.companyId,
       status: DocumentStatus.POSTED,
       customerId: { not: null },
-      OR: [
-        { dueDate: { lt: cutoff } },
-        { dueDate: null, invoiceDate: { lt: cutoff } },
-      ],
     },
     select: {
       id: true,
+      customerId: true,
       invoiceNumber: true,
       invoiceDate: true,
       dueDate: true,
@@ -586,23 +604,72 @@ async function checkLongOverdue(context: CheckContext): Promise<Finding[]> {
     },
     orderBy: { invoiceDate: "asc" },
   });
-  if (overdue.length === 0) return [];
+  if (invoices.length === 0) return [];
 
   const credited = await settledByNotes(prisma, {
     companyId: context.companyId,
-    documentIds: overdue.map((sale) => sale.id),
+    documentIds: invoices.map((sale) => sale.id),
     side: "RECEIVABLE",
   });
 
-  const stillOwed = overdue
+  const open = invoices
     .map((sale) => ({
       sale,
+      due: sale.dueDate ?? sale.invoiceDate,
       outstanding: subtract(
         sale.totalAmount,
         add(sale.paidAmount, credited.get(sale.id) ?? money(0)),
       ),
     }))
     .filter((entry) => compare(entry.outstanding, 0) > 0);
+
+  const documented = new Map<string, ReturnType<typeof money>>();
+  for (const entry of open) {
+    const partyId = entry.sale.customerId;
+    if (!partyId) continue;
+    documented.set(
+      partyId,
+      add(documented.get(partyId) ?? money(0), entry.outstanding),
+    );
+  }
+
+  // Money on the account that no invoice was named for. The ageing report and
+  // the payment reminder both take this off before saying what is owed; a
+  // check that did not would accuse a customer whose money is already in the
+  // bank — the same accusation the credit-note reading above removed, made
+  // about a payment instead of a return.
+  const held = await unappliedCreditByParty({
+    companyId: context.companyId,
+    side: "RECEIVABLE",
+    documented,
+  });
+
+  // Applied oldest first, which is what the rest of the product means by
+  // settling. Overdue invoices are the oldest by construction — an invoice is
+  // overdue precisely because its due date is behind the others — so the
+  // credit reaches them before anything still within terms.
+  const remaining = new Map(held);
+  const stillOwed = [...open]
+    .sort((a, b) => a.due.getTime() - b.due.getTime())
+    .map((entry) => {
+      const partyId = entry.sale.customerId ?? "";
+      const credit = remaining.get(partyId);
+      if (!credit || !credit.greaterThan(0)) return entry;
+
+      const taken = entry.outstanding.greaterThan(credit)
+        ? credit
+        : entry.outstanding;
+      remaining.set(partyId, subtract(credit, taken));
+      return { ...entry, outstanding: subtract(entry.outstanding, taken) };
+    })
+    .filter(
+      (entry) =>
+        compare(entry.outstanding, 0) > 0 &&
+        entry.due.getTime() < cutoff.getTime(),
+    )
+    .sort(
+      (a, b) => a.sale.invoiceDate.getTime() - b.sale.invoiceDate.getTime(),
+    );
 
   if (stillOwed.length === 0) return [];
 

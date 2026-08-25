@@ -22,7 +22,10 @@ import {
   createSalesReturn,
   returnableLines,
 } from "@/server/returns/sales-return-service";
-import { createPayment } from "@/server/settlements/settlement-service";
+import {
+  createPayment,
+  createReceipt,
+} from "@/server/settlements/settlement-service";
 import {
   getLatestAudit,
   runAudit,
@@ -788,6 +791,151 @@ describe("figures a person might act on", () => {
     });
 
     expect(keysOf(report)).not.toContain("LONG_OVERDUE_RECEIVABLE");
+  }, 90_000);
+
+  /**
+   * A customer who paid without saying which invoice it was for.
+   *
+   * The same shape as the credit-note case above, from the other direction.
+   * An unallocated receipt credits the receivable account, so the ledger knows
+   * the debt is gone; `paidAmount` on the invoice does not move, because the
+   * customer named no invoice for it to move against.
+   *
+   * The check reads `totalAmount - paidAmount - credited`, so it would tell a
+   * shop to chase somebody whose money is already in the bank — the same
+   * accusation the credit-note fix removed, made about a payment instead of a
+   * return.
+   */
+  it("does not chase a customer who paid without naming an invoice", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, { quantity: 10, rate: 100, date: daysBefore(1) });
+
+    await createReceipt({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        kind: "CUSTOMER",
+        partyId: fixture.customerId,
+        date: daysBefore(1),
+        paymentMode: "CASH",
+        amount: 1000,
+        referenceNo: "",
+        notes: "",
+        allocations: [],
+      },
+    });
+
+    // The receivable account is nil: they paid the lot.
+    expect(
+      Number(
+        await accountBalance(
+          fixture.companyId,
+          SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+        ),
+      ),
+    ).toBe(0);
+
+    const report = await runAudit({
+      companyId: fixture.companyId,
+      from: WINDOW.from,
+      to: new Date(TODAY.getTime() + 200 * DAY),
+    });
+    expect(keysOf(report)).not.toContain("LONG_OVERDUE_RECEIVABLE");
+  }, 90_000);
+
+  it("counts only part of it as owed when part was paid on account", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, { quantity: 10, rate: 100, date: daysBefore(1) });
+
+    await createReceipt({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        kind: "CUSTOMER",
+        partyId: fixture.customerId,
+        date: daysBefore(1),
+        paymentMode: "CASH",
+        amount: 400,
+        referenceNo: "",
+        notes: "",
+        allocations: [],
+      },
+    });
+
+    const report = await runAudit({
+      companyId: fixture.companyId,
+      from: WINDOW.from,
+      to: new Date(TODAY.getTime() + 200 * DAY),
+    });
+    const overdue = report.findings.find(
+      (entry) => entry.ruleKey === "LONG_OVERDUE_RECEIVABLE",
+    );
+    expect(overdue).toBeDefined();
+
+    // The same standard the credit-note case is held to: what the auditor says
+    // is owed is what the receivable account says is owed.
+    const receivable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+    );
+    expect(Number(overdue!.evidence.outstanding)).toBeCloseTo(
+      Number(receivable),
+      2,
+    );
+  }, 90_000);
+
+  /**
+   * A customer with an old debt and a recent one, who pays something.
+   *
+   * How much of a payment is unapplied is a fact about the whole account, so
+   * it cannot be worked out from the overdue invoices alone. Measuring it
+   * against only those makes the newer invoice look like unexplained balance
+   * and swallows the credit whole: this customer's ₹300 would go nowhere and
+   * the old debt would still read ₹1,000.
+   *
+   * Most customers have more than one invoice open, so this is the ordinary
+   * case rather than the corner.
+   */
+  it("takes a payment off the old debt when a newer invoice is also open", async () => {
+    const fixture = await createCompany();
+    // Inside the first fiscal year, and far enough back that 30 days of
+    // credit puts the due date well behind the ninety-day mark.
+    await sell(fixture, { quantity: 10, rate: 100, date: daysBefore(140) });
+    await sell(fixture, { quantity: 5, rate: 100, date: daysBefore(1) });
+
+    await createReceipt({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        kind: "CUSTOMER",
+        partyId: fixture.customerId,
+        date: daysBefore(1),
+        paymentMode: "CASH",
+        amount: 300,
+        referenceNo: "",
+        notes: "",
+        allocations: [],
+      },
+    });
+
+    const report = await runAudit({
+      companyId: fixture.companyId,
+      from: WINDOW.from,
+      to: WINDOW.to,
+    });
+    const overdue = report.findings.find(
+      (entry) => entry.ruleKey === "LONG_OVERDUE_RECEIVABLE",
+    );
+    expect(overdue).toBeDefined();
+
+    // ₹1,000 owed since long ago, less the ₹300 that came in against no
+    // invoice in particular. The ₹500 raised yesterday is not overdue and is
+    // not part of this figure.
+    expect(Number(overdue!.evidence.outstanding)).toBeCloseTo(700, 2);
+    expect(Number(overdue!.evidence.invoices)).toBe(1);
   }, 90_000);
 
   it("counts only what is still owed after a part of it came back", async () => {

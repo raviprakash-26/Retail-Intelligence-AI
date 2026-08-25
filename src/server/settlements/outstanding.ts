@@ -414,12 +414,40 @@ export async function unappliedCredit(params: {
   /** What the open documents between you add up to. */
   documented: MoneyInput;
 }): Promise<Decimal> {
-  const control = await controlAccountByParty(params.companyId, params.side);
-  const entry = control.get(params.partyId);
-  if (!entry) return money(0);
+  const held = await unappliedCreditByParty({
+    companyId: params.companyId,
+    side: params.side,
+    documented: new Map([[params.partyId, money(params.documented)]]),
+  });
+  return held.get(params.partyId) ?? money(0);
+}
 
-  const residual = subtract(entry.balance, money(params.documented));
-  return residual.greaterThan(0) ? money(0) : residual.negated();
+/**
+ * The same question for many parties at once, in one read of the control
+ * account.
+ *
+ * A party absent from `documented` is absent from the answer: both callers ask
+ * about people they already have documents for, and a party carrying a credit
+ * and no open document is not somebody either of them is about to quote a
+ * figure to.
+ */
+export async function unappliedCreditByParty(params: {
+  companyId: string;
+  side: "RECEIVABLE" | "PAYABLE";
+  documented: ReadonlyMap<string, Decimal>;
+}): Promise<Map<string, Decimal>> {
+  const held = new Map<string, Decimal>();
+  if (params.documented.size === 0) return held;
+
+  const control = await controlAccountByParty(params.companyId, params.side);
+  for (const [partyId, documented] of params.documented) {
+    const entry = control.get(partyId);
+    if (!entry) continue;
+    const residual = subtract(entry.balance, documented);
+    if (residual.greaterThan(0)) continue;
+    held.set(partyId, residual.negated());
+  }
+  return held;
 }
 
 /**
