@@ -4,6 +4,7 @@ import { MasterDataHeader } from "@/components/master-data/page-header";
 import { formatCurrency } from "@/lib/format";
 import { requirePermission } from "@/server/auth/context";
 import {
+  balanceSideLabel,
   describeBalance,
   getAccountLedger,
   ledgerAccounts,
@@ -108,7 +109,10 @@ export default async function LedgerPage({
                 })}
                 {Number(ledger.closingBalance) !== 0 && (
                   <span className="ml-1 text-xs font-normal text-muted-foreground">
-                    {Number(ledger.closingBalance) < 0 ? "Cr" : "Dr"}
+                    {balanceSideLabel({
+                      nature: ledger.account.nature,
+                      balance: ledger.closingBalance,
+                    })}
                   </span>
                 )}
               </p>

@@ -579,12 +579,14 @@ export function describeBalance(params: {
   return negative ? "Reduced" : "Your stake";
 }
 
-/** Debit or credit, for the side a balance actually sits on. */
-export function balanceSideLabel(balance: Decimal | string): "Dr" | "Cr" | "" {
-  const value = money(balance);
-  if (value.isZero()) return "";
-  return value.isNegative() ? "Cr" : "Dr";
-}
+/**
+ * Re-exported so the ledger page and its tests keep one import.
+ *
+ * It lives in `lib/accounting/double-entry` beside `signedBalance`, which is
+ * what produces the figure it has to read, and because the ledger table is a
+ * client component and cannot import anything from a `server-only` module.
+ */
+export { balanceSideLabel } from "@/lib/accounting/double-entry";
 
 /**
  * Whether opening plus movement really is the closing figure.
