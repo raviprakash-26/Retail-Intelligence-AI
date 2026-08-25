@@ -1,4 +1,4 @@
-import { add, money, multiply, subtract, type Decimal } from "@/lib/money";
+import { add, Decimal, money, multiply, subtract } from "@/lib/money";
 
 /**
  * Statutory deductions on Indian salary.
@@ -136,6 +136,45 @@ export type StatutoryResult = {
 const percent = (base: Decimal, rate: number): Decimal =>
   multiply(base, rate / 100);
 
+/**
+ * A contribution, in the whole rupees the scheme is remitted in.
+ *
+ * Neither return carries paise. The EPF electronic challan takes whole rupees
+ * per member and so does the ESI challan, so a contribution held at four
+ * decimal places is not a figure anybody can pay. It was still posted to the
+ * PF and ESI payable accounts at full precision, which left those liabilities
+ * disagreeing with the remittance by a fraction of a rupee per employee per
+ * month — a residue that no payment clears and that grows for as long as the
+ * business runs payroll.
+ *
+ * Rounded per employee rather than on the run's total because that is the
+ * level the schemes work at: both returns are filed member by member, and the
+ * total is whatever the members add up to. Rounding the total instead would
+ * produce a figure that reconciles to the challan in aggregate while
+ * disagreeing with every payslip inside it.
+ *
+ * The two schemes round differently, so neither rule is applied to both.
+ *
+ *   • **ESI** — Regulation 40 of the Employees' State Insurance (General)
+ *     Regulations, 1950 takes each contribution to the *next higher* rupee.
+ *     Any fraction goes up, so ₹113.25 is ₹114 and ₹112.50 is ₹113. An
+ *     already-whole figure is left where it is; this rounds the fraction away,
+ *     it does not add a rupee.
+ *   • **EPF** — rounded to the *nearest* rupee, so ₹1,481.40 stays ₹1,481.
+ *
+ * Applied to each share separately, because each is remitted as its own line
+ * rather than as a half of one total.
+ */
+function toRupees(
+  contribution: Decimal,
+  rule: "nearest" | "up" = "nearest",
+): Decimal {
+  return contribution.toDecimalPlaces(
+    0,
+    rule === "up" ? Decimal.ROUND_UP : Decimal.ROUND_HALF_UP,
+  );
+}
+
 /** The lesser of the wage and the scheme's ceiling. */
 function ceilingApplied(wage: Decimal, ceiling: number): Decimal {
   return wage.greaterThan(ceiling) ? money(ceiling) : wage;
@@ -161,18 +200,18 @@ export function computeStatutory(
   const pfWage = policy.providentFund
     ? ceilingApplied(basicSalary, EPF.wageCeiling)
     : money(0);
-  const employeeProvidentFund = percent(pfWage, EPF.employeeRate);
-  const employerProvidentFund = percent(pfWage, EPF.employerRate);
+  const employeeProvidentFund = toRupees(percent(pfWage, EPF.employeeRate));
+  const employerProvidentFund = toRupees(percent(pfWage, EPF.employerRate));
 
   // ESI is on gross, and is all-or-nothing: an employee earning above the
   // limit is outside the scheme rather than contributing on a capped wage.
   const inEsi =
     policy.employeeStateInsurance && !gross.greaterThan(ESI.wageLimit);
   const employeeStateInsurance = inEsi
-    ? percent(gross, ESI.employeeRate)
+    ? toRupees(percent(gross, ESI.employeeRate), "up")
     : money(0);
   const employerStateInsurance = inEsi
-    ? percent(gross, ESI.employerRate)
+    ? toRupees(percent(gross, ESI.employerRate), "up")
     : money(0);
 
   // Professional tax is a flat monthly figure from a threshold, not a rate.

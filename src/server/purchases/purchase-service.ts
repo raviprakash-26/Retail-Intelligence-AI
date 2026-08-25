@@ -743,6 +743,15 @@ export async function voidPurchase(params: {
         sign: -1,
       });
 
+      // As on the sales side: the payment stays made and the supplier ends up
+      // owing the shop, which the ledger reaches by itself. The allocation
+      // rows have to be released, or the payment reports itself fully applied
+      // against a bill that no longer exists and the credit with the supplier
+      // can never be set against their next one.
+      const released = await tx.paymentAllocation.deleteMany({
+        where: { purchaseId: purchase.id },
+      });
+
       await tx.purchase.update({
         where: { id: purchase.id },
         data: {
@@ -767,6 +776,7 @@ export async function voidPurchase(params: {
             total: toStorageString(purchase.totalAmount),
             reason: params.reason,
             reversalEntry: reversal.entryNumber,
+            paymentsReleased: released.count,
           },
         },
         tx,

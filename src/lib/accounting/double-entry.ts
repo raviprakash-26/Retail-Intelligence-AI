@@ -297,6 +297,40 @@ export function signedBalance(
 }
 
 /**
+ * Debit or credit, for the side a balance from `signedBalance` sits on.
+ *
+ * The nature is needed and reading the sign alone will not do. That figure is
+ * signed *against the account's own nature* — positive means "on the side this
+ * account normally sits on" — so on payables a positive balance is money the
+ * shop owes and belongs on the credit side. Taking positive to mean debit was
+ * backwards for every credit-nature account in the chart: every liability, all
+ * income, capital, and accumulated depreciation, which is an asset held at
+ * credit nature precisely because it is a contra.
+ *
+ * The ledger printed it under `describeBalance`, so a supplier account read
+ * "You owe Metro Wholesale this much" and tagged the figure "Dr" — which says
+ * the supplier owes the shop. The two halves of one heading contradicted each
+ * other, and the same tag sat on the opening balance, the closing balance and
+ * every running balance between them, on the statement a business sends its
+ * supplier.
+ *
+ * Note this is the opposite job from `balanceSide` below, which is handed raw
+ * debit and credit totals and reports where they landed. This is handed a
+ * figure whose sign has already been folded into the account's nature, and has
+ * to unfold it again.
+ */
+export function balanceSideLabel(params: {
+  nature: AccountNature;
+  balance: MoneyInput;
+}): "Dr" | "Cr" | "" {
+  const value = money(params.balance);
+  if (value.isZero()) return "";
+  const naturalSide = params.nature === "DEBIT" ? "Dr" : "Cr";
+  if (!value.isNegative()) return naturalSide;
+  return naturalSide === "Dr" ? "Cr" : "Dr";
+}
+
+/**
  * Which column a balance belongs in on the trial balance.
  *
  * Note this deliberately ignores the account's declared nature: the trial

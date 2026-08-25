@@ -620,6 +620,35 @@ describe("what a debit note refuses to do", () => {
     ).rejects.toThrow(ReturnError);
   }, 90_000);
 
+  it("refuses a line named twice in the same return", async () => {
+    // Three and three against a bill of five. Each is measured against the
+    // whole outstanding quantity because the figure is read once before the
+    // lines are walked, so both pass and only a unique constraint on the
+    // return's line numbers stops six of five going back.
+    const fixture = await createCompany();
+    const bill = await buy(fixture, 5);
+    const line = await firstLine(fixture, bill.id);
+
+    await expect(
+      createPurchaseReturn({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        branchId: null,
+        input: {
+          purchaseId: bill.id,
+          returnDate: today,
+          reason: "",
+          refundMode: "CREDIT",
+          lines: [
+            { sourceLineId: line.lineId, quantity: 3 },
+            { sourceLineId: line.lineId, quantity: 3 },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({ code: "DUPLICATE_LINE" });
+  }, 90_000);
+
   it("counts what has already gone back", async () => {
     // Two returns of three against a bill of five: the second must be refused.
     const fixture = await createCompany();

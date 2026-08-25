@@ -23,8 +23,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { balanceSideLabel } from "@/lib/accounting/double-entry";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import type { AccountNature } from "@prisma/client";
 import type {
   AccountLedger,
   LedgerAccountOption,
@@ -192,7 +194,10 @@ function LedgerTable({ ledger }: { ledger: AccountLedger }) {
                 <TableCell />
                 <TableCell />
                 <TableCell className="tabular-figures pr-4 text-right text-sm font-medium">
-                  <Signed value={ledger.openingBalance} />
+                  <Signed
+                    value={ledger.openingBalance}
+                    nature={ledger.account.nature}
+                  />
                 </TableCell>
               </TableRow>
             )}
@@ -272,7 +277,10 @@ function LedgerTable({ ledger }: { ledger: AccountLedger }) {
                     )}
                   </TableCell>
                   <TableCell className="tabular-figures pr-4 text-right align-top text-sm font-medium">
-                    <Signed value={row.running} />
+                    <Signed
+                      value={row.running}
+                      nature={ledger.account.nature}
+                    />
                   </TableCell>
                 </TableRow>
               ))
@@ -294,7 +302,10 @@ function LedgerTable({ ledger }: { ledger: AccountLedger }) {
                 })}
               </TableCell>
               <TableCell className="tabular-figures pr-4 text-right text-base font-semibold">
-                <Signed value={ledger.closingBalance} />
+                <Signed
+                  value={ledger.closingBalance}
+                  nature={ledger.account.nature}
+                />
               </TableCell>
             </TableRow>
           </TableBody>
@@ -317,8 +328,13 @@ function LedgerTable({ ledger }: { ledger: AccountLedger }) {
  * Shown as a positive figure plus Dr or Cr rather than as a negative number,
  * because that is how a ledger reads and because "−₹300" against a customer is
  * ambiguous in a way "₹300 Cr" is not.
+ *
+ * Which means the tag has to be right, and it needs the account's nature to
+ * be: these figures are signed against it, so on a credit-nature account a
+ * positive balance is a credit. Deciding from the sign alone put every row of
+ * every liability, income and capital ledger on the wrong side.
  */
-function Signed({ value }: { value: string }) {
+function Signed({ value, nature }: { value: string; nature: AccountNature }) {
   const amount = Number(value);
   if (amount === 0) return <span className="text-muted-foreground">—</span>;
 
@@ -326,7 +342,7 @@ function Signed({ value }: { value: string }) {
     <>
       {formatCurrency(Math.abs(amount))}
       <span className="ml-1 text-[0.6875rem] text-muted-foreground">
-        {amount < 0 ? "Cr" : "Dr"}
+        {balanceSideLabel({ nature, balance: value })}
       </span>
     </>
   );

@@ -3,7 +3,7 @@ import { MembershipStatus, UserStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { hashPassword } from "@/lib/auth/password";
 import { expiresAt, hashToken, issueToken, TOKEN_TTL } from "@/lib/auth/tokens";
-import { SYSTEM_ROLE } from "@/lib/rbac/permissions";
+import { SYSTEM_ROLE, type PermissionKey } from "@/lib/rbac/permissions";
 import type {
   AcceptInvitationInput,
   InviteMemberInput,
@@ -20,8 +20,9 @@ import { revokeAllSessions } from "@/server/auth/session";
  *   • A company must always retain at least one active Owner. The last one
  *     cannot be removed, suspended or demoted — by anyone, including
  *     themselves.
- *   • You cannot change your own role. Otherwise "grant myself Owner" is one
- *     request away for anyone holding `users.manage`.
+ *   • You cannot change your own role, and you cannot put anybody else into a
+ *     role holding permissions you do not hold yourself. Otherwise "grant
+ *     myself Owner" is one request away for anyone holding `users.manage`.
  *   • Only a verified email may invite. An unverified inviter could otherwise
  *     hand out access to a business they have not proven they control.
  *   • Revoking someone ends their sessions immediately, not at expiry.
@@ -160,12 +161,44 @@ export async function listPendingInvitations(
   });
 }
 
-export async function listAssignableRoles(companyId: string) {
-  return prisma.role.findMany({
+/**
+ * The roles this person can actually put somebody into.
+ *
+ * Filtered by what the caller holds, not merely by tenant, which is what the
+ * name has always claimed. `grantableBy` in `role-service` gives the reason for
+ * the role builder and it is the same reason here: a dropdown offering choices
+ * that are refused on save is a worse way to learn the rule than not offering
+ * them. The guard on the write path is what makes it safe; this is what makes
+ * it comprehensible.
+ */
+export async function listAssignableRoles(
+  companyId: string,
+  holder: ReadonlySet<PermissionKey>,
+) {
+  const roles = await prisma.role.findMany({
     where: { companyId },
-    select: { id: true, key: true, name: true, description: true },
+    select: {
+      id: true,
+      key: true,
+      name: true,
+      description: true,
+      permissions: { select: { permission: { select: { key: true } } } },
+    },
     orderBy: { name: "asc" },
   });
+
+  return roles
+    .filter((role) =>
+      role.permissions.every((entry) =>
+        holder.has(entry.permission.key as PermissionKey),
+      ),
+    )
+    .map((role) => ({
+      id: role.id,
+      key: role.key,
+      name: role.name,
+      description: role.description,
+    }));
 }
 
 /** Active owners, used by every guard that protects the last one. */
@@ -183,6 +216,68 @@ async function countActiveOwners(companyId: string): Promise<number> {
 // Invitations
 // ---------------------------------------------------------------------------
 
+/**
+ * Finds a role this company can assign, and refuses to hand out more than the
+ * person doing the assigning already has.
+ *
+ * `role-service` stops anybody *defining* a role stronger than themselves, and
+ * describes that as the whole risk of custom roles. It is half the rule.
+ * Defining a role is not how somebody gets one — assigning it is, and the six
+ * built-in roles are assignable, seeded into every company at signup, and
+ * `isSystem` so they can never be narrowed. Owner is one of them and holds
+ * every permission there is. So the guard on the role builder could be
+ * airtight and a manager with `users.manage` would still only have to pick
+ * "Owner" from the dropdown.
+ *
+ * Refusing self-promotion does not close it either. That guard stops the
+ * one-step version; it does nothing about inviting a second account at an
+ * address you control, or promoting a colleague who then promotes you. Both
+ * end with the same permissions in the same hands.
+ *
+ * Compared against the holder's set rather than against role keys, because
+ * "is this role stronger than that one" is not a question roles can answer —
+ * a custom role is an arbitrary bundle, and the built-in six are not a
+ * ladder. Permissions are the only thing that orders them. The set the actor
+ * is measured by is built from their own role's rows, and the target's from
+ * its rows, so both sides are the same kind of thing.
+ */
+async function findAssignableRole(params: {
+  companyId: string;
+  roleId: string;
+  holder: ReadonlySet<PermissionKey>;
+}): Promise<{ id: string; key: string; name: string }> {
+  const role = await prisma.role.findFirst({
+    where: { id: params.roleId, companyId: params.companyId },
+    select: {
+      id: true,
+      key: true,
+      name: true,
+      permissions: { select: { permission: { select: { key: true } } } },
+    },
+  });
+  if (!role) {
+    throw new TeamOperationError(
+      "That role does not exist.",
+      "ROLE_NOT_FOUND",
+      "roleId",
+    );
+  }
+
+  const beyond = role.permissions
+    .map((entry) => entry.permission.key)
+    .filter((key) => !params.holder.has(key as PermissionKey));
+
+  if (beyond.length > 0) {
+    throw new TeamOperationError(
+      `${role.name} carries ${beyond.length === 1 ? "a permission" : "permissions"} you do not hold yourself: ${beyond.join(", ")}. You can only give away access you have.`,
+      "ROLE_ESCALATION",
+      "roleId",
+    );
+  }
+
+  return { id: role.id, key: role.key, name: role.name };
+}
+
 export type InvitationIssued = {
   token: string;
   email: string;
@@ -199,6 +294,8 @@ export async function inviteMember(params: {
   invitedById: string;
   invitedByEmail: string;
   inviterEmailVerified: boolean;
+  /** Permissions the inviter holds. Nothing beyond these can be handed out. */
+  holder: ReadonlySet<PermissionKey>;
   input: InviteMemberInput;
   ipAddress?: string | null;
   userAgent?: string | null;
@@ -212,17 +309,11 @@ export async function inviteMember(params: {
     );
   }
 
-  const role = await prisma.role.findFirst({
-    where: { id: input.roleId, companyId },
-    select: { id: true, name: true },
+  const role = await findAssignableRole({
+    companyId,
+    roleId: input.roleId,
+    holder: params.holder,
   });
-  if (!role) {
-    throw new TeamOperationError(
-      "That role does not exist.",
-      "ROLE_NOT_FOUND",
-      "roleId",
-    );
-  }
 
   if (input.branchId) {
     const branch = await prisma.branch.findFirst({
@@ -616,6 +707,8 @@ export async function changeMemberRole(params: {
   branchId?: string | null;
   actingUserId: string;
   actorEmail: string;
+  /** Permissions the actor holds. Nothing beyond these can be handed out. */
+  holder: ReadonlySet<PermissionKey>;
   ipAddress?: string | null;
   userAgent?: string | null;
 }): Promise<void> {
@@ -633,17 +726,11 @@ export async function changeMemberRole(params: {
     );
   }
 
-  const role = await prisma.role.findFirst({
-    where: { id: params.roleId, companyId: params.companyId },
-    select: { id: true, key: true, name: true },
+  const role = await findAssignableRole({
+    companyId: params.companyId,
+    roleId: params.roleId,
+    holder: params.holder,
   });
-  if (!role) {
-    throw new TeamOperationError(
-      "That role does not exist.",
-      "ROLE_NOT_FOUND",
-      "roleId",
-    );
-  }
 
   await assertNotLastOwner(
     params.companyId,

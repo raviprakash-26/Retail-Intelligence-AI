@@ -85,8 +85,10 @@ describe("employee state insurance", () => {
       { ...FULL, providentFund: false, professionalTaxMonthly: null },
     );
 
-    expect(n(result.employeeStateInsurance)).toBeCloseTo(112.5, 4);
-    expect(n(result.employerStateInsurance)).toBeCloseTo(487.5, 4);
+    // 0.75% and 3.25% of ₹15,000 are ₹112.50 and ₹487.50, and Regulation 40
+    // takes each to the next higher rupee.
+    expect(n(result.employeeStateInsurance)).toBe(113);
+    expect(n(result.employerStateInsurance)).toBe(488);
   });
 
   it("drops out entirely above the wage limit, rather than capping", () => {
@@ -105,6 +107,98 @@ describe("employee state insurance", () => {
     expect(n(outside.employeeStateInsurance)).toBe(0);
     expect(n(outside.employerStateInsurance)).toBe(0);
     expect(ESI.wageLimit).toBe(21_000);
+  });
+});
+
+/**
+ * Whole rupees, because that is the only thing either scheme accepts.
+ *
+ * Both returns are filed in rupees — the ECR takes no paise, and neither does
+ * the ESI challan. A contribution carrying a fraction is not a contribution
+ * anybody can remit, and it goes to the payable account all the same, so the
+ * liability drifts from the payment by paise a month and the account never
+ * clears.
+ *
+ * The two schemes do not round the same way, and that is the point of doing
+ * each explicitly: ESI Regulation 40 takes every contribution to the *next
+ * higher* rupee, so ₹113.25 is ₹114 and ₹112.50 is ₹113. EPF rounds to the
+ * *nearest*, so ₹1,481.40 stays ₹1,481. Rounding both the same way would be
+ * right for one scheme and wrong for the other in the same payslip.
+ */
+describe("contributions are whole rupees", () => {
+  const esiOnly: PayrollPolicy = {
+    ...FULL,
+    providentFund: false,
+    professionalTaxMonthly: null,
+  };
+  const pfOnly: PayrollPolicy = {
+    ...FULL,
+    employeeStateInsurance: false,
+    professionalTaxMonthly: null,
+  };
+
+  it("takes ESI up to the next rupee, not to the nearest", () => {
+    // 0.75% of ₹15,100 is ₹113.25. Rounding to the nearest would give ₹113;
+    // Regulation 40 says ₹114.
+    const employee = computeStatutory(
+      { basicSalary: 15_100, allowances: 0 },
+      esiOnly,
+    );
+    expect(n(employee.employeeStateInsurance)).toBe(114);
+
+    // 3.25% of ₹10,100 is ₹328.25 — the same quarter-rupee, on the other share.
+    const employer = computeStatutory(
+      { basicSalary: 10_100, allowances: 0 },
+      esiOnly,
+    );
+    expect(n(employer.employerStateInsurance)).toBe(329);
+  });
+
+  it("leaves an ESI contribution that is already whole alone", () => {
+    // 0.75% of ₹20,000 is exactly ₹150. Rounding up is about the fraction, not
+    // about always adding a rupee.
+    const result = computeStatutory(
+      { basicSalary: 20_000, allowances: 0 },
+      esiOnly,
+    );
+    expect(n(result.employeeStateInsurance)).toBe(150);
+    expect(n(result.employerStateInsurance)).toBe(650);
+  });
+
+  it("takes EPF to the nearest rupee, in both directions", () => {
+    // 12% of ₹12,345 is ₹1,481.40 — down to ₹1,481, where rounding up would
+    // have said ₹1,482.
+    const down = computeStatutory(
+      { basicSalary: 12_345, allowances: 0 },
+      pfOnly,
+    );
+    expect(n(down.employeeProvidentFund)).toBe(1481);
+    expect(n(down.employerProvidentFund)).toBe(1481);
+
+    // 12% of ₹12,346 is ₹1,481.52 — up to ₹1,482, where truncating would have
+    // said ₹1,481.
+    const up = computeStatutory({ basicSalary: 12_346, allowances: 0 }, pfOnly);
+    expect(n(up.employeeProvidentFund)).toBe(1482);
+    expect(n(up.employerProvidentFund)).toBe(1482);
+  });
+
+  it("adds a run up to whole rupees, so the payable can be settled", () => {
+    // Three employees whose contributions each carry a fraction. What is
+    // posted to the PF and ESI liabilities has to be payable to the rupee,
+    // otherwise the account keeps a residue no remittance can ever clear.
+    const run = [12_345, 12_346, 15_100].map((basicSalary) =>
+      computeStatutory({ basicSalary, allowances: 0 }, FULL),
+    );
+    const totals = totalStatutory(run);
+
+    for (const figure of [
+      totals.employeeProvidentFund,
+      totals.employerProvidentFund,
+      totals.employeeStateInsurance,
+      totals.employerStateInsurance,
+    ]) {
+      expect(n(figure) % 1).toBe(0);
+    }
   });
 });
 

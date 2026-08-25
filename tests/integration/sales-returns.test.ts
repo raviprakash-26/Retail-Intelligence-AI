@@ -479,6 +479,89 @@ describe("what a return refuses to do", () => {
     expect(Number(remaining[0]!.returnable)).toBeCloseTo(2, 3);
   }, 90_000);
 
+  it("refuses a line named twice in the same return", async () => {
+    // Three and three against a sale of five. Neither exceeds what is
+    // outstanding on its own and the guard never adds them up, so it passes
+    // both — and the only thing that stops six of five coming back is a unique
+    // constraint on the return's line numbers, which fails as a raw database
+    // error rather than as a refusal anybody can read.
+    const fixture = await createCompany();
+    const sale = await sell(fixture, 5);
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+    });
+    const lineId = lines[0]!.lineId;
+
+    await expect(
+      createSalesReturn({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        branchId: null,
+        input: {
+          saleId: sale.id,
+          returnDate: today,
+          reason: "",
+          refundMode: "CREDIT",
+          lines: [
+            { sourceLineId: lineId, quantity: 3 },
+            { sourceLineId: lineId, quantity: 3 },
+          ],
+        },
+      }),
+    ).rejects.toThrow(ReturnError);
+
+    // Nothing came back, so the whole five is still returnable.
+    const after = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+    });
+    expect(Number(after[0]!.returnable)).toBeCloseTo(5, 3);
+  }, 90_000);
+
+  it("refuses a repeated line even when the two together fit", async () => {
+    // Two and two of five is within what is owed, and still refused. A return
+    // item carries the invoice's line number so a later return can tell which
+    // line it is drawing down, which leaves room for exactly one item per
+    // invoice line — there is nowhere to put the second. Merging them would
+    // mean quietly rewriting a request rather than answering it, so this says
+    // no in the same words the allocation guard uses for a document named
+    // twice.
+    const fixture = await createCompany();
+    const sale = await sell(fixture, 5);
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+    });
+    const lineId = lines[0]!.lineId;
+
+    await expect(
+      createSalesReturn({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        branchId: null,
+        input: {
+          saleId: sale.id,
+          returnDate: today,
+          reason: "",
+          refundMode: "CREDIT",
+          lines: [
+            { sourceLineId: lineId, quantity: 2 },
+            { sourceLineId: lineId, quantity: 2 },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({ code: "DUPLICATE_LINE" });
+
+    const after = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+    });
+    expect(Number(after[0]!.returnable)).toBeCloseTo(5, 3);
+  }, 90_000);
+
   it("will not return against a voided invoice", async () => {
     // Voiding already reversed the revenue, the tax and the stock. Returning
     // as well would reverse all three a second time.

@@ -648,8 +648,84 @@ describe("reading a balance aloud", () => {
   });
 
   it("labels the side a balance actually sits on", () => {
-    expect(balanceSideLabel("500")).toBe("Dr");
-    expect(balanceSideLabel("-500")).toBe("Cr");
-    expect(balanceSideLabel("0")).toBe("");
+    expect(balanceSideLabel({ nature: "DEBIT", balance: "500" })).toBe("Dr");
+    expect(balanceSideLabel({ nature: "DEBIT", balance: "-500" })).toBe("Cr");
+    expect(balanceSideLabel({ nature: "DEBIT", balance: "0" })).toBe("");
+  });
+
+  /**
+   * The tag has to agree with the sentence beside it.
+   *
+   * A ledger balance is signed against the account's own nature — positive
+   * means "on the side this account normally sits on". So on payables a
+   * positive figure is money the shop owes, and it sits on the *credit* side;
+   * reading the sign alone called it Dr, which on a supplier account says the
+   * supplier owes the shop. The page printed "You owe Metro Wholesale this
+   * much" and "₹30,000 Dr" one line apart, each contradicting the other, on
+   * the statement a shop would send its supplier.
+   *
+   * Backwards for every credit-nature account in the chart, which is every
+   * liability, all income, capital — and accumulated depreciation, an asset
+   * held at credit nature precisely because it is a contra.
+   */
+  it("puts a credit-nature balance on the credit side", () => {
+    // The shop owes ₹30,000. That is a credit balance on payables.
+    expect(balanceSideLabel({ nature: "CREDIT", balance: "30000" })).toBe("Cr");
+    // And an overpaid supplier leaves a debit balance.
+    expect(balanceSideLabel({ nature: "CREDIT", balance: "-30000" })).toBe(
+      "Dr",
+    );
+    expect(balanceSideLabel({ nature: "CREDIT", balance: "0" })).toBe("");
+  });
+
+  it("agrees with the sentence it is printed beside", () => {
+    // The page prints these two one line apart, so they have to say the same
+    // thing about the same balance. Money the shop is owed is a debit on a
+    // party account; money it owes is a credit.
+    const cases = [
+      {
+        type: "LIABILITY",
+        nature: "CREDIT",
+        balance: "30000",
+        sentence: "You owe Metro Wholesale this much",
+        side: "Cr",
+      },
+      {
+        type: "LIABILITY",
+        nature: "CREDIT",
+        balance: "-30000",
+        sentence: "You are in credit with Metro Wholesale",
+        side: "Dr",
+      },
+      {
+        type: "ASSET",
+        nature: "DEBIT",
+        balance: "1180",
+        sentence: "Metro Wholesale owes you this much",
+        side: "Dr",
+      },
+      {
+        type: "ASSET",
+        nature: "DEBIT",
+        balance: "-1180",
+        sentence: "Metro Wholesale is in credit with you",
+        side: "Cr",
+      },
+    ] as const;
+
+    for (const entry of cases) {
+      expect(
+        describeBalance({
+          type: entry.type,
+          nature: entry.nature,
+          balance: entry.balance,
+          partyName: "Metro Wholesale",
+        }),
+      ).toBe(entry.sentence);
+
+      expect(
+        balanceSideLabel({ nature: entry.nature, balance: entry.balance }),
+      ).toBe(entry.side);
+    }
   });
 });

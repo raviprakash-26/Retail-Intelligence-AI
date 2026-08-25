@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { SYSTEM_ROLE } from "@/lib/rbac/permissions";
+import {
+  ALL_PERMISSION_KEYS,
+  SYSTEM_ROLE,
+  type PermissionKey,
+} from "@/lib/rbac/permissions";
 import { hashToken } from "@/lib/auth/tokens";
 import { registerOwner } from "@/server/auth/registration";
 import type { RegisterInput } from "@/lib/validation/auth";
@@ -7,6 +11,7 @@ import {
   acceptInvitation,
   changeMemberRole,
   inviteMember,
+  listAssignableRoles,
   listPendingInvitations,
   listTeamMembers,
   previewInvitation,
@@ -113,13 +118,46 @@ async function createCompanyFixture(): Promise<Fixture> {
   };
 }
 
-async function invite(fixture: Fixture, roleKey: string, email: string) {
+/** The permissions a company's copy of a built-in role actually carries. */
+async function permissionsOf(
+  fixture: Fixture,
+  roleKey: string,
+): Promise<Set<PermissionKey>> {
+  const role = await prisma.role.findFirstOrThrow({
+    where: { id: fixture.roles.get(roleKey)! },
+    select: {
+      permissions: { select: { permission: { select: { key: true } } } },
+    },
+  });
+  return new Set(
+    role.permissions.map((entry) => entry.permission.key as PermissionKey),
+  );
+}
+
+/**
+ * What a custom "Office Manager" role holds: everything a Manager does, plus
+ * the ability to run the team. Exactly the role the custom-roles feature lets
+ * an owner build, and the one an escalation would start from.
+ */
+async function officeManager(fixture: Fixture): Promise<Set<PermissionKey>> {
+  const holder = await permissionsOf(fixture, SYSTEM_ROLE.MANAGER);
+  holder.add("users.manage");
+  return holder;
+}
+
+async function invite(
+  fixture: Fixture,
+  roleKey: string,
+  email: string,
+  holder?: ReadonlySet<PermissionKey>,
+) {
   return inviteMember({
     companyId: fixture.companyId,
     companyName: "Team Test Mart",
     invitedById: fixture.ownerUserId,
     invitedByEmail: fixture.ownerEmail,
     inviterEmailVerified: true,
+    holder: holder ?? new Set(ALL_PERMISSION_KEYS),
     input: {
       email,
       fullName: "Deepa Iyer",
@@ -182,6 +220,7 @@ describe("invitations", () => {
         invitedById: fixture.ownerUserId,
         invitedByEmail: fixture.ownerEmail,
         inviterEmailVerified: false,
+        holder: new Set(ALL_PERMISSION_KEYS),
         input: {
           email: newEmail("blocked"),
           fullName: "Someone",
@@ -230,6 +269,7 @@ describe("invitations", () => {
         invitedById: fixture.ownerUserId,
         invitedByEmail: fixture.ownerEmail,
         inviterEmailVerified: true,
+        holder: new Set(ALL_PERMISSION_KEYS),
         input: {
           email: newEmail("crosstenant"),
           fullName: "Someone",
@@ -240,6 +280,62 @@ describe("invitations", () => {
       }),
     ).rejects.toMatchObject({ code: "ROLE_NOT_FOUND" });
   }, 90_000);
+
+  it("refuses to invite somebody into a role stronger than the inviter's", async () => {
+    const fixture = await createCompanyFixture();
+    const holder = await officeManager(fixture);
+
+    // Owner carries billing.manage and the voids, none of which this inviter
+    // holds. Issuing the invitation would hand all of it to an address they
+    // chose, and accepting needs nothing from anybody else.
+    await expect(
+      invite(fixture, SYSTEM_ROLE.OWNER, newEmail("confederate"), holder),
+    ).rejects.toMatchObject({ code: "ROLE_ESCALATION" });
+
+    const issued = await prisma.verificationToken.count({
+      where: { companyId: fixture.companyId, purpose: "MEMBER_INVITATION" },
+    });
+    expect(issued).toBe(0);
+  }, 90_000);
+
+  it("allows inviting into a role the inviter fully holds", async () => {
+    const fixture = await createCompanyFixture();
+    const holder = await officeManager(fixture);
+
+    // Cashier is a strict subset of Manager, so nothing is being handed out
+    // that the inviter could not already do themselves.
+    const invitation = await invite(
+      fixture,
+      SYSTEM_ROLE.CASHIER,
+      newEmail("junior"),
+      holder,
+    );
+    expect(invitation.roleName).toBe("Cashier");
+  }, 90_000);
+
+  it("offers only the roles the caller could actually assign", async () => {
+    const fixture = await createCompanyFixture();
+
+    const everything = await listAssignableRoles(
+      fixture.companyId,
+      new Set(ALL_PERMISSION_KEYS),
+    );
+    expect(everything.map((role) => role.key)).toContain(SYSTEM_ROLE.OWNER);
+
+    const offered = await listAssignableRoles(
+      fixture.companyId,
+      await officeManager(fixture),
+    );
+    const keys = offered.map((role) => role.key);
+
+    // Cashier is a subset of what they hold; Owner, Accountant and Auditor all
+    // carry something they do not. Offering those would put choices in the
+    // dropdown that the write path refuses on save.
+    expect(keys).toContain(SYSTEM_ROLE.CASHIER);
+    expect(keys).not.toContain(SYSTEM_ROLE.OWNER);
+    expect(keys).not.toContain(SYSTEM_ROLE.ACCOUNTANT);
+    expect(keys).not.toContain(SYSTEM_ROLE.AUDITOR);
+  }, 60_000);
 
   it("stops a withdrawn invitation from being used", async () => {
     const fixture = await createCompanyFixture();
@@ -337,6 +433,7 @@ describe("accepting an invitation", () => {
       invitedById: second.ownerUserId,
       invitedByEmail: second.ownerEmail,
       inviterEmailVerified: true,
+      holder: new Set(ALL_PERMISSION_KEYS),
       input: {
         email: first.ownerEmail,
         fullName: "Ravi Prakash",
@@ -420,6 +517,7 @@ describe("membership guards", () => {
         roleId: fixture.roles.get(SYSTEM_ROLE.CASHIER)!,
         actingUserId: "00000000-0000-0000-0000-000000000000",
         actorEmail: "someone@example.com",
+        holder: new Set(ALL_PERMISSION_KEYS),
       }),
     ).rejects.toMatchObject({ code: "LAST_OWNER" });
   }, 60_000);
@@ -450,6 +548,7 @@ describe("membership guards", () => {
         roleId: fixture.roles.get(SYSTEM_ROLE.MANAGER)!,
         actingUserId: joined.userId,
         actorEmail: secondOwnerEmail,
+        holder: new Set(ALL_PERMISSION_KEYS),
       }),
     ).resolves.toBeUndefined();
 
@@ -480,7 +579,9 @@ describe("membership guards", () => {
     });
 
     // Self-promotion is the obvious escalation path for anyone who holds
-    // users.manage, so it is simply not possible.
+    // users.manage, so it is simply not possible. Given every permission on
+    // purpose, so the self-change guard is the only thing that can refuse this
+    // and the test cannot start passing for the escalation guard's reasons.
     await expect(
       changeMemberRole({
         companyId: fixture.companyId,
@@ -488,8 +589,48 @@ describe("membership guards", () => {
         roleId: fixture.roles.get(SYSTEM_ROLE.OWNER)!,
         actingUserId: joined.userId,
         actorEmail: email,
+        holder: new Set(ALL_PERMISSION_KEYS),
       }),
     ).rejects.toMatchObject({ code: "SELF_ROLE_CHANGE" });
+  }, 90_000);
+
+  it("refuses to promote a member into a role stronger than the actor's", async () => {
+    const fixture = await createCompanyFixture();
+    const email = newEmail("colleague");
+    const invitation = await invite(fixture, SYSTEM_ROLE.CASHIER, email);
+    const joined = await acceptInvitation({
+      input: {
+        token: invitation.token,
+        fullName: "Colleague",
+        mobile: "",
+        password: "MountainRiver42!",
+        confirmPassword: "MountainRiver42!",
+      },
+    });
+
+    const membership = await prisma.membership.findFirstOrThrow({
+      where: { userId: joined.userId, companyId: fixture.companyId },
+      select: { id: true },
+    });
+
+    // Refusing self-promotion alone settles nothing: promote a colleague to
+    // Owner and they promote you back. The actor here is a different user, so
+    // the self-change guard never fires and this is the only thing in the way.
+    await expect(
+      changeMemberRole({
+        companyId: fixture.companyId,
+        membershipId: membership.id,
+        roleId: fixture.roles.get(SYSTEM_ROLE.OWNER)!,
+        actingUserId: fixture.ownerUserId,
+        actorEmail: fixture.ownerEmail,
+        holder: await officeManager(fixture),
+      }),
+    ).rejects.toMatchObject({ code: "ROLE_ESCALATION" });
+
+    const members = await listTeamMembers(fixture.companyId);
+    expect(members.find((member) => member.email === email)?.roleKey).toBe(
+      SYSTEM_ROLE.CASHIER,
+    );
   }, 90_000);
 
   it("refuses to let anyone suspend themselves", async () => {

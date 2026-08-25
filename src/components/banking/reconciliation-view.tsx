@@ -292,7 +292,20 @@ export function ReconciliationView(props: Props) {
                         </TableCell>
                         {props.canPost && (
                           <TableCell className="text-right">
-                            <RecordButton row={row} busy={busy} onRun={run} />
+                            {/*
+                              An outstanding line can already be matched — to an
+                              entry dated after this window, which is what keeps
+                              it outstanding here. Recording it again would be a
+                              duplicate, and the action refuses it, so it is not
+                              offered.
+                            */}
+                            {row.matchedEntryId === null ? (
+                              <RecordButton row={row} busy={busy} onRun={run} />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                Matched {row.matchedEntryNumber}
+                              </span>
+                            )}
                           </TableCell>
                         )}
                       </TableRow>

@@ -35,6 +35,8 @@ export type BookMovement = {
   amount: string;
   direction: StatementDirection;
   matchedTransactionId: string | null;
+  /** When the statement line it was matched to is dated, if it is matched. */
+  matchedTransactionDate: Date | null;
 };
 
 export type StatementMovement = {
@@ -46,6 +48,8 @@ export type StatementMovement = {
   direction: StatementDirection;
   matchedEntryId: string | null;
   matchedEntryNumber: string | null;
+  /** When the entry it was matched to is dated, if it is matched. */
+  matchedEntryDate: Date | null;
   reconciledAt: Date | null;
 };
 
@@ -103,7 +107,7 @@ async function bookMovements(
           narration: true,
           referenceNo: true,
           voucherType: true,
-          bankTransactions: { select: { id: true } },
+          bankTransactions: { select: { id: true, txnDate: true } },
         },
       },
     },
@@ -127,6 +131,8 @@ async function bookMovements(
       // A debit to a bank asset is money arriving.
       direction: isDebit ? "IN" : "OUT",
       matchedTransactionId: line.journalEntry.bankTransactions[0]?.id ?? null,
+      matchedTransactionDate:
+        line.journalEntry.bankTransactions[0]?.txnDate ?? null,
     });
   }
   return movements;
@@ -160,7 +166,7 @@ async function statementMovements(
       credit: true,
       journalEntryId: true,
       reconciledAt: true,
-      journalEntry: { select: { entryNumber: true } },
+      journalEntry: { select: { entryNumber: true, entryDate: true } },
     },
   });
 
@@ -176,6 +182,7 @@ async function statementMovements(
       direction: isDebit ? ("IN" as const) : ("OUT" as const),
       matchedEntryId: row.journalEntryId,
       matchedEntryNumber: row.journalEntry?.entryNumber ?? null,
+      matchedEntryDate: row.journalEntry?.entryDate ?? null,
       reconciledAt: row.reconciledAt,
     };
   });
@@ -288,10 +295,48 @@ export async function reconciliationView(params: {
   );
 
   // What is still outstanding at the end of it, whenever it arose.
-  const unmatchedStatement = allStatement.filter(
+  //
+  // Outstanding is a question about a date, and being matched is not an answer
+  // to it. A cheque written on 28 April and paid by the bank on 5 May is an
+  // unpresented cheque as at 30 April whether or not anybody has linked it to
+  // the line that cleared it — that item is the reason a reconciliation
+  // statement exists at all.
+  //
+  // Reading it as "unmatched" instead made the two sides disagree about `to`.
+  // The balances are cumulative as at `to` and these lists are read to `to`,
+  // but matchedness was evaluated with no regard to any date: the April cheque
+  // stayed in the April book balance while dropping out of April's outstanding
+  // items the moment it was matched, and the May statement line that would
+  // have balanced it is outside every figure on the page. So April reported
+  // the whole cheque as an unexplained gap.
+  //
+  // What makes that worse than the arithmetic being off is when it happened.
+  // Before the match, April reconciled. Matching is the correct thing to do
+  // and the thing the page asks for — and it is what broke April, silently,
+  // after the month had been agreed and probably closed.
+  //
+  // So the counterpart's own date decides: matched across the boundary is
+  // still outstanding on this side of it.
+  const outstandingStatement = allStatement.filter(
+    (row) =>
+      row.matchedEntryId === null ||
+      (row.matchedEntryDate !== null && row.matchedEntryDate > params.to),
+  );
+  const outstandingBook = allBook.filter(
+    (row) =>
+      row.matchedTransactionId === null ||
+      (row.matchedTransactionDate !== null &&
+        row.matchedTransactionDate > params.to),
+  );
+
+  // Suggestions are the other question, and the one place the difference
+  // between the two matters. An item already matched to something after the
+  // window needs no suggestion — `matchTransaction` would refuse it — so these
+  // are the strictly unmatched, not the outstanding.
+  const unlinkedStatement = allStatement.filter(
     (row) => row.matchedEntryId === null,
   );
-  const unmatchedBook = allBook.filter(
+  const unlinkedBook = allBook.filter(
     (row) => row.matchedTransactionId === null,
   );
 
@@ -314,10 +359,10 @@ export async function reconciliationView(params: {
     to: params.to,
     statement,
     book,
-    unmatchedStatement,
-    unmatchedBook,
+    unmatchedStatement: outstandingStatement,
+    unmatchedBook: outstandingBook,
     suggestions: suggestMatches(
-      unmatchedStatement.map((row) => ({
+      unlinkedStatement.map((row) => ({
         id: row.id,
         date: row.txnDate,
         amount: row.amount,
@@ -325,7 +370,7 @@ export async function reconciliationView(params: {
         description: row.description,
         referenceNo: row.referenceNo,
       })),
-      unmatchedBook.map((row) => ({
+      unlinkedBook.map((row) => ({
         id: row.journalEntryId,
         date: row.entryDate,
         amount: row.amount,
@@ -337,8 +382,8 @@ export async function reconciliationView(params: {
     difference: reconciliationDifference({
       perBooks,
       perStatement,
-      unmatchedBook,
-      unmatchedStatement,
+      unmatchedBook: outstandingBook,
+      unmatchedStatement: outstandingStatement,
     }),
     neverImported: importedCount === 0,
   };

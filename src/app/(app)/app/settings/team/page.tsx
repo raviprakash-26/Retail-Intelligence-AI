@@ -27,7 +27,7 @@ export default async function TeamSettingsPage() {
     canManage
       ? listPendingInvitations(context.company.id)
       : Promise.resolve([]),
-    listAssignableRoles(context.company.id),
+    listAssignableRoles(context.company.id, context.permissions),
     prisma.branch.findMany({
       where: { companyId: context.company.id, isActive: true },
       select: { id: true, name: true },

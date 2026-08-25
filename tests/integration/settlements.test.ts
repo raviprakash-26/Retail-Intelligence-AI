@@ -19,8 +19,9 @@ import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
 import {
   createPurchase,
   listPurchases,
+  voidPurchase,
 } from "@/server/purchases/purchase-service";
-import { createSale, listSales } from "@/server/sales/sale-service";
+import { createSale, listSales, voidSale } from "@/server/sales/sale-service";
 import {
   openBills,
   openInvoices,
@@ -30,6 +31,7 @@ import {
 import {
   createPayment,
   createReceipt,
+  getPayment,
   getReceipt,
   listPayments,
   listReceipts,
@@ -805,6 +807,114 @@ describe("voiding a settlement", () => {
     });
     expect(open).toHaveLength(1);
     expect(open[0]?.outstanding).toBe(toStorageString(1180));
+
+    await assertTrialBalances(fixture.companyId);
+  });
+
+  /**
+   * Voiding an invoice somebody has already paid.
+   *
+   * The money was really received and it stays received — voiding the invoice
+   * says the sale should never have been billed, not that the cash never
+   * arrived. So the customer ends up in credit, and the general ledger says so
+   * on its own: the invoice's reversal and the receipt both credit
+   * receivables, leaving the control account at minus the amount paid.
+   *
+   * The settlement records did not agree. The allocation row survived the
+   * void, still claiming the receipt against an invoice that no longer exists,
+   * so the receipt reported itself fully applied. The control account said the
+   * shop was holding the customer's money and the subledger said every rupee
+   * of it was spoken for — and because `allocated` is what decides how much of
+   * a receipt is still available, that credit could never be put against the
+   * customer's next invoice. Real money, invisible.
+   */
+  it("frees the receipt when the invoice it paid is voided", async () => {
+    const fixture = await createCompany();
+    const sale = await raiseInvoice(fixture);
+
+    const receipt = await createReceipt({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: receiptInput({
+        partyId: fixture.customerId,
+        amount: 1180,
+        allocations: [{ documentId: sale.id, amount: 1180 }],
+      }),
+    });
+    expect(receipt.allocated).toBe(toStorageString(1180));
+
+    await voidSale({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      reason: "Billed to the wrong customer",
+    });
+
+    // The ledger's view: the shop is holding ₹1,180 of the customer's money.
+    expect(
+      await accountBalance(
+        fixture.companyId,
+        SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+      ),
+    ).toBe(toStorageString(-1180));
+
+    // And the receipt has to agree, or that credit cannot be used. `allocated`
+    // is what the list shows and what decides how much is still available.
+    const listed = await listReceipts({
+      companyId: fixture.companyId,
+      page: 1,
+    });
+    expect(listed.rows[0]?.allocated).toBe(toStorageString(0));
+
+    // The stale allocation row is what made it disagree.
+    const after = await getReceipt({
+      companyId: fixture.companyId,
+      receiptId: receipt.id,
+    });
+    expect(after.receipt.allocations).toHaveLength(0);
+
+    await assertTrialBalances(fixture.companyId);
+  });
+
+  it("frees the payment when the bill it settled is voided", async () => {
+    const fixture = await createCompany();
+    const bill = await raiseBill(fixture);
+
+    const payment = await createPayment({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: paymentInput({
+        partyId: fixture.supplierId,
+        amount: Number(bill.totalAmount),
+        allocations: [
+          { documentId: bill.id, amount: Number(bill.totalAmount) },
+        ],
+      }),
+    });
+    expect(payment.allocated).toBe(toStorageString(bill.totalAmount));
+
+    await voidPurchase({
+      companyId: fixture.companyId,
+      purchaseId: bill.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      reason: "Bill entered twice",
+    });
+
+    const listed = await listPayments({
+      companyId: fixture.companyId,
+      page: 1,
+    });
+    expect(listed.rows[0]?.allocated).toBe(toStorageString(0));
+
+    const after = await getPayment({
+      companyId: fixture.companyId,
+      paymentId: payment.id,
+    });
+    expect(after.payment.allocations).toHaveLength(0);
 
     await assertTrialBalances(fixture.companyId);
   });

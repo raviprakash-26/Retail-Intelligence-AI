@@ -720,6 +720,28 @@ export async function voidSale(params: {
         sign: -1,
       });
 
+      // --- Release what was received against it ----------------------------
+      //
+      // The money stays received. Voiding says the sale should never have been
+      // billed, not that the cash never arrived, so the receipt is untouched
+      // and the customer simply ends up in credit — which the ledger works out
+      // on its own, the reversal and the receipt both crediting receivables
+      // until the control account sits at minus what was paid.
+      //
+      // The allocation rows are the part that has to be let go. Left behind,
+      // they claim the receipt against an invoice that no longer exists, and
+      // `allocated` is a sum over them — so the receipt reports itself fully
+      // applied while the ledger says the shop is holding the customer's
+      // money. The two disagree, and because `allocated` is what decides how
+      // much of a receipt is still available, that credit can never be put
+      // against the customer's next invoice. Real money, invisible.
+      //
+      // `paidAmount` below is zeroed for the same reason and always was; this
+      // is the other half of it.
+      const released = await tx.receiptAllocation.deleteMany({
+        where: { saleId: sale.id },
+      });
+
       await tx.sale.update({
         where: { id: sale.id },
         data: {
@@ -744,6 +766,9 @@ export async function voidSale(params: {
             total: toStorageString(sale.totalAmount),
             reason: params.reason,
             reversalEntry: reversal.entryNumber,
+            // So the credit left on the customer's account is traceable to
+            // the void that created it.
+            receiptsReleased: released.count,
           },
         },
         tx,
