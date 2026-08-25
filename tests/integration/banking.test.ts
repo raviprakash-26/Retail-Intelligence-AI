@@ -742,6 +742,149 @@ describe("the reconciliation statement", () => {
     expect(after?.difference.unexplained.toString()).toBe("0");
   }, 90_000);
 
+  /**
+   * The same cheque, looked at from April — after it has been matched.
+   *
+   * Outstanding is a question about a date, and being matched is not an answer
+   * to it. A cheque written on 28 April and paid by the bank on 5 May is an
+   * unpresented cheque as at 30 April whether or not anybody has since linked
+   * it to the line that cleared it. It is the whole reason a reconciliation
+   * statement exists.
+   *
+   * Before the match, April reconciled. Matching is the correct thing to do
+   * and the thing the page asks for, and it is what breaks April: the entry
+   * drops out of the outstanding items because it is matched, while staying in
+   * the book balance because it is dated April — and the statement line that
+   * balances it is in May, outside every figure on the page. So the reconciled
+   * period silently stops reconciling, and the month it points at is the one
+   * that was already closed.
+   */
+  it("still treats an April cheque cleared in May as outstanding in April", async () => {
+    const fixture = await createCompanyWithBank();
+
+    const cheque = await postBankPayment(fixture, {
+      date: "2026-04-28",
+      amount: "7000",
+      narration: "Cheque to supplier",
+    });
+
+    await importFor(
+      fixture,
+      statementCsv([
+        { date: "05/05/2026", description: "Cheque paid", out: "7000.00" },
+      ]),
+    );
+
+    const before = await viewFor(fixture, "2026-04-01", "2026-04-30");
+    expect(before?.difference.unexplained.toString()).toBe("0");
+
+    const may = await viewFor(fixture, "2026-05-01", "2026-05-31");
+    await matchTransaction({
+      companyId: fixture.companyId,
+      bankTransactionId: may!.statement[0]!.id,
+      journalEntryId: cheque.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+
+    // Matching it must not change what April says about itself.
+    const april = await viewFor(fixture, "2026-04-01", "2026-04-30");
+    expect(april?.unmatchedBook.map((row) => row.narration)).toContain(
+      "Cheque to supplier",
+    );
+    expect(april?.difference.unexplained.toString()).toBe("0");
+  }, 90_000);
+
+  /**
+   * Outstanding and unmatched are different questions, and only one of them
+   * is a suggestion.
+   *
+   * A cheque kept outstanding in April because it cleared in May is still
+   * matched, and `matchTransaction` refuses to match anything twice. Offering
+   * it against some other April line would be a suggestion that cannot be
+   * accepted — the dropdown full of choices that fail on save. So the
+   * outstanding list and the suggestion list are drawn from different sets,
+   * and this is what says so.
+   */
+  it("does not suggest a cheque that is outstanding only because it cleared later", async () => {
+    const fixture = await createCompanyWithBank();
+
+    const cheque = await postBankPayment(fixture, {
+      date: "2026-04-28",
+      amount: "7000",
+      narration: "Cheque to supplier",
+    });
+
+    await importFor(
+      fixture,
+      statementCsv([
+        // An April payment the books have never recorded, the same size as the
+        // cheque and eight days from it — well inside the matcher's window.
+        { date: "20/04/2026", description: "Unknown debit", out: "7000.00" },
+        { date: "05/05/2026", description: "Cheque paid", out: "7000.00" },
+      ]),
+    );
+
+    const may = await viewFor(fixture, "2026-05-01", "2026-05-31");
+    await matchTransaction({
+      companyId: fixture.companyId,
+      bankTransactionId: may!.statement[0]!.id,
+      journalEntryId: cheque.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+
+    const april = await viewFor(fixture, "2026-04-01", "2026-04-30");
+
+    // It is outstanding as at 30 April …
+    expect(april?.unmatchedBook.map((row) => row.narration)).toContain(
+      "Cheque to supplier",
+    );
+    // … and it is not on offer, because it is already spoken for.
+    expect(april?.suggestions.map((entry) => entry.bookId)).not.toContain(
+      cheque.id,
+    );
+  }, 90_000);
+
+  /**
+   * And the mirror: a statement line the bank recorded before the books did.
+   *
+   * A direct debit the bank took on 29 April that the shop wrote up on 3 May.
+   * As at 30 April the bank has seen it and the books have not, which is an
+   * unrecorded item — again regardless of whether the two have been linked.
+   */
+  it("still treats an April bank line recorded in May as unrecorded in April", async () => {
+    const fixture = await createCompanyWithBank();
+
+    const written = await postBankPayment(fixture, {
+      date: "2026-05-03",
+      amount: "1200",
+      narration: "Standing instruction",
+    });
+
+    await importFor(
+      fixture,
+      statementCsv([
+        { date: "29/04/2026", description: "SI debit", out: "1200.00" },
+      ]),
+    );
+
+    const april = await viewFor(fixture, "2026-04-01", "2026-04-30");
+    await matchTransaction({
+      companyId: fixture.companyId,
+      bankTransactionId: april!.statement[0]!.id,
+      journalEntryId: written.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+
+    const after = await viewFor(fixture, "2026-04-01", "2026-04-30");
+    expect(after?.unmatchedStatement.map((row) => row.description)).toContain(
+      "SI debit",
+    );
+    expect(after?.difference.unexplained.toString()).toBe("0");
+  }, 90_000);
+
   it("offers the April cheque against the May statement line that cleared it", async () => {
     // The worse half of the same fault. If the unmatched book side is only the
     // movements inside the window, an April cheque presented in May is absent
