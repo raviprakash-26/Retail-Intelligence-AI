@@ -8,6 +8,7 @@ import {
   subtract,
   toStorageString,
   type Decimal,
+  type MoneyInput,
 } from "@/lib/money";
 import {
   daysOverdue,
@@ -385,6 +386,40 @@ async function controlAccountByParty(
   }
 
   return empty;
+}
+
+/**
+ * Money held for one party that no open document accounts for.
+ *
+ * A customer who sends ₹100 against a ₹250 invoice without saying which one has
+ * still paid ₹100. The receipt credits receivables whether or not anybody
+ * allocated it, so the ledger already knows; what it cannot do is reduce a
+ * particular invoice, because the customer did not name one.
+ *
+ * `withLedgerResidual` has always taken this off the ageing report. Anything
+ * quoting a figure to the customer needs the same number, and reaching it
+ * through the same control-account read is the point — the module already
+ * warns that three places deciding separately what a document still owes is
+ * three chances to decide differently, and a reminder is the place where
+ * deciding differently is read by somebody who kept their own records.
+ *
+ * Returns what is held, never negative: a party who owes more than the ledger
+ * shows is a residual of the other kind, and that one belongs on the ageing
+ * report as a debt rather than here as a credit.
+ */
+export async function unappliedCredit(params: {
+  companyId: string;
+  side: "RECEIVABLE" | "PAYABLE";
+  partyId: string;
+  /** What the open documents between you add up to. */
+  documented: MoneyInput;
+}): Promise<Decimal> {
+  const control = await controlAccountByParty(params.companyId, params.side);
+  const entry = control.get(params.partyId);
+  if (!entry) return money(0);
+
+  const residual = subtract(entry.balance, money(params.documented));
+  return residual.greaterThan(0) ? money(0) : residual.negated();
 }
 
 /**

@@ -11,6 +11,8 @@ import {
   paymentReminderEmail,
   reminderPreview,
 } from "@/server/settlements/payment-reminder";
+import { createReceipt } from "@/server/settlements/settlement-service";
+import { receivablesAgeing } from "@/server/settlements/outstanding";
 import {
   disconnectTestDb,
   ensurePlatformData,
@@ -225,6 +227,57 @@ describe("what the shop would be sending", () => {
     });
     expect(preview?.invoices).toEqual([]);
     expect(Number(preview?.totalOutstanding)).toBe(0);
+  }, 120_000);
+
+  /**
+   * Money paid on account, which no invoice was named for.
+   *
+   * A customer who sends ₹100 against a ₹250 invoice without saying which one
+   * has still paid ₹100. The ledger knows: the receipt credits receivables
+   * whether or not anybody allocated it, so the control account for this
+   * customer reads ₹150. The ageing report knows too — `withLedgerResidual`
+   * exists to take exactly this off the oldest debt.
+   *
+   * The reminder reads `openInvoices`, which is per-invoice arithmetic and has
+   * never seen an unallocated receipt. So the shop's own ageing says ₹150 and
+   * the email to the customer asks for ₹250.
+   *
+   * This module's opening comment sets the standard it misses: "a reminder
+   * quoting a figure the books do not carry is the fastest way to lose an
+   * argument with a customer who has kept their own records."
+   */
+  it("counts money paid on account, not just money allocated", async () => {
+    const shop = await shopWithDebt(40);
+
+    await createReceipt({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      input: {
+        kind: "CUSTOMER",
+        partyId: shop.customerId,
+        date: new Date().toISOString().slice(0, 10),
+        paymentMode: "CASH",
+        amount: 100,
+        referenceNo: "",
+        notes: "",
+        // Deliberately unallocated: the customer sent money, not instructions.
+        allocations: [],
+      },
+    });
+
+    const preview = await reminderPreview({
+      companyId: shop.companyId,
+      customerId: shop.customerId,
+    });
+    expect(Number(preview?.totalOutstanding)).toBe(150);
+
+    // And it agrees with the report the shop is looking at while it decides
+    // whether to send. Those two disagreeing is the whole defect.
+    const ageing = await receivablesAgeing(shop.companyId);
+    const theirs = ageing.parties.find((party) => party.id === shop.customerId);
+    expect(Number(theirs?.outstanding)).toBe(150);
+    expect(Number(theirs?.outstanding)).toBe(Number(preview?.totalOutstanding));
   }, 120_000);
 
   it("says nobody has been reminded yet", async () => {
