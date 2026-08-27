@@ -23,6 +23,7 @@ import {
 import {
   type Decimal,
   add,
+  compare,
   divide,
   isZero,
   money,
@@ -31,7 +32,11 @@ import {
 } from "@/lib/money";
 import type { PurchaseInput } from "@/lib/validation/purchases";
 import { postJournalEntry } from "@/server/accounting/post-journal-entry";
-import { settledByNotes } from "@/server/settlements/outstanding";
+import {
+  afterUnappliedCredit,
+  settledByNotes,
+  unappliedCreditByParty,
+} from "@/server/settlements/outstanding";
 import { recordAuditLog } from "@/server/audit/audit-log";
 import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { writeGstRows } from "@/server/documents/gst-register";
@@ -923,7 +928,14 @@ export async function listPurchases(params: {
           status: DocumentStatus.POSTED,
           paymentMode: "CREDIT",
         },
-        select: { id: true, totalAmount: true, paidAmount: true },
+        select: {
+          id: true,
+          supplierId: true,
+          billDate: true,
+          dueDate: true,
+          totalAmount: true,
+          paidAmount: true,
+        },
       }),
     ]);
 
@@ -936,16 +948,37 @@ export async function listPurchases(params: {
     documentIds: outstanding.map((purchase) => purchase.id),
     side: "PAYABLE",
   });
-  const payablesOutstanding = outstanding.reduce(
-    (running, purchase) =>
-      add(
-        running,
-        subtract(
-          purchase.totalAmount,
-          add(purchase.paidAmount, debitedByNotes.get(purchase.id) ?? money(0)),
-        ),
+  // As on the sales side: money already sent to the supplier against no bill
+  // in particular settles the debt, and no `paidAmount` moves to record it. The
+  // headline has to equal the payable account, and without this it claimed a
+  // debt the shop had already discharged.
+  const openBills = outstanding
+    .map((purchase) => ({
+      partyId: purchase.supplierId ?? "",
+      dueDate: purchase.dueDate ?? purchase.billDate,
+      outstanding: subtract(
+        purchase.totalAmount,
+        add(purchase.paidAmount, debitedByNotes.get(purchase.id) ?? money(0)),
       ),
-    money(0),
+    }))
+    .filter((row) => compare(row.outstanding, 0) > 0);
+
+  const documented = new Map<string, ReturnType<typeof money>>();
+  for (const row of openBills) {
+    if (!row.partyId) continue;
+    documented.set(
+      row.partyId,
+      add(documented.get(row.partyId) ?? money(0), row.outstanding),
+    );
+  }
+  const held = await unappliedCreditByParty({
+    companyId: params.companyId,
+    side: "PAYABLE",
+    documented,
+  });
+
+  const payablesOutstanding = add(
+    ...afterUnappliedCredit(openBills, held).map((row) => row.outstanding),
   );
 
   return {

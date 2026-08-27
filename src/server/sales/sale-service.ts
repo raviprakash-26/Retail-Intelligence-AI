@@ -22,6 +22,7 @@ import {
 import {
   type Decimal,
   add,
+  compare,
   isZero,
   money,
   subtract,
@@ -29,7 +30,11 @@ import {
 } from "@/lib/money";
 import type { SaleInput } from "@/lib/validation/sales";
 import { postJournalEntry } from "@/server/accounting/post-journal-entry";
-import { settledByNotes } from "@/server/settlements/outstanding";
+import {
+  afterUnappliedCredit,
+  settledByNotes,
+  unappliedCreditByParty,
+} from "@/server/settlements/outstanding";
 import { recordAuditLog } from "@/server/audit/audit-log";
 import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { writeGstRows } from "@/server/documents/gst-register";
@@ -899,7 +904,14 @@ export async function listSales(params: {
         status: DocumentStatus.POSTED,
         paymentMode: "CREDIT",
       },
-      select: { id: true, totalAmount: true, paidAmount: true },
+      select: {
+        id: true,
+        customerId: true,
+        invoiceDate: true,
+        dueDate: true,
+        totalAmount: true,
+        paidAmount: true,
+      },
     }),
   ]);
 
@@ -913,16 +925,40 @@ export async function listSales(params: {
     documentIds: outstanding.map((sale) => sale.id),
     side: "RECEIVABLE",
   });
-  const creditOutstanding = outstanding.reduce(
-    (running, sale) =>
-      add(
-        running,
-        subtract(
-          sale.totalAmount,
-          add(sale.paidAmount, creditedByNotes.get(sale.id) ?? money(0)),
-        ),
+  // And money the customer has sent against no invoice in particular settles
+  // it just as surely. That is not a fact about any one document, so it cannot
+  // be read off them: the receipt credits the control account and leaves every
+  // `paidAmount` where it was. Without this the headline went on claiming
+  // money already in the bank — the same fault as the credit note above, from
+  // the other side, and against the same test: this figure has to equal the
+  // receivable account or the page has drifted from the books.
+  const openCredit = outstanding
+    .map((sale) => ({
+      partyId: sale.customerId ?? "",
+      dueDate: sale.dueDate ?? sale.invoiceDate,
+      outstanding: subtract(
+        sale.totalAmount,
+        add(sale.paidAmount, creditedByNotes.get(sale.id) ?? money(0)),
       ),
-    money(0),
+    }))
+    .filter((row) => compare(row.outstanding, 0) > 0);
+
+  const documented = new Map<string, ReturnType<typeof money>>();
+  for (const row of openCredit) {
+    if (!row.partyId) continue;
+    documented.set(
+      row.partyId,
+      add(documented.get(row.partyId) ?? money(0), row.outstanding),
+    );
+  }
+  const held = await unappliedCreditByParty({
+    companyId: params.companyId,
+    side: "RECEIVABLE",
+    documented,
+  });
+
+  const creditOutstanding = add(
+    ...afterUnappliedCredit(openCredit, held).map((row) => row.outstanding),
   );
 
   return {
