@@ -816,6 +816,57 @@ describe("bills left unpaid", () => {
     expect(after).toBeCloseTo(before * 0.75, 2);
   });
 
+  /**
+   * Money the shop has actually paid, against no bill in particular.
+   *
+   * Section 43B allows the deduction on payment. A shop that sent its supplier
+   * the money has paid, whether or not anybody sat down afterwards and matched
+   * it to bill numbers — the cash left the bank and the payable was credited.
+   *
+   * Reading the bill as its total less what was allocated to it counts that
+   * money as still owed, so the working paper disallows expenditure the shop
+   * has settled and raises its taxable income by the amount. The same fault as
+   * the debit note above, and the same consequence: this list is tax, not a
+   * figure on a screen.
+   */
+  it("says nothing about a bill paid without naming it", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    const bill = await buy(fixture, 200, { date: "2026-04-10" });
+
+    await pay(fixture, {
+      date: "2026-04-11",
+      amount: Number(bill.totalAmount),
+      allocations: [],
+    });
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.unpaidBills).toHaveLength(0);
+    expect(Number(paper.flagged.unpaidBillsTotal)).toBe(0);
+  });
+
+  it("counts only the part still owed when some was paid on account", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    await buy(fixture, 200, { date: "2026-04-10" });
+
+    const before = Number(
+      (await paperFor(fixture)).flagged.unpaidBills[0]?.outstanding ?? 0,
+    );
+    await pay(fixture, {
+      date: "2026-04-11",
+      amount: before / 4,
+      allocations: [],
+    });
+
+    const paper = await paperFor(fixture);
+    expect(paper.flagged.unpaidBills).toHaveLength(1);
+    expect(Number(paper.flagged.unpaidBills[0]?.outstanding ?? 0)).toBeCloseTo(
+      before * 0.75,
+      2,
+    );
+  });
+
   it("still lists a bill nothing has gone back against", async () => {
     // The ordinary path, which the netting must not quietly clear.
     const fixture = await createCompany();

@@ -53,7 +53,11 @@ import {
   isoDay,
   type FlaggedPayment,
 } from "@/server/tax/cash-outflows";
-import { settledByNotes } from "@/server/settlements/outstanding";
+import {
+  afterUnappliedCredit,
+  settledByNotes,
+  unappliedCreditByParty,
+} from "@/server/settlements/outstanding";
 
 /**
  * The income tax working paper.
@@ -436,14 +440,22 @@ async function unpaidBills(params: {
   /** Bills younger than this at the year end are not yet in question. */
   ageDays: number;
 }): Promise<UnpaidBill[]> {
+  // Every posted bill, not only those up to the year end.
+  //
+  // What is unapplied on a supplier's account is a fact about the account, and
+  // the control balance it is measured against carries no date either. Reading
+  // a subset against an undated balance would call the difference unexplained
+  // and hand the credit to the wrong bills. Anything dated after the year end
+  // is filtered out below, once it has taken its place in the queue — last,
+  // since the credit goes to the oldest debt first.
   const purchases = await prisma.purchase.findMany({
     where: {
       companyId: params.companyId,
       status: DocumentStatus.POSTED,
-      billDate: { lte: params.to },
     },
     select: {
       id: true,
+      supplierId: true,
       billNumber: true,
       billDate: true,
       totalAmount: true,
@@ -465,30 +477,70 @@ async function unpaidBills(params: {
   // and the cash projection use. This was the fourth place deciding on its own
   // what a document still owes, and the only one where deciding wrongly costs
   // the shop tax rather than a wrong figure on a screen.
+  //
+  // Which is why it is worth naming what that fix did not cover. A debit note
+  // was only half of "settled": money paid against no bill in particular is
+  // the other half, and this read it as still owed for as long again. Both are
+  // now taken off through the functions the ageing report has always used.
   const debited = await settledByNotes(prisma, {
     companyId: params.companyId,
     documentIds: purchases.map((purchase) => purchase.id),
     side: "PAYABLE",
   });
 
-  const rows: UnpaidBill[] = [];
-  for (const purchase of purchases) {
-    const outstanding = subtract(
-      purchase.totalAmount,
-      add(purchase.paidAmount, debited.get(purchase.id) ?? money(0)),
+  const open = purchases
+    .map((purchase) => ({
+      purchase,
+      partyId: purchase.supplierId ?? "",
+      // Section 43B(h) ages from the bill, so that is the order the credit
+      // comes off in too: the oldest debt is settled first.
+      dueDate: purchase.billDate,
+      outstanding: subtract(
+        purchase.totalAmount,
+        add(purchase.paidAmount, debited.get(purchase.id) ?? money(0)),
+      ),
+    }))
+    .filter((entry) => compare(entry.outstanding, 0) > 0);
+
+  // Money the shop has actually sent, against no bill in particular.
+  //
+  // Section 43B allows the deduction on payment, and a shop that paid its
+  // supplier has paid whether or not anybody sat down afterwards and matched
+  // the money to bill numbers — the cash left the bank and the payable was
+  // credited. Counting it as still owed disallows expenditure that was
+  // settled, which raises taxable income by an amount the shop has already
+  // parted with. The debit-note reading above was the same fault; this is the
+  // other way it arrives.
+  const documented = new Map<string, Decimal>();
+  for (const entry of open) {
+    if (!entry.partyId) continue;
+    documented.set(
+      entry.partyId,
+      add(documented.get(entry.partyId) ?? money(0), entry.outstanding),
     );
-    if (compare(outstanding, 0) <= 0) continue;
+  }
+
+  const held = await unappliedCreditByParty({
+    companyId: params.companyId,
+    side: "PAYABLE",
+    documented,
+  });
+
+  const rows: UnpaidBill[] = [];
+  for (const entry of afterUnappliedCredit(open, held)) {
+    if (compare(entry.outstanding, 0) <= 0) continue;
+    if (entry.purchase.billDate.getTime() > params.to.getTime()) continue;
 
     const days = Math.floor(
-      (params.to.getTime() - purchase.billDate.getTime()) / 86_400_000,
+      (params.to.getTime() - entry.purchase.billDate.getTime()) / 86_400_000,
     );
     if (days <= params.ageDays) continue;
 
     rows.push({
-      supplierName: purchase.supplier?.name ?? "Unnamed supplier",
-      number: purchase.billNumber,
-      date: isoDay(purchase.billDate),
-      outstanding: toStorageString(outstanding),
+      supplierName: entry.purchase.supplier?.name ?? "Unnamed supplier",
+      number: entry.purchase.billNumber,
+      date: isoDay(entry.purchase.billDate),
+      outstanding: toStorageString(entry.outstanding),
       daysAtYearEnd: days,
     });
   }
