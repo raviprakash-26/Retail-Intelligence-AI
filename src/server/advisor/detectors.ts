@@ -244,11 +244,22 @@ const DETECTORS: readonly Detector[] = [
        * products where no level was set and none is wanted. It said that on
        * every visit, forever, because a discontinued product stays at nil.
        *
-       * Intent is read two ways: a reorder level the owner entered, or recent
-       * trade in the line. The second window is the same one the slow-moving
-       * check uses, so between them every held line is either moving or not.
+       * Intent is read three ways, and the plainest of them was missing. A
+       * reorder level the owner entered says they mean to keep the line; so
+       * does recent trade in it. But archiving the product says the opposite
+       * outright, and the row carries that as a flag — so a discontinued line
+       * still holding a little stock, with a reorder level set before it was
+       * retired, was reported as "at or below the reorder level you set".
+       * Telling a shop to restock something it has deliberately stopped
+       * selling is the small lie this detector exists to avoid.
+       *
+       * Only this check. `SLOW_MOVING_STOCK` reads the same rows and should go
+       * on counting a discontinued line: the money in it is tied up whether or
+       * not the shop means to sell any more of it, and that is the whole point
+       * of saying so.
        */
       const stocked = (row: StockRow): boolean => {
+        if (row.archived) return false;
         if (compare(row.minStockLevel, 0) > 0) return true;
         return (
           row.lastMovementAt !== null &&

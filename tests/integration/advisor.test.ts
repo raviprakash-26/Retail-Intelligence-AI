@@ -279,6 +279,79 @@ describe("what the advisor says about real books", () => {
     }
   }, 60_000);
 
+  /**
+   * A line the shop has discontinued.
+   *
+   * `STOCK_OUT_RISK` already refuses to nag about products nobody stocks any
+   * more, and reads intent two ways: a reorder level the owner entered, or
+   * recent trade. Neither of those notices that the owner has archived the
+   * product outright — which is the plainest statement of intent there is, and
+   * the row carries it as a flag.
+   *
+   * So a discontinued line still holding stock, with a reorder level set
+   * before it was retired, was reported as "at or below the reorder level you
+   * set". Telling a shop to restock something they have deliberately stopped
+   * selling is the small lie this detector was written to avoid.
+   */
+  it("does not ask the shop to reorder a line it has discontinued", async () => {
+    const fixture = await createCompany();
+    const { createProduct } =
+      await import("@/server/master-data/product-service");
+    const { setProductArchived } =
+      await import("@/server/master-data/product-service");
+    const { getProductTaxonomy } =
+      await import("@/server/master-data/taxonomy-service");
+
+    const taxonomy = await getProductTaxonomy(fixture.companyId);
+    const unit = taxonomy.units.find((entry) => entry.code === "PCS")!;
+    const retired = await createProduct({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        sku: "RETIRED",
+        name: "Discontinued line",
+        description: "",
+        barcode: "",
+        hsnCode: "1905",
+        categoryId: "",
+        unitId: unit.id,
+        taxRateId: taxonomy.taxRates[0]!.id,
+        purchasePrice: 60,
+        sellingPrice: 100,
+        mrp: 0,
+        isStockTracked: true,
+        // Below the level the owner set before retiring it.
+        openingQuantity: 2,
+        openingRate: 60,
+        minStockLevel: 50,
+      },
+    });
+
+    await setProductArchived({
+      companyId: fixture.companyId,
+      productId: retired.id,
+      archived: true,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+
+    const advice = await advise(fixture);
+    const stockOut = advice.suggestions.find(
+      (entry) => entry.key === "STOCK_OUT_RISK",
+    );
+    expect(stockOut).toBeUndefined();
+
+    // And it is still on the stock report, carrying its value. Silencing the
+    // reorder nag must not hide the money: `SLOW_MOVING_STOCK` reads these
+    // same rows and a discontinued line is exactly what it is for.
+    const { stockRows } = await import("@/server/inventory/inventory-report");
+    const rows = await stockRows(fixture.companyId);
+    const held = rows.find((row) => row.productId === retired.id);
+    expect(held?.archived).toBe(true);
+    expect(Number(held?.stockValue)).toBeGreaterThan(0);
+  }, 90_000);
+
   it("never sees a second business", async () => {
     const [mine, theirs] = await Promise.all([
       createCompany(),
