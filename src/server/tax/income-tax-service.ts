@@ -681,7 +681,29 @@ export async function getTaxWorkingPaper(params: {
     }),
     accountBalances({ companyId: params.companyId, from, to }),
     prisma.fixedAsset.findMany({
-      where: { companyId: params.companyId, purchaseDate: { lte: to } },
+      where: {
+        companyId: params.companyId,
+        purchaseDate: { lte: to },
+        // An asset whose purchase was voided was never bought.
+        //
+        // Voiding a capital expense reverses the ledger and marks the register
+        // inactive, and nothing here read that — so the schedule kept the cost
+        // and read the void as a *disposal for nil* instead. The two are not
+        // the same event: a disposal leaves the cost in the block, so the next
+        // asset bought into that block brings it back to life and the whole
+        // balance is depreciated. An ₹80,000 purchase voided and replaced by a
+        // real ₹50,000 one was depreciated as ₹1,30,000 — ₹32,000 of deduction
+        // on money the shop never spent, which understates the tax.
+        //
+        // Filtering on `isActive` is exact rather than approximate today: the
+        // only two things that ever touch a fixed asset are the capital
+        // expense that creates it and the void that deactivates it. There is
+        // no disposal flow, so nothing real is dropped here. When one is
+        // added, a sold asset must stay in the schedule with its proceeds —
+        // that is the case this filter would then need to tell apart, and
+        // `disposedAt` with a `disposalValue` is what would say so.
+        isActive: true,
+      },
       select: {
         id: true,
         name: true,

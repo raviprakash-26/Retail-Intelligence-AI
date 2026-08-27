@@ -621,6 +621,82 @@ describe("depreciation under the Act", () => {
     expect(block?.assets[0]?.rateInferred).toBe(true);
   });
 
+  /**
+   * A capital expense that was voided.
+   *
+   * Voiding reverses the ledger — the debit to fixed assets is gone and the
+   * books say the asset was never bought. The register is told too: the void
+   * marks the asset inactive. Nothing read that, so the schedule went on
+   * carrying the cost, and treated the void as a disposal for nil rather than
+   * as an acquisition that never happened.
+   *
+   * Which is not a harmless difference. A disposal for nil leaves the cost
+   * sitting in the block, so the next asset bought into the same block brings
+   * `live` back above zero and depreciation is charged on the whole of it —
+   * money the shop never spent, deducted from its taxable income.
+   */
+  it("forgets an asset whose purchase was voided", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    const capital = await spend(fixture, {
+      amount: 80_000,
+      paymentMode: "BANK",
+      isCapitalExpenditure: true,
+      assetName: "Billing computer",
+      payeeName: "Tech Bazaar",
+    });
+
+    const { voidExpense } = await import("@/server/expenses/expense-service");
+    await voidExpense({
+      companyId: fixture.companyId,
+      expenseId: capital.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      reason: "Booked against the wrong shop",
+    });
+
+    const paper = await paperFor(fixture);
+    expect(paper.depreciation.blocks).toHaveLength(0);
+    expect(Number(paper.depreciation.closingWdv)).toBe(0);
+    expect(Number(paper.depreciation.depreciation)).toBe(0);
+  });
+
+  it("does not depreciate a voided asset through a later purchase", async () => {
+    // The compounding case, and the one that costs tax. With the voided cost
+    // left in the block, a real purchase afterwards revives it: the block has
+    // an asset in it again, so the whole balance is depreciated.
+    const fixture = await createCompany();
+    await sell(fixture, 500);
+    const capital = await spend(fixture, {
+      amount: 80_000,
+      paymentMode: "BANK",
+      isCapitalExpenditure: true,
+      assetName: "Billing computer",
+      payeeName: "Tech Bazaar",
+    });
+
+    const { voidExpense } = await import("@/server/expenses/expense-service");
+    await voidExpense({
+      companyId: fixture.companyId,
+      expenseId: capital.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      reason: "Booked against the wrong shop",
+    });
+
+    await spend(fixture, {
+      amount: 50_000,
+      paymentMode: "BANK",
+      isCapitalExpenditure: true,
+      assetName: "Replacement computer",
+      payeeName: "Tech Bazaar",
+    });
+
+    const paper = await paperFor(fixture);
+    // 40% of the ₹50,000 actually spent, and of nothing else.
+    expect(Number(paper.depreciation.depreciation)).toBeCloseTo(20_000, 2);
+  });
+
   it("charges half the rate on an asset bought late in the year", async () => {
     const fixture = await createCompany();
     await sell(fixture, 500);
