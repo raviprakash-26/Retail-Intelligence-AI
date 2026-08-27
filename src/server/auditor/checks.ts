@@ -22,6 +22,7 @@ import { getTrialBalance } from "@/server/accounting/trial-balance-service";
 import { getGstWorkingPaper } from "@/server/gst/gst-return-service";
 import { reconcileStock } from "@/server/inventory/inventory-report";
 import {
+  afterUnappliedCredit,
   settledByNotes,
   unappliedCreditByParty,
 } from "@/server/settlements/outstanding";
@@ -615,7 +616,8 @@ async function checkLongOverdue(context: CheckContext): Promise<Finding[]> {
   const open = invoices
     .map((sale) => ({
       sale,
-      due: sale.dueDate ?? sale.invoiceDate,
+      partyId: sale.customerId ?? "",
+      dueDate: sale.dueDate ?? sale.invoiceDate,
       outstanding: subtract(
         sale.totalAmount,
         add(sale.paidAmount, credited.get(sale.id) ?? money(0)),
@@ -648,24 +650,11 @@ async function checkLongOverdue(context: CheckContext): Promise<Finding[]> {
   // settling. Overdue invoices are the oldest by construction — an invoice is
   // overdue precisely because its due date is behind the others — so the
   // credit reaches them before anything still within terms.
-  const remaining = new Map(held);
-  const stillOwed = [...open]
-    .sort((a, b) => a.due.getTime() - b.due.getTime())
-    .map((entry) => {
-      const partyId = entry.sale.customerId ?? "";
-      const credit = remaining.get(partyId);
-      if (!credit || !credit.greaterThan(0)) return entry;
-
-      const taken = entry.outstanding.greaterThan(credit)
-        ? credit
-        : entry.outstanding;
-      remaining.set(partyId, subtract(credit, taken));
-      return { ...entry, outstanding: subtract(entry.outstanding, taken) };
-    })
+  const stillOwed = afterUnappliedCredit(open, held)
     .filter(
       (entry) =>
         compare(entry.outstanding, 0) > 0 &&
-        entry.due.getTime() < cutoff.getTime(),
+        entry.dueDate.getTime() < cutoff.getTime(),
     )
     .sort(
       (a, b) => a.sale.invoiceDate.getTime() - b.sale.invoiceDate.getTime(),
