@@ -180,7 +180,21 @@ async function loadBalances(params: {
       from: params.from,
       to: params.to,
       branchId: params.branchId ?? null,
+      // The year's own closing entry is not trading, and read as movement it
+      // erases the year it settles: revenue credited across twelve months and
+      // debited once on the last day nets to nil. So closing a year emptied
+      // its own profit and loss account — and with it the book profit the
+      // income tax working paper is built on, which read nil turnover and nil
+      // taxable income for a year the shop had traded through. Closing happens
+      // at the year end and the return is filed after it, so the figure was
+      // destroyed exactly when it came to be needed.
+      excludeClosingEntries: true,
     }),
+    // Positions keep it. The balance sheet is drawn from these and depends on
+    // the transfer having happened: with the income accounts zeroed,
+    // `earnedToDate` falls to nil of its own accord and retained earnings
+    // carries the amount instead. Excluding it here would count the year's
+    // profit twice.
     accountBalances({
       companyId: params.companyId,
       to: params.to,

@@ -3,6 +3,7 @@ import {
   AccountNature,
   type AccountType,
   JournalStatus,
+  VoucherType,
   type Prisma,
   type AccountSubType,
   type StatementSection,
@@ -85,6 +86,22 @@ export type BalanceWindow = {
   to?: Date | null;
   /** Restrict to one branch. Omit for the whole business. */
   branchId?: string | null;
+  /**
+   * Leave year-end closing entries out of the movement.
+   *
+   * A closing entry transfers the year's income and expenses into retained
+   * earnings, which means it moves those accounts by the whole of their
+   * balances. Read as period movement it cancels the year exactly: revenue
+   * credited through the year and debited once at the end nets to nil, so the
+   * moment a year is closed its own profit and loss account reads empty.
+   *
+   * Positions want it and movement does not. The balance sheet is drawn from
+   * cumulative balances and *relies* on the transfer having happened — that is
+   * what stops the profit being counted once in the income accounts and again
+   * in retained earnings. So this is an option rather than a rule, and the
+   * statements engine sets it for the trading and profit-and-loss reads only.
+   */
+  excludeClosingEntries?: boolean;
 };
 
 type Totals = { debit: Decimal; credit: Decimal };
@@ -104,6 +121,7 @@ async function movements(params: {
   to?: Date | null;
   branchId?: string | null;
   accountIds?: readonly string[];
+  excludeClosingEntries?: boolean;
 }): Promise<Map<string, Totals>> {
   const where: Prisma.JournalLineWhereInput = {
     companyId: params.companyId,
@@ -128,6 +146,14 @@ async function movements(params: {
     // query tells the two apart, and no caller passed a branch, so nothing
     // ever did. The trial balance and statements suites now do.
     ...(params.branchId ? { journalEntry: { branchId: params.branchId } } : {}),
+    ...(params.excludeClosingEntries
+      ? {
+          journalEntry: {
+            ...(params.branchId ? { branchId: params.branchId } : {}),
+            voucherType: { not: VoucherType.CLOSING_ENTRY },
+          },
+        }
+      : {}),
   };
 
   const rows = await prisma.journalLine.groupBy({
@@ -240,6 +266,7 @@ export async function accountBalances(
       from: window.from,
       to: window.to,
       branchId: window.branchId,
+      excludeClosingEntries: window.excludeClosingEntries,
     }),
   ]);
 
