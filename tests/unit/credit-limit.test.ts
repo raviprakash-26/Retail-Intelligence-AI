@@ -2,109 +2,126 @@ import { globSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /**
- * The credit limit is recorded, not enforced — and the form now says so.
+ * The credit limit is enforced on credit sales, and the form says so.
  *
- * It is captured on the customer form, validated, read out of a CSV column with
- * its own synonyms, stored, and shown in the party list. Nothing else touches
- * it. No posting path selects it; a credit invoice that takes a customer to
- * twice their limit is accepted without a word.
- *
- * What made that a defect rather than an unbuilt feature is that the form said
- * otherwise. Under the box it read:
+ * It was not, for as long as it had existed. The field was captured on the
+ * customer form, validated, read out of a CSV column with its own synonyms,
+ * stored, and shown in the party list — and consulted by nothing. No posting
+ * path selected it. A credit invoice that took a customer to twice their limit
+ * was accepted without a word, while the form said:
  *
  *   > 0 means no limit is enforced.
  *
- * — which tells a shopkeeper, in as many words, that a non-zero one is. Someone
- * typing ₹50,000 against a customer was being told the software would stop
- * them, and it never would. This module has a rule about that, in the AI
- * provider's own words: a thing that is switched off is better said than
- * faked.
+ * — which tells a shopkeeper, in as many words, that a non-zero one is.
  *
- * Two ways to make it true, and they are different products. A hard refusal on
- * a credit invoice over the limit, or a warning beside the stock shortages the
- * invoice form already lists without blocking. Whichever is chosen, the figure
- * to test against is what the customer owes *after* money paid on account, and
- * that has one definition already — `unappliedCredit` and
- * `afterUnappliedCredit` in `server/settlements/outstanding`.
- *
- * So this does not assert that the field is unused for ever. It asserts that
- * the claim and the behaviour move together: the day a posting path reads
- * `creditLimit`, this fails, and whoever wired it is sent to the sentence under
- * the box.
+ * The previous version of this file held the *opposite* claim: that the field
+ * was recorded and read by nothing, with the copy saying so. It did its job
+ * when the enforcement landed — both halves failed at once and named
+ * `sale-service.ts` and the sentence under the box. The claim has moved, so the
+ * file moves with it, and the pairing is the part that stays: whatever the form
+ * promises, something has to keep.
  */
 
+/** The copy under the box, whitespace collapsed. */
+function description(): string {
+  const form = readFileSync(
+    "src/components/master-data/party-manager.tsx",
+    "utf8",
+  );
+  const at = form.indexOf('name="creditLimit"');
+  expect(at).toBeGreaterThan(-1);
+  return form.slice(at, at + 1200).replace(/\s+/g, " ");
+}
+
+describe("what the form promises about a credit limit", () => {
+  it("is that an invoice over it is refused", () => {
+    expect(description()).toMatch(/refused/i);
+    // The two things a shopkeeper has to know beyond that, because both change
+    // what they do: nought is not a limit of nought, and a counter sale is
+    // never blocked by one.
+    expect(description()).toMatch(/0 means no limit/i);
+    expect(description()).toMatch(/[Cc]ash sales/);
+  });
+
+  it("is kept by the one path that raises an invoice", () => {
+    // A promise on the form and no reader in the service is the state this
+    // whole pairing exists to catch — it is what was shipped, and it is what
+    // the previous version of this file recorded.
+    const sale = readFileSync("src/server/sales/sale-service.ts", "utf8");
+
+    expect(sale).toContain("creditLimit: true");
+    expect(sale).toContain("CREDIT_LIMIT_EXCEEDED");
+  });
+
+  it("is tested against the figure every other page quotes", () => {
+    // Not a fresh calculation. `owedByParty` is the control account's balance
+    // for the customer, which is what the ageing report, the reminder and the
+    // customer statement all show — so a refusal can be argued with by looking
+    // at any of them.
+    const sale = readFileSync("src/server/sales/sale-service.ts", "utf8");
+    expect(sale).toContain("owedByParty(tx, {");
+
+    const outstanding = readFileSync(
+      "src/server/settlements/outstanding.ts",
+      "utf8",
+    );
+    expect(outstanding).toContain("export async function owedByParty");
+    // Through the same control-account read the ageing residual uses, rather
+    // than a second query that could drift from it.
+    expect(outstanding).toMatch(
+      /owedByParty[\s\S]{0,600}controlAccountByParty\(/,
+    );
+  });
+});
+
 /**
- * Where the field legitimately appears while it is only recorded.
+ * Where the field may be read without deciding anything.
  *
- * Writing it down, reading it back for a list, validating it and importing it
- * are all storage. Enforcement is a posting path consulting it before deciding
- * what a document may be.
+ * Storing it, listing it, validating it and importing it are not enforcement.
+ * `sale-service` is the one path that acts on it, and it is named rather than
+ * pattern-matched so that a *second* path acting on it has to be added here
+ * deliberately — two places deciding what a customer may be trusted with is how
+ * they come to decide differently.
  */
-const RECORDING: Record<string, string> = {
+const READERS: Record<string, string> = {
   "src/server/master-data/party-service.ts":
-    "Writes the field and reads it back for the party list. The doc comment on `PartyRow.creditLimit` is where the boundary is stated.",
+    "Writes the field and reads it back for the party list. The doc comment on `PartyRow.creditLimit` states what it now does.",
   "src/server/import/import-service.ts":
     "Reads the column out of a CSV into the same input the form submits.",
   "src/lib/validation/master-data.ts": "The field's own schema.",
   "src/lib/import/datasets.ts":
     "The column's header synonyms, so a spreadsheet that calls it 'limit' still lands here.",
+  "src/server/sales/sale-service.ts":
+    "Enforces it. The only path that refuses on the strength of it.",
 };
 
 const FIELD = /\bcreditLimit\b/;
 
-function readers(): string[] {
-  const found: string[] = [];
-  for (const file of globSync("src/{server,lib}/**/*.ts", {
-    cwd: process.cwd(),
-  })) {
-    if (file in RECORDING) continue;
-    const source = readFileSync(file, "utf8");
-    for (const [index, line] of source.split("\n").entries()) {
-      // The rule described is not the rule broken.
-      if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue;
-      if (FIELD.test(line)) found.push(`${file}:${index + 1}`);
-    }
-  }
-  return found;
-}
-
-describe("the credit limit", () => {
+describe("who reads a credit limit", () => {
   it("has enough server files for this to mean anything", () => {
-    // A glob that stops matching would make the check below vacuously true.
     const files = globSync("src/{server,lib}/**/*.ts", { cwd: process.cwd() });
     expect(files.length).toBeGreaterThan(100);
   });
 
-  it("is read by nothing that decides what a document may be", () => {
-    // If this fails, the field has grown a reader. That is welcome — and the
-    // sentence under the box in `party-manager.tsx` has to stop saying nothing
-    // stops an invoice, because now something does.
-    expect(readers()).toEqual([]);
+  it("is nobody beyond the places named here", () => {
+    const found: string[] = [];
+    for (const file of globSync("src/{server,lib}/**/*.ts", {
+      cwd: process.cwd(),
+    })) {
+      if (file in READERS) continue;
+      const source = readFileSync(file, "utf8");
+      for (const [index, line] of source.split("\n").entries()) {
+        // The rule described is not the rule broken.
+        if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue;
+        if (FIELD.test(line)) found.push(`${file}:${index + 1}`);
+      }
+    }
+
+    expect(found).toEqual([]);
   });
 
-  it("says as much on the form that captures it", () => {
-    const form = readFileSync(
-      "src/components/master-data/party-manager.tsx",
-      "utf8",
-    );
-
-    // Whitespace collapsed first: the sentence is wrapped across source lines
-    // and re-wrapped by the formatter whenever a word changes, so matching the
-    // raw text would be a test of where Prettier put the newline.
-    const field = form.indexOf('name="creditLimit"');
-    expect(field).toBeGreaterThan(-1);
-    const description = form.slice(field, field + 1200).replace(/\s+/g, " ");
-
-    // The exact sentence matters less than what it cannot claim: the old copy
-    // turned on the word "enforced", and a field nothing reads must not use it.
-    expect(description).not.toMatch(/enforced/i);
-    expect(description).toMatch(/Nothing stops an invoice/i);
-  });
-
-  it("keeps the recording list honest", () => {
-    // An entry for a file that no longer mentions the field is a claim nobody
-    // has checked in a while.
-    const stale = Object.keys(RECORDING).filter(
+  it("keeps the list honest", () => {
+    const stale = Object.keys(READERS).filter(
       (file) => !FIELD.test(readFileSync(file, "utf8")),
     );
 

@@ -670,8 +670,9 @@ function PartyDialog({
                         />
                       </FormControl>
                       <FormDescription>
-                        Recorded against the customer for reference. Nothing
-                        stops an invoice that takes them over it.
+                        A credit invoice that would take this customer past it
+                        is refused. 0 means no limit. Cash sales are never
+                        affected.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
