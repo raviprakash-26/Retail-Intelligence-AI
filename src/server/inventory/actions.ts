@@ -29,6 +29,7 @@ import {
   StockAdjustmentError,
   type PostedAdjustment,
 } from "./adjustment-service";
+import { postingBranchId } from "@/server/company/posting-branch";
 
 /**
  * Stock adjustment actions.
@@ -107,23 +108,25 @@ export async function bookQuantityAction(
   productId: string,
 ): Promise<{ quantity: string; averageCost: string; stockValue: string }> {
   const context = await assertPermission("inventory.adjust");
-  const [company, primary] = await Promise.all([
+  const [company, branchId] = await Promise.all([
     prisma.company.findUniqueOrThrow({
       where: { id: context.company.id },
       select: { inventoryMethod: true },
     }),
-    prisma.branch.findFirst({
-      where: { companyId: context.company.id, isPrimary: true },
-      select: { id: true },
+    // The same branch the adjustment will post against, so the figure shown
+    // beside the count box is the one it will be compared with. This reader
+    // had the rule right while the sales form did not, which is the reason it
+    // is now one function rather than a habit.
+    postingBranchId(prisma, {
+      companyId: context.company.id,
+      memberBranchId: context.membership.branchId,
     }),
   ]);
 
-  // The same branch the adjustment will post against, so the figure shown
-  // beside the count box is the one it will be compared with.
   return readBookQuantity({
     companyId: context.company.id,
     productId,
-    branchId: context.membership.branchId ?? primary?.id ?? null,
+    branchId,
     method: company.inventoryMethod as InventoryMethod,
   });
 }
