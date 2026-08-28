@@ -15,6 +15,7 @@ import { recordAuditLog } from "@/server/audit/audit-log";
 import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
+import { CURRENT_EMPLOYEE_STATUSES } from "@/server/master-data/employee-service";
 
 /**
  * Running payroll.
@@ -134,6 +135,21 @@ export function periodLabel(year: number, month: number): string {
  * Joining or leaving *during* the month still puts somebody on the run. What
  * they are owed for a part-month is a proration question this does not answer
  * and should not silently decide by dropping them.
+ *
+ * The same was true of status, one category over. Selecting on ACTIVE alone
+ * dropped everybody on leave — and somebody on leave has not left, which is
+ * why the staff list counts them as current and asks for `includeFormer`
+ * before hiding them. So they were on the team page and absent from the
+ * payroll: no payslip, no salary posted, no deduction, and nothing said about
+ * it. `CURRENT_EMPLOYEE_STATUSES` is that list's own definition, shared rather
+ * than restated.
+ *
+ * What this still does not do is pay somebody whose status has already been
+ * moved to RESIGNED or TERMINATED for the part of the month they worked. The
+ * exit date is what records leaving and the window above reads it, but once
+ * the status has been changed they drop out regardless. Final settlement is a
+ * flow this product does not have, and inventing one here — deciding what a
+ * leaver is owed — is not something to do quietly in a `where` clause.
  */
 function employedDuring(year: number, month: number) {
   const monthStart = new Date(Date.UTC(year, month - 1, 1));
@@ -213,7 +229,11 @@ export async function previewPayroll(params: {
   const [policy, employees, existing] = await Promise.all([
     payrollPolicy(companyId),
     prisma.employee.findMany({
-      where: { companyId, status: "ACTIVE", ...employedDuring(year, month) },
+      where: {
+        companyId,
+        status: { in: [...CURRENT_EMPLOYEE_STATUSES] },
+        ...employedDuring(year, month),
+      },
       select: {
         id: true,
         employeeCode: true,
@@ -316,7 +336,11 @@ export async function createPayrollRun(params: {
 
       const policy = await payrollPolicy(companyId);
       const employees = await tx.employee.findMany({
-        where: { companyId, status: "ACTIVE", ...employedDuring(year, month) },
+        where: {
+          companyId,
+          status: { in: [...CURRENT_EMPLOYEE_STATUSES] },
+          ...employedDuring(year, month),
+        },
         select: {
           id: true,
           basicSalary: true,

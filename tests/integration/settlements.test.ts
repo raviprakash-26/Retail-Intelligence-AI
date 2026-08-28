@@ -1207,6 +1207,67 @@ describe("what a credit note does to the ageing", () => {
   }, 90_000);
 
   /**
+   * The same headline, against money paid on account.
+   *
+   * The credit-note case above fixed half of what settled means and the tests
+   * beside it assert the half that matters: the page has to agree with the
+   * control account. An unallocated receipt breaks that the same way — the
+   * money is in the bank, receivables are down by it, and a headline computed
+   * from the invoices alone goes on claiming it.
+   *
+   * It is the figure a shopkeeper reads to know what is owed to them, on the
+   * page they open most.
+   */
+  it("stops claiming money the customer has already sent", async () => {
+    const fixture = await createCompany();
+    await raiseInvoice(fixture);
+
+    await createReceipt({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: receiptInput({
+        partyId: fixture.customerId,
+        amount: 400,
+        allocations: [],
+      }),
+    });
+
+    const receivable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_RECEIVABLE,
+    );
+    const list = await listSales({ companyId: fixture.companyId });
+    expect(Number(list.creditOutstanding)).toBeCloseTo(Number(receivable), 2);
+  }, 90_000);
+
+  it("stops claiming money already sent to a supplier", async () => {
+    const fixture = await createCompany();
+    await raiseBill(fixture);
+
+    await createPayment({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: paymentInput({
+        partyId: fixture.supplierId,
+        amount: 400,
+        allocations: [],
+      }),
+    });
+
+    const payable = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.ACCOUNTS_PAYABLE,
+    );
+    const list = await listPurchases({ companyId: fixture.companyId });
+    expect(Number(list.payablesOutstanding)).toBeCloseTo(
+      Math.abs(Number(payable)),
+      2,
+    );
+  }, 90_000);
+
+  /**
    * The figure on the sales page, which is the same question asked again.
    *
    * "On credit" is what customers still owe on invoices, and it was computed

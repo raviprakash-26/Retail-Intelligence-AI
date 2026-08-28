@@ -581,6 +581,72 @@ describe("tenant isolation", () => {
  * floor rather than a prediction — the interface says so in those words — and a
  * floor that counts money nobody is going to send is the one a shop walks off.
  */
+/**
+ * Money already received, against no invoice in particular.
+ *
+ * The credit-note block above is the same question about goods. This is the
+ * one about cash, and it is worse, because the money is not merely absent from
+ * the future — it is already present in the opening balance. Counting the
+ * invoice at full value as well puts the same rupee in the projection twice,
+ * on the optimistic side of a figure the product calls a floor.
+ */
+describe("the cash projection against money paid on account", () => {
+  const iso = TODAY.toISOString().slice(0, 10);
+
+  const receiptsDue = (projection: { weeks: Array<{ receiptsDue: string }> }) =>
+    projection.weeks.reduce(
+      (total, week) => total + Number(week.receiptsDue),
+      0,
+    );
+
+  async function payOnAccount(fixture: Fixture, amount: number) {
+    const { createReceipt } =
+      await import("@/server/settlements/settlement-service");
+    await createReceipt({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        kind: "CUSTOMER",
+        partyId: fixture.customerId,
+        date: iso,
+        paymentMode: "CASH",
+        amount,
+        referenceNo: "",
+        notes: "",
+        allocations: [],
+      },
+    });
+  }
+
+  it("stops expecting money that has already arrived", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, { date: iso, amount: 10_000 });
+
+    const before = await cashFor(fixture);
+    expect(receiptsDue(before)).toBeCloseTo(10_000, 2);
+
+    await payOnAccount(fixture, 4_000);
+
+    const after = await cashFor(fixture);
+    // The ₹4,000 is in the opening balance now, so only ₹6,000 is still to
+    // come. Expecting ₹10,000 as well would count it twice.
+    expect(Number(after.openingCash) - Number(before.openingCash)).toBeCloseTo(
+      4_000,
+      2,
+    );
+    expect(receiptsDue(after)).toBeCloseTo(6_000, 2);
+  }, 90_000);
+
+  it("expects nothing further once the account is square", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, { date: iso, amount: 10_000 });
+    await payOnAccount(fixture, 10_000);
+
+    expect(receiptsDue(await cashFor(fixture))).toBeCloseTo(0, 2);
+  }, 90_000);
+});
+
 describe("the cash projection against credit notes", () => {
   const iso = TODAY.toISOString().slice(0, 10);
 

@@ -42,6 +42,7 @@ function preview(overrides: Partial<ReminderPreview> = {}): ReminderPreview {
         daysOverdue: 0,
       },
     ],
+    creditOnAccount: "0",
     totalOutstanding: "16800.0000",
     totalOverdue: "12500.0000",
     oldestOverdueDays: 76,
@@ -156,6 +157,47 @@ describe("when nothing is overdue", () => {
       preview: nothingLate,
     });
     expect(sent.text).not.toContain("Of which past due");
+  });
+});
+
+/**
+ * A customer who has sent money without saying which invoice it was for.
+ *
+ * The statement has to show it. Netting it silently into a smaller total
+ * leaves them holding a payment they can see in their own records and a figure
+ * from the shop that does not mention it — which is exactly the argument this
+ * module was written to avoid.
+ */
+describe("when they have paid on account", () => {
+  const paidSome = preview({
+    creditOnAccount: "5000.0000",
+    totalOutstanding: "11800.0000",
+    totalOverdue: "7500.0000",
+  });
+
+  it("says what was invoiced and what was received", () => {
+    const sent = paymentReminderEmail({
+      to: "accounts@sharma.example",
+      supplierName: "Ravi Retail Mart",
+      preview: paidSome,
+    });
+
+    // The invoices still add to 16,800; the payment is named, not absorbed.
+    expect(sent.text).toContain("Invoiced: ₹16,800.00");
+    expect(sent.text).toContain(
+      "Less payment received, not yet applied to an invoice: ₹5,000.00",
+    );
+    expect(sent.text).toContain("Total outstanding: ₹11,800.00");
+  });
+
+  it("says nothing about it when there is none", () => {
+    const sent = paymentReminderEmail({
+      to: "accounts@sharma.example",
+      supplierName: "Ravi Retail Mart",
+      preview: preview(),
+    });
+    expect(sent.text).not.toContain("Less payment received");
+    expect(sent.text).not.toContain("Invoiced:");
   });
 });
 

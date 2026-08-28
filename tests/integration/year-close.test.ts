@@ -251,9 +251,18 @@ describe("closing a financial year", () => {
       to: isoDay(shop.to),
     });
 
-    // Income and expenses are back to nil: the year has been settled.
-    expect(Number(after.trading.revenueTotal)).toBe(0);
-    expect(Number(after.profitAndLoss.expensesTotal)).toBe(0);
+    // The year's own profit and loss account still reports the year. Closing
+    // settles where the result sits; it does not unmake the trading, and the
+    // income tax working paper is built on this figure — a return is filed
+    // after the year end, which is to say after the close.
+    expect(Number(after.trading.revenueTotal)).toBe(
+      Number(before.trading.revenueTotal),
+    );
+    expect(Number(after.profitAndLoss.netProfit)).toBe(Number(profit));
+
+    // What the close moves is the balance sheet: nothing is left sitting in
+    // the income accounts to be counted as equity, because retained earnings
+    // now carries it.
     expect(Number(after.balanceSheet.earningsToDate)).toBe(0);
 
     // And retained earnings now carries exactly what was earned.
@@ -276,6 +285,45 @@ describe("closing a financial year", () => {
     const net =
       Number(lines[0]?._sum.credit ?? 0) - Number(lines[0]?._sum.debit ?? 0);
     expect(net).toBeCloseTo(Number(profit), 2);
+  }, 120_000);
+
+  /**
+   * The year's own tax computation has to survive its close.
+   *
+   * A return is filed after the year end, which is to say after the year has
+   * been closed — the two acts are days apart and in that order. The working
+   * paper is built on the book profit the statements engine reports, so when
+   * closing emptied the profit and loss account it emptied the computation
+   * with it: nil turnover, nil book profit, nil taxable income, for a year the
+   * shop had traded through and owed tax on.
+   */
+  it("leaves the year's tax computation intact", async () => {
+    const shop = await shopReadyToClose();
+    const { getTaxWorkingPaper } =
+      await import("@/server/tax/income-tax-service");
+
+    const before = await getTaxWorkingPaper({
+      companyId: shop.companyId,
+      fiscalYearId: shop.yearId,
+    });
+    expect(Number(before?.turnover)).toBeGreaterThan(0);
+    expect(Number(before?.bookNetProfit)).toBeGreaterThan(0);
+
+    await closeEveryMonth(shop);
+    await closeFiscalYear({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      fiscalYearId: shop.yearId,
+    });
+
+    const after = await getTaxWorkingPaper({
+      companyId: shop.companyId,
+      fiscalYearId: shop.yearId,
+    });
+    expect(Number(after?.turnover)).toBe(Number(before?.turnover));
+    expect(Number(after?.bookNetProfit)).toBe(Number(before?.bookNetProfit));
+    expect(Number(after?.taxableIncome)).toBe(Number(before?.taxableIncome));
   }, 120_000);
 
   it("leaves the books balanced and equity unmoved", async () => {
@@ -821,7 +869,8 @@ describe("months inside a closed year", () => {
 
   it("keeps the settled year settled", async () => {
     // The defect this guards, stated as the shop would see it: a year that has
-    // been closed reports nil income, and must still report nil afterwards.
+    // been closed reports a settled result, and must still report the same one
+    // after somebody has tried to prise a month of it back open.
     const { shop, trading } = await shopWithClosedYear();
 
     const revenue = async () =>
@@ -835,7 +884,8 @@ describe("months inside a closed year", () => {
         ).trading.revenueTotal,
       );
 
-    expect(await revenue()).toBe(0);
+    const settled = await revenue();
+    expect(settled).toBeGreaterThan(0);
 
     await expect(
       reopenPeriod({
@@ -849,7 +899,7 @@ describe("months inside a closed year", () => {
 
     // Nothing can be posted into it, so the year's result cannot drift away
     // from the retained earnings the closing entry already moved.
-    expect(await revenue()).toBe(0);
+    expect(await revenue()).toBe(settled);
     const year = await prisma.fiscalYear.findUniqueOrThrow({
       where: { id: shop.yearId },
       select: { closedAt: true },
@@ -1089,7 +1139,10 @@ describe("an account retired between one close and the next", () => {
     await closeYear(shop);
 
     const after = await statementsFor(shop);
-    expect(Number(after.profitAndLoss.expensesTotal)).toBe(0);
+    // The expense still belongs to the year it was incurred in; what the close
+    // settles is the balance sheet, and nothing is left in the income accounts
+    // for it to count as equity a second time.
+    expect(Number(after.profitAndLoss.expensesTotal)).toBeGreaterThan(0);
     expect(Number(after.balanceSheet.earningsToDate)).toBe(0);
     expect(after.balanceSheet.balanced).toBe(true);
   }, 120_000);

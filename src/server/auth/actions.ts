@@ -1,4 +1,5 @@
 "use server";
+import { logger } from "@/lib/observability/logger";
 
 import { redirect } from "next/navigation";
 import { UserStatus } from "@prisma/client";
@@ -418,7 +419,7 @@ export async function registerAction(
       );
     }
 
-    console.error("Registration failed", error);
+    logger.error("Registration failed", { module: "Auth", error });
     return fail(
       "We could not create your account. Nothing was saved — please try again.",
       { code: ACTION_ERROR.UNEXPECTED },

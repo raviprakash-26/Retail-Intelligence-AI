@@ -8,6 +8,7 @@ import {
   subtract,
   toStorageString,
   type Decimal,
+  type MoneyInput,
 } from "@/lib/money";
 import {
   daysOverdue,
@@ -388,6 +389,105 @@ async function controlAccountByParty(
 }
 
 /**
+ * Money held for one party that no open document accounts for.
+ *
+ * A customer who sends ₹100 against a ₹250 invoice without saying which one has
+ * still paid ₹100. The receipt credits receivables whether or not anybody
+ * allocated it, so the ledger already knows; what it cannot do is reduce a
+ * particular invoice, because the customer did not name one.
+ *
+ * `withLedgerResidual` has always taken this off the ageing report. Anything
+ * quoting a figure to the customer needs the same number, and reaching it
+ * through the same control-account read is the point — the module already
+ * warns that three places deciding separately what a document still owes is
+ * three chances to decide differently, and a reminder is the place where
+ * deciding differently is read by somebody who kept their own records.
+ *
+ * Returns what is held, never negative: a party who owes more than the ledger
+ * shows is a residual of the other kind, and that one belongs on the ageing
+ * report as a debt rather than here as a credit.
+ */
+export async function unappliedCredit(params: {
+  companyId: string;
+  side: "RECEIVABLE" | "PAYABLE";
+  partyId: string;
+  /** What the open documents between you add up to. */
+  documented: MoneyInput;
+}): Promise<Decimal> {
+  const held = await unappliedCreditByParty({
+    companyId: params.companyId,
+    side: params.side,
+    documented: new Map([[params.partyId, money(params.documented)]]),
+  });
+  return held.get(params.partyId) ?? money(0);
+}
+
+/**
+ * The same question for many parties at once, in one read of the control
+ * account.
+ *
+ * A party absent from `documented` is absent from the answer: both callers ask
+ * about people they already have documents for, and a party carrying a credit
+ * and no open document is not somebody either of them is about to quote a
+ * figure to.
+ */
+export async function unappliedCreditByParty(params: {
+  companyId: string;
+  side: "RECEIVABLE" | "PAYABLE";
+  documented: ReadonlyMap<string, Decimal>;
+}): Promise<Map<string, Decimal>> {
+  const held = new Map<string, Decimal>();
+  if (params.documented.size === 0) return held;
+
+  const control = await controlAccountByParty(params.companyId, params.side);
+  for (const [partyId, documented] of params.documented) {
+    const entry = control.get(partyId);
+    if (!entry) continue;
+    const residual = subtract(entry.balance, documented);
+    if (residual.greaterThan(0)) continue;
+    held.set(partyId, residual.negated());
+  }
+  return held;
+}
+
+/**
+ * Takes each party's on-account credit off their own debts, oldest first.
+ *
+ * Oldest first is what the rest of the product means by settling: money goes
+ * against the debt that has been waiting longest. Nothing crosses between
+ * parties — one customer's credit can never reduce another's debt — and a
+ * credit larger than the debts simply runs out, leaving them at nil rather
+ * than negative.
+ *
+ * Shared because three readers now need it and they must agree: the ageing
+ * report, the auditor's long-overdue check, and the cash projection. Each one
+ * of them quotes a figure somebody acts on — chasing a customer, or deciding
+ * whether next month's wages will clear.
+ */
+export function afterUnappliedCredit<
+  T extends { partyId: string; dueDate: Date; outstanding: Decimal },
+>(documents: readonly T[], held: ReadonlyMap<string, Decimal>): T[] {
+  if (held.size === 0) return documents.map((document) => ({ ...document }));
+
+  const remaining = new Map(held);
+  return [...documents]
+    .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
+    .map((document) => {
+      const credit = remaining.get(document.partyId);
+      if (!credit || !credit.greaterThan(0)) return { ...document };
+
+      const taken = document.outstanding.greaterThan(credit)
+        ? credit
+        : document.outstanding;
+      remaining.set(document.partyId, subtract(credit, taken));
+      return {
+        ...document,
+        outstanding: subtract(document.outstanding, taken),
+      };
+    });
+}
+
+/**
  * Adds the part of each party's balance that no document explains.
  *
  * Positive where something was brought on outside a document — an opening
@@ -455,10 +555,10 @@ async function withLedgerResidual(
   // to come *off this party's own debt* rather than join the list. `summarise`
   // drops a non-positive row deliberately, so that one customer's credit cannot
   // net away another's debt — right for documents, and the reason an advance
-  // cannot simply be appended here. It is applied oldest first, which is what
-  // the rest of this module means by settling: money goes against the debt that
-  // has been waiting longest.
-  const reduced = documents.map((document) => ({ ...document }));
+  // cannot simply be appended here. Anything left over after their own debts
+  // are cleared is a party in net credit: they owe nothing, and the remainder
+  // stays out of the total rather than reducing somebody else's.
+  const held = new Map<string, Decimal>();
   const rows: typeof documents = [];
 
   for (const entry of residuals) {
@@ -471,25 +571,10 @@ async function withLedgerResidual(
       });
       continue;
     }
-
-    let advance = subtract(money(0), entry.balance);
-    const theirs = reduced
-      .filter((document) => document.partyId === entry.partyId)
-      .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
-
-    for (const document of theirs) {
-      if (!advance.greaterThan(0)) break;
-      const taken = document.outstanding.greaterThan(advance)
-        ? advance
-        : document.outstanding;
-      document.outstanding = subtract(document.outstanding, taken);
-      advance = subtract(advance, taken);
-    }
-    // Anything still left is a party in net credit. They owe nothing, and the
-    // credit stays out of the total rather than reducing somebody else's debt.
+    held.set(entry.partyId, entry.balance.negated());
   }
 
-  return [...reduced, ...rows];
+  return [...afterUnappliedCredit(documents, held), ...rows];
 }
 
 /** Receivables: who owes the business, and how overdue each of them is. */

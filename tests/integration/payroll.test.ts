@@ -488,6 +488,58 @@ describe("who is on a run", () => {
     expect(Number(preview.totals.gross)).toBe(0);
   }, 90_000);
 
+  /**
+   * Somebody on leave is still employed.
+   *
+   * `ON_LEAVE` is one of the four statuses an employee can hold, and the staff
+   * list treats it as current — `includeFormer` has to be asked for before a
+   * person on leave is hidden, because they have not left. Payroll selected on
+   * `status: "ACTIVE"` alone, so they vanished from the run: no payslip, no
+   * salary posted, no deduction, and nothing said about it.
+   *
+   * Not a smaller figure. Absent — which is how it goes unnoticed until
+   * somebody on maternity or medical leave asks why they were not paid.
+   */
+  it("pays somebody who is on leave", async () => {
+    const fixture = await createCompany({ providentFund: true });
+    const employee = await hire(fixture, "Anita Rao", 10_000, 0, {
+      joiningDate: "2025-04-01",
+    });
+
+    const { updateEmployee } =
+      await import("@/server/master-data/employee-service");
+    await updateEmployee({
+      companyId: fixture.companyId,
+      employeeId: employee.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        name: "Anita Rao",
+        email: "",
+        phone: "",
+        department: "",
+        designation: "Sales assistant",
+        joiningDate: "2025-04-01",
+        exitDate: "",
+        status: "ON_LEAVE",
+        basicSalary: 10_000,
+        allowances: 0,
+        panNumber: "",
+        bankAccountNo: "",
+        ifsc: "",
+      },
+    });
+
+    const preview = await previewPayroll({
+      companyId: fixture.companyId,
+      year: 2026,
+      month: 6,
+    });
+
+    expect(preview.payslips).toHaveLength(1);
+    expect(Number(preview.totals.gross)).toBe(10_000);
+  }, 90_000);
+
   it("leaves out somebody who had already left", async () => {
     // The exit date is recorded when notice is given, which is before the
     // status is moved off ACTIVE — so for a while both are true of the record.

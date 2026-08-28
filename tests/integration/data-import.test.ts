@@ -162,6 +162,66 @@ describe("looking before writing", () => {
     expect(issue?.message).toContain("CRATE");
   }, 60_000);
 
+  /**
+   * A price somebody mistyped.
+   *
+   * `parseNumber` returns null for anything it cannot read, and every caller
+   * turned that into nought — so a cost of "12O0", with a letter where a zero
+   * belongs, became a product costing nothing. It imports cleanly, and from
+   * then on every sale of that line shows a hundred per cent margin, the
+   * auditor calls it sold below cost, and the stock is valued at nil.
+   *
+   * The principle is already written down one function away, about booleans:
+   * "a column somebody filled with 'maybe' should stop the row, not quietly
+   * become 'no'." A number is the same. Blank still means nought — that is a
+   * person saying there is no figure, rather than a person getting one wrong.
+   */
+  it("stops a row whose number cannot be read, rather than calling it nought", async () => {
+    const fixture = await createCompany();
+    const preview = await look(
+      fixture,
+      "products",
+      `SKU,Name,Unit,Cost Price\nA-1,Good row,PCS,240\nB-2,Typo row,PCS,12O0\n`,
+    );
+
+    expect(preview.ready).toBe(false);
+    expect(preview.counts.error).toBe(1);
+    const issue = preview.issues[0];
+    expect(issue?.row).toBe(3);
+    expect(issue?.column).toBe("purchasePrice");
+    expect(issue?.message).toContain("12O0");
+  }, 60_000);
+
+  it("still reads a blank number as nought", async () => {
+    // The other half, and the reason this cannot simply refuse every null: an
+    // empty cell is a person saying there is no figure.
+    const fixture = await createCompany();
+    const preview = await look(
+      fixture,
+      "products",
+      `SKU,Name,Unit,Cost Price\nA-1,No cost given,PCS,\n`,
+    );
+
+    expect(preview.ready).toBe(true);
+    expect(preview.counts.error).toBe(0);
+  }, 60_000);
+
+  it("stops a customer whose opening balance cannot be read", async () => {
+    // The one that matters most: an opening balance is not a figure stored on
+    // a record, it posts a balanced entry against opening capital. Read as
+    // nought, a debt the shop is owed disappears from the books entirely.
+    const fixture = await createCompany();
+    const preview = await look(
+      fixture,
+      "customers",
+      `Name,State Code,Opening Balance\nSharma Store,29,12500\nAnand Stores,29,1O500\n`,
+    );
+
+    expect(preview.ready).toBe(false);
+    expect(preview.counts.error).toBe(1);
+    expect(preview.issues[0]?.column).toBe("openingBalance");
+  }, 60_000);
+
   it("counts the row a person would see, not the row after the blank line", async () => {
     // A spreadsheet with a gap in it still has to report the line somebody can
     // open the file and go to. Dropping blanks before numbering silently

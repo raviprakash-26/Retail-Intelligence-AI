@@ -21,7 +21,11 @@ import {
   NATURAL_SIDE_FOR_TYPE,
   type AccountBalance,
 } from "@/server/accounting/balances";
-import { settledByNotes } from "@/server/settlements/outstanding";
+import {
+  afterUnappliedCredit,
+  settledByNotes,
+  unappliedCreditByParty,
+} from "@/server/settlements/outstanding";
 
 /**
  * What the cash position looks like over the next few weeks.
@@ -159,65 +163,117 @@ async function latenessInDays(params: {
  * the projection is offered as a floor rather than a prediction, and a floor
  * that counts money nobody is going to send is the one a shop walks off.
  *
- * `settledByNotes` is the same function the ageing report and the allocation
- * cap use, for the same reason they share it — three places deciding
- * separately what a document still owes is three chances to decide differently.
+ * Money already received against no invoice in particular was the same fault
+ * again, and worse here than anywhere it has been found. Elsewhere an
+ * unapplied receipt merely overstates what is owed; here the money is already
+ * sitting in the cash and bank balance this projection opens at, so counting
+ * the invoice at full value puts the same rupee in twice. It reads as more
+ * cash than the shop has, in the figure somebody uses to decide whether next
+ * month's wages will clear, on a page that calls itself a floor.
+ *
+ * `settledByNotes`, `unappliedCreditByParty` and `afterUnappliedCredit` are
+ * the same functions the ageing report and the auditor use, for the same
+ * reason they share them — several places deciding separately what a document
+ * still owes is several chances to decide differently, and this module has now
+ * been on the wrong end of that twice.
  */
 async function dueSchedule(params: {
   companyId: string;
   kind: "receivable" | "payable";
 }): Promise<DueRow[]> {
-  if (params.kind === "receivable") {
-    const sales = await prisma.sale.findMany({
-      where: { companyId: params.companyId, status: DocumentStatus.POSTED },
-      select: {
-        id: true,
-        invoiceDate: true,
-        dueDate: true,
-        totalAmount: true,
-        paidAmount: true,
-      },
-    });
-    const credited = await settledByNotes(prisma, {
-      companyId: params.companyId,
-      documentIds: sales.map((sale) => sale.id),
-      side: "RECEIVABLE",
-    });
-    return sales
-      .map((sale) => ({
-        dueDate: sale.dueDate ?? sale.invoiceDate,
-        outstanding: subtract(
-          sale.totalAmount,
-          add(sale.paidAmount, credited.get(sale.id) ?? money(0)),
-        ),
-      }))
-      .filter((row) => compare(row.outstanding, 0) > 0);
-  }
+  const side = params.kind === "receivable" ? "RECEIVABLE" : "PAYABLE";
 
-  const purchases = await prisma.purchase.findMany({
-    where: { companyId: params.companyId, status: DocumentStatus.POSTED },
-    select: {
-      id: true,
-      billDate: true,
-      dueDate: true,
-      totalAmount: true,
-      paidAmount: true,
-    },
-  });
-  const debited = await settledByNotes(prisma, {
+  const rows =
+    params.kind === "receivable"
+      ? (
+          await prisma.sale.findMany({
+            where: {
+              companyId: params.companyId,
+              status: DocumentStatus.POSTED,
+            },
+            select: {
+              id: true,
+              customerId: true,
+              invoiceDate: true,
+              dueDate: true,
+              totalAmount: true,
+              paidAmount: true,
+            },
+          })
+        ).map((sale) => ({
+          id: sale.id,
+          partyId: sale.customerId ?? "",
+          dueDate: sale.dueDate ?? sale.invoiceDate,
+          total: sale.totalAmount,
+          paid: sale.paidAmount,
+        }))
+      : (
+          await prisma.purchase.findMany({
+            where: {
+              companyId: params.companyId,
+              status: DocumentStatus.POSTED,
+            },
+            select: {
+              id: true,
+              supplierId: true,
+              billDate: true,
+              dueDate: true,
+              totalAmount: true,
+              paidAmount: true,
+            },
+          })
+        ).map((purchase) => ({
+          id: purchase.id,
+          partyId: purchase.supplierId ?? "",
+          dueDate: purchase.dueDate ?? purchase.billDate,
+          total: purchase.totalAmount,
+          paid: purchase.paidAmount,
+        }));
+
+  const settled = await settledByNotes(prisma, {
     companyId: params.companyId,
-    documentIds: purchases.map((purchase) => purchase.id),
-    side: "PAYABLE",
+    documentIds: rows.map((row) => row.id),
+    side,
   });
-  return purchases
-    .map((purchase) => ({
-      dueDate: purchase.dueDate ?? purchase.billDate,
+
+  const open = rows
+    .map((row) => ({
+      partyId: row.partyId,
+      dueDate: row.dueDate,
       outstanding: subtract(
-        purchase.totalAmount,
-        add(purchase.paidAmount, debited.get(purchase.id) ?? money(0)),
+        row.total,
+        add(row.paid, settled.get(row.id) ?? money(0)),
       ),
     }))
     .filter((row) => compare(row.outstanding, 0) > 0);
+
+  // Money already received against no invoice in particular — or already paid
+  // against no bill.
+  //
+  // This is worse here than anywhere else it has been missed. The money is not
+  // merely absent from the future: a receipt sitting unallocated is already in
+  // the cash and bank balance this projection opens at, so counting the
+  // invoice at full value puts the same rupee in twice. On the receivable side
+  // that overstates the cash a shop will have, in a figure the page calls a
+  // floor and somebody reads to decide whether wages will clear.
+  const documented = new Map<string, Decimal>();
+  for (const row of open) {
+    if (!row.partyId) continue;
+    documented.set(
+      row.partyId,
+      add(documented.get(row.partyId) ?? money(0), row.outstanding),
+    );
+  }
+
+  const held = await unappliedCreditByParty({
+    companyId: params.companyId,
+    side,
+    documented,
+  });
+
+  return afterUnappliedCredit(open, held).filter(
+    (row) => compare(row.outstanding, 0) > 0,
+  );
 }
 
 /**

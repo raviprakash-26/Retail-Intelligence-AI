@@ -1,4 +1,5 @@
 "use server";
+import { logger } from "@/lib/observability/logger";
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
@@ -72,7 +73,7 @@ function fromServiceError(error: unknown): ActionResult<never> {
   ) {
     return fail(error.message, { code: "PERIOD_UNAVAILABLE" });
   }
-  console.error("Settlement action failed", error);
+  logger.error("Settlement action failed", { module: "Settlements", error });
   return fail(
     "Something went wrong. Nothing was recorded — please try again.",
     {

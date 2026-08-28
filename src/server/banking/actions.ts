@@ -1,4 +1,5 @@
 "use server";
+import { logger } from "@/lib/observability/logger";
 
 import { revalidatePath } from "next/cache";
 import {
@@ -68,7 +69,7 @@ function fromServiceError(error: unknown): ActionResult<never> {
   ) {
     return fail(error.message, { code: "PERIOD_UNAVAILABLE" });
   }
-  console.error("Banking action failed", error);
+  logger.error("Banking action failed", { module: "Banking", error });
   return fail("Something went wrong. Nothing was changed — please try again.", {
     code: ACTION_ERROR.UNEXPECTED,
   });

@@ -1,9 +1,10 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { add } from "@/lib/money";
+import { add, max, money, subtract, toStorageString } from "@/lib/money";
 import { formatCurrency, formatDate } from "@/lib/format";
 import {
   openInvoices,
+  unappliedCredit,
   type OpenDocument,
 } from "@/server/settlements/outstanding";
 import type { EmailMessage } from "@/server/email/mailer";
@@ -40,6 +41,15 @@ export type ReminderPreview = {
   customer: { id: string; name: string; email: string | null };
   /** Everything unpaid, oldest due first — overdue and not yet due alike. */
   invoices: OpenDocument[];
+  /**
+   * Money received from them that no invoice was named for.
+   *
+   * Shown rather than quietly netted off the invoices: the customer knows they
+   * sent it, and a statement that swallows it into a smaller number is one
+   * they cannot check against their own records.
+   */
+  creditOnAccount: string;
+  /** What the invoices come to, less anything paid on account. */
   totalOutstanding: string;
   totalOverdue: string;
   oldestOverdueDays: number;
@@ -66,16 +76,34 @@ export async function reminderPreview(params: {
     asOf: params.asOf,
   });
 
-  let outstanding = "0";
-  let overdue = "0";
+  let invoiced = money(0);
+  let overdue = money(0);
   let oldest = 0;
   for (const invoice of invoices) {
-    outstanding = add(outstanding, invoice.outstanding).toString();
+    invoiced = add(invoiced, invoice.outstanding);
     if (invoice.daysOverdue > 0) {
-      overdue = add(overdue, invoice.outstanding).toString();
+      overdue = add(overdue, invoice.outstanding);
       oldest = Math.max(oldest, invoice.daysOverdue);
     }
   }
+
+  // Money they have sent that no invoice was named for. The ledger has always
+  // known about it and the ageing report has always subtracted it; this is the
+  // figure the customer is quoted, and it was the one place still adding up
+  // invoices as though the payment had not arrived.
+  const credit = await unappliedCredit({
+    companyId: params.companyId,
+    side: "RECEIVABLE",
+    partyId: params.customerId,
+    documented: invoiced,
+  });
+
+  // Taken off what is overdue first, because that is the debt it would have
+  // been allocated to and the figure the reminder leads with. Neither total
+  // goes below nil — a customer in credit is owed money, not owing a negative
+  // amount, and saying so is a conversation rather than a reminder.
+  const outstanding = max(subtract(invoiced, credit), 0);
+  overdue = max(subtract(overdue, credit), 0);
 
   // Read off the activity log rather than a column: the log is append-only and
   // already records every send, and a second place to record it is a second
@@ -93,8 +121,9 @@ export async function reminderPreview(params: {
   return {
     customer: { ...customer, email: customer.email?.trim() || null },
     invoices,
-    totalOutstanding: outstanding,
-    totalOverdue: overdue,
+    creditOnAccount: toStorageString(credit),
+    totalOutstanding: toStorageString(outstanding),
+    totalOverdue: toStorageString(overdue),
     oldestOverdueDays: oldest,
     lastRemindedAt: last?.createdAt ?? null,
   };
@@ -108,6 +137,13 @@ export async function reminderPreview(params: {
  * often not the person who received the message, and a URL they cannot open is
  * a reason to put it aside.
  */
+/** What the invoices themselves come to, before anything paid on account. */
+function sumOutstanding(preview: ReminderPreview): string {
+  return toStorageString(
+    add(...preview.invoices.map((invoice) => invoice.outstanding)),
+  );
+}
+
 export function paymentReminderEmail(params: {
   to: string;
   supplierName: string;
@@ -141,6 +177,18 @@ export function paymentReminderEmail(params: {
       "UNPAID INVOICES",
       ...rows,
       "",
+      // Stated on its own line rather than folded into the total. They know
+      // they sent it, and a statement they cannot reconcile against their own
+      // records is the one that starts the argument.
+      ...(Number(preview.creditOnAccount) > 0
+        ? [
+            `Invoiced: ${formatCurrency(
+              rows.length === 0 ? 0 : sumOutstanding(preview),
+            )}`,
+            `Less payment received, not yet applied to an invoice: ${formatCurrency(preview.creditOnAccount)}`,
+            "",
+          ]
+        : []),
       `Total outstanding: ${formatCurrency(preview.totalOutstanding)}`,
       ...(overdue
         ? [`Of which past due: ${formatCurrency(preview.totalOverdue)}`]
