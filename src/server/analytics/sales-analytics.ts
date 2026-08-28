@@ -371,6 +371,30 @@ const WEEKDAYS = [
  * Every weekday is returned, including the ones with nothing on them — a
  * missing Tuesday would read as a formatting quirk, where an empty Tuesday
  * reads as a fact about the business.
+ *
+ * **A return is carried back to the day of the sale it undoes**, and this is
+ * the one breakdown where that matters. The other three net a return against
+ * the same dimension the sale carried — the product, the customer, the
+ * category — and those are identical on both documents, so taking the return
+ * on its own date lands it in the right bucket. Here the dimension *is* the
+ * date. A Tuesday sale returned on Thursday would take value off Thursday and
+ * leave Tuesday standing at full, which reports the wrong strongest day twice
+ * over.
+ *
+ * So both halves are windowed on the sale's own date, and a return of a sale
+ * from before the window does not appear at all: the question this answers is
+ * what the trade done on each weekday *in this period* came to, once what came
+ * back is taken off it. A return whose sale has since been deleted carries no
+ * date to attribute it to and is dropped by the join.
+ *
+ * This ran gross of returns, while the three breakdowns beside it ran net. The
+ * panel is titled "Which days earn" and names a strongest day as a fact, so a
+ * shop whose biggest Tuesday came back was being told the wrong one.
+ *
+ * The bill count does not fall, for the reason `customerPerformance` gives
+ * about its own: the customer was invoiced, and a count that dropped when
+ * goods came back would say a shop had served somebody fewer times than it
+ * did.
  */
 export async function weekdayPattern(params: {
   companyId: string;
@@ -378,14 +402,26 @@ export async function weekdayPattern(params: {
   to: Date;
 }): Promise<WeekdayPattern[]> {
   const rows = await prisma.$queryRaw<WeekdayRow[]>`
-    SELECT EXTRACT(DOW FROM s."invoiceDate")::int AS weekday,
-           SUM(s."taxableAmount")                 AS revenue,
-           COUNT(*)::int                          AS bills
-    FROM sales s
-    WHERE s."companyId" = ${params.companyId}::uuid
-      AND s.status = 'POSTED'
-      AND s."invoiceDate" >= ${params.from}
-      AND s."invoiceDate" <= ${params.to}
+    SELECT EXTRACT(DOW FROM d.sold_on)::int AS weekday,
+           SUM(d.taxable)                  AS revenue,
+           SUM(d.bill)::int                AS bills
+    FROM (
+      SELECT s."invoiceDate" AS sold_on, s."taxableAmount" AS taxable, 1 AS bill
+        FROM sales s
+       WHERE s."companyId" = ${params.companyId}::uuid
+         AND s.status = 'POSTED'
+         AND s."invoiceDate" >= ${params.from}
+         AND s."invoiceDate" <= ${params.to}
+      UNION ALL
+      SELECT s."invoiceDate", -r."taxableAmount", 0
+        FROM sales_returns r
+        JOIN sales s ON s.id = r."saleId"
+       WHERE r."companyId" = ${params.companyId}::uuid
+         AND r.status = 'POSTED'
+         AND s.status = 'POSTED'
+         AND s."invoiceDate" >= ${params.from}
+         AND s."invoiceDate" <= ${params.to}
+    ) d
     GROUP BY 1
   `;
 
