@@ -450,6 +450,22 @@ function buildProduct(
     };
   }
 
+  // Read the numeric cells first, so an unreadable one names its own column
+  // rather than becoming nought inside the object below.
+  const numbers: Record<string, number> = {};
+  for (const field of [
+    "purchasePrice",
+    "sellingPrice",
+    "mrp",
+    "openingQuantity",
+    "openingRate",
+    "minStockLevel",
+  ]) {
+    const value = numberCell(raw, field);
+    if (typeof value !== "number") return value;
+    numbers[field] = value;
+  }
+
   const input = {
     sku: raw.sku ?? "",
     name: raw.name ?? "",
@@ -459,22 +475,59 @@ function buildProduct(
     categoryId: category?.id ?? "",
     unitId: unit.id,
     taxRateId: taxRate?.id ?? "",
-    purchasePrice: parseNumber(raw.purchasePrice ?? "") ?? 0,
-    sellingPrice: parseNumber(raw.sellingPrice ?? "") ?? 0,
-    mrp: parseNumber(raw.mrp ?? "") ?? 0,
+    purchasePrice: numbers.purchasePrice!,
+    sellingPrice: numbers.sellingPrice!,
+    mrp: numbers.mrp!,
     isStockTracked: true,
-    openingQuantity: parseNumber(raw.openingQuantity ?? "") ?? 0,
+    openingQuantity: numbers.openingQuantity!,
+    // An opening rate left blank falls back to what the goods cost, which is
+    // what they are worth on the shelf.
     openingRate:
-      parseNumber(raw.openingRate ?? "") ??
-      parseNumber(raw.purchasePrice ?? "") ??
-      0,
-    minStockLevel: parseNumber(raw.minStockLevel ?? "") ?? 0,
+      (raw.openingRate ?? "").trim() === ""
+        ? numbers.purchasePrice!
+        : numbers.openingRate!,
+    minStockLevel: numbers.minStockLevel!,
   };
 
   const parsed = productSchema.safeParse(input);
   if (!parsed.success) return fromZod(parsed.error);
 
   return { key: input.sku, label: `${input.sku} — ${input.name}`, input };
+}
+
+/**
+ * A number a person typed, or the reason the row cannot be brought in.
+ *
+ * Blank and unreadable are different answers and were treated as one. Every
+ * numeric cell went through `parseNumber(...) ?? 0`, so "12O0" — a letter
+ * where a zero belongs, which is what a scanner or a hurried hand produces —
+ * arrived as a product costing nothing. It imports cleanly and stays wrong:
+ * every sale of that line then shows a hundred per cent margin, the auditor
+ * calls it sold below cost, and the stock is valued at nil.
+ *
+ * The principle is already written down one module away, about booleans — "a
+ * column somebody filled with 'maybe' should stop the row, not quietly become
+ * 'no'". A number is the same, and the preview exists precisely so a person
+ * sees the row and the column before anything is written.
+ *
+ * Blank still means nought. That is somebody saying there is no figure, which
+ * is not the same as somebody getting one wrong.
+ */
+function numberCell(
+  raw: Record<string, string>,
+  field: string,
+): number | { error: string; column: string } {
+  const text = (raw[field] ?? "").trim();
+  if (text === "") return 0;
+
+  const value = parseNumber(text);
+  if (value === null) {
+    return {
+      error: `"${text}" is not a number this can read.`,
+      column: field,
+    };
+  }
+  return value;
 }
 
 /**
@@ -512,7 +565,15 @@ function stateCodeFrom(value: string): string | null {
 }
 
 function buildParty(raw: Record<string, string>, dataset: DatasetKey): Built {
-  const opening = parseNumber(raw.openingBalance ?? "") ?? 0;
+  // The opening balance matters most of all of these: it is not a figure on a
+  // record, it posts a balanced journal entry against opening capital. A
+  // mistyped one read as nought silently loses a debt the shop is owed.
+  const openingCell = numberCell(raw, "openingBalance");
+  if (typeof openingCell !== "number") return openingCell;
+  const opening = openingCell;
+
+  const creditDays = numberCell(raw, "creditDays");
+  if (typeof creditDays !== "number") return creditDays;
 
   const stateCode = stateCodeFrom(raw.stateCode ?? "");
   if (stateCode === null) {
@@ -532,7 +593,7 @@ function buildParty(raw: Record<string, string>, dataset: DatasetKey): Built {
     city: raw.city ?? "",
     stateCode,
     pincode: raw.pincode ?? "",
-    creditDays: parseNumber(raw.creditDays ?? "") ?? 0,
+    creditDays,
     // A negative opening is the other side of the ledger, which the form
     // expresses as a nature rather than a sign.
     openingBalance: Math.abs(opening),
@@ -548,7 +609,9 @@ function buildParty(raw: Record<string, string>, dataset: DatasetKey): Built {
   };
 
   if (dataset === "customers") {
-    input.creditLimit = parseNumber(raw.creditLimit ?? "") ?? 0;
+    const creditLimit = numberCell(raw, "creditLimit");
+    if (typeof creditLimit !== "number") return creditLimit;
+    input.creditLimit = creditLimit;
   }
 
   const schema = dataset === "customers" ? customerSchema : supplierSchema;
