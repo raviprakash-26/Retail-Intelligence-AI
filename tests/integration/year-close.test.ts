@@ -31,6 +31,7 @@ import {
 } from "@/server/accounting/year-close-service";
 import { getFinancialStatements } from "@/server/accounting/statements-service";
 import { getTrialBalance } from "@/server/accounting/trial-balance-service";
+import { getCashProjection } from "@/server/forecast/cash-projection";
 import { resolveFiscalYear } from "@/server/fiscal/fiscal-service";
 import {
   disconnectTestDb,
@@ -215,6 +216,18 @@ async function closeEveryMonth(shop: Shop): Promise<void> {
 
 const isoDay = (date: Date) => date.toISOString().slice(0, 10);
 
+/** One of the accounts every chart is provisioned with, by its key. */
+async function systemAccount(
+  companyId: string,
+  systemKey: string,
+): Promise<string> {
+  const account = await prisma.account.findFirstOrThrow({
+    where: { companyId, systemKey },
+    select: { id: true },
+  });
+  return account.id;
+}
+
 beforeAll(async () => {
   await ensurePlatformData();
 }, 60_000);
@@ -323,6 +336,80 @@ describe("closing a financial year", () => {
     });
     expect(Number(after?.turnover)).toBe(Number(before?.turnover));
     expect(Number(after?.bookNetProfit)).toBe(Number(before?.bookNetProfit));
+    expect(Number(after?.taxableIncome)).toBe(Number(before?.taxableIncome));
+  }, 120_000);
+
+  /**
+   * The add-back has to survive it too, and it was not covered by the case
+   * above.
+   *
+   * Turnover and book profit come from the statements engine, which excludes
+   * closing entries from the movement it reports. The depreciation add-back
+   * does not: it is summed from `accountBalances` over the year, and that call
+   * was left as it was. A shop with no depreciation in its books cannot tell
+   * the difference, which is why the case above passed while this one did not.
+   *
+   * What it costs is a deduction taken twice. Book profit is already net of the
+   * depreciation charged, so the charge is added back and the Act's own figure
+   * — written down value, Appendix I rates — is deducted in its place. When the
+   * add-back reads nil the charge stays in profit *and* the Act's figure comes
+   * off as well. The taxable income is understated by the whole of the year's
+   * book depreciation, and the working paper shows "Add: depreciation charged
+   * in the books — 0.00" beside a profit and loss account that plainly shows
+   * the charge.
+   */
+  it("still adds back the depreciation charged in the books", async () => {
+    const shop = await shopReadyToClose();
+    const { getTaxWorkingPaper } =
+      await import("@/server/tax/income-tax-service");
+
+    // Depreciation the way a shop actually charges it: a manual journal at the
+    // year end, expense debited, accumulated depreciation credited. Nothing in
+    // this product posts one for you.
+    const [expense, accumulated] = await Promise.all([
+      systemAccount(shop.companyId, SYSTEM_ACCOUNT.DEPRECIATION_EXPENSE),
+      systemAccount(shop.companyId, SYSTEM_ACCOUNT.ACCUMULATED_DEPRECIATION),
+    ]);
+    await prisma.$transaction((tx) =>
+      postJournalEntry(tx, {
+        companyId: shop.companyId,
+        entryDate: new Date(),
+        voucherType: VoucherType.JOURNAL,
+        createdById: shop.userId,
+        narration: "Depreciation for the year",
+        lines: [
+          { accountId: expense, debit: 12_000 },
+          { accountId: accumulated, credit: 12_000 },
+        ],
+      }),
+    );
+
+    const before = await getTaxWorkingPaper({
+      companyId: shop.companyId,
+      fiscalYearId: shop.yearId,
+    });
+    expect(Number(before?.bookDepreciation)).toBe(12_000);
+
+    await closeEveryMonth(shop);
+    await closeFiscalYear({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      fiscalYearId: shop.yearId,
+    });
+
+    const after = await getTaxWorkingPaper({
+      companyId: shop.companyId,
+      fiscalYearId: shop.yearId,
+    });
+
+    expect(Number(after?.bookDepreciation)).toBe(12_000);
+    // The line the reader sees, and the total it feeds.
+    const addBack = after?.computation.find((line) =>
+      line.label.startsWith("Add: depreciation"),
+    );
+    expect(addBack).toBeDefined();
+    expect(Number(addBack?.amount)).toBe(12_000);
     expect(Number(after?.taxableIncome)).toBe(Number(before?.taxableIncome));
   }, 120_000);
 
@@ -1180,5 +1267,170 @@ describe("an account retired between one close and the next", () => {
 
     expect(retiredAccount).toBeDefined();
     expect(retiredAccount!.balance.toFixed(2)).toBe("0.00");
+  }, 120_000);
+});
+
+/**
+ * The cash projection, read in the quarter after a year end.
+ *
+ * The projection works out what a shop spends running itself from the last
+ * thirteen weeks of its profit and loss account, then subtracts that from every
+ * week ahead. A closing entry credits each expense account by the whole of its
+ * year's balance on one day, and that day sits inside a thirteen-week window
+ * from the first of April until about the end of June — the whole of the first
+ * quarter of every year, for every shop that closes its books.
+ *
+ * Inside that quarter the sum was a quarter's debits against a year's credit,
+ * which does not fall to nil but goes past it. A negative running cost is
+ * subtracted from each week and so *adds* money to it: the line climbs, the
+ * shortfall week disappears, and the shop is told it never runs out of cash.
+ * That is the one thing this projection exists to say, failing in the direction
+ * that does the damage, in the quarter a shop is least sure of its money.
+ */
+describe("the cash projection, across a year end", () => {
+  const DAY = 86_400_000;
+
+  /**
+   * A shop with a year of spending behind it, ready to close.
+   *
+   * Some of the spending is inside the thirteen-week window the projection
+   * reads and some is well before it, which is the shape that makes the failure
+   * visible: with everything inside the window a closing entry cancels the sum
+   * to nil, and nil is a wrong answer that still looks like an answer. With
+   * spending outside it too, the year's credit is larger than the window's
+   * debits and the running cost comes out below zero.
+   */
+  async function shopWithASpentYear() {
+    const email = `ycp-${uniqueSlug("x").replace(/-/g, "")}@example.com`;
+    createdEmails.push(email);
+    const owner = await registerOwner(registrationInput(email));
+    createdCompanies.push(owner.companyId);
+
+    const now = new Date();
+    const provisioned = await prisma.$transaction((tx) =>
+      provisionCompany(tx, {
+        name: "Year End Forecast Mart",
+        slug: uniqueSlug("yearendforecast"),
+        stateCode: "29",
+        fiscalYearStartMonth: 4,
+        asOf: new Date(
+          Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 13, 15),
+        ),
+      }),
+    );
+    createdCompanies.push(provisioned.companyId);
+
+    const companyId = provisioned.companyId;
+    const cash = provisioned.accountsBySystemKey.get(SYSTEM_ACCOUNT.CASH)!;
+    const rent = provisioned.accountsBySystemKey.get(
+      SYSTEM_ACCOUNT.RENT_EXPENSE,
+    )!;
+    const year = await prisma.fiscalYear.findFirstOrThrow({
+      where: { companyId },
+      select: { id: true, startDate: true, endDate: true },
+      orderBy: { startDate: "asc" },
+    });
+
+    // Twenty days after the year ended: far enough in to be a real April, close
+    // enough that the closing entry is inside the thirteen-week window.
+    const today = new Date(year.endDate.getTime() + 20 * DAY);
+
+    const spending: Array<[Date, number]> = [
+      // Well outside the window. Only the closing entry carries this back into
+      // it, which is the whole of the defect.
+      [new Date(year.startDate.getTime() + 20 * DAY), 60_000],
+      // Inside it, and the only rent the projection should be reading.
+      [new Date(year.endDate.getTime() - 40 * DAY), 20_000],
+      [new Date(year.endDate.getTime() - 10 * DAY), 20_000],
+    ];
+
+    for (const [on, amount] of spending) {
+      await prisma.$transaction((tx) =>
+        postJournalEntry(tx, {
+          companyId,
+          entryDate: on,
+          voucherType: VoucherType.JOURNAL,
+          createdById: owner.userId,
+          narration: "Shop rent",
+          lines: [
+            { accountId: rent, debit: amount },
+            { accountId: cash, credit: amount },
+          ],
+        }),
+      );
+    }
+
+    return {
+      shop: {
+        companyId,
+        userId: owner.userId,
+        yearId: year.id,
+        from: year.startDate,
+        to: year.endDate,
+      },
+      today,
+    };
+  }
+
+  it("still knows what the shop spends running itself", async () => {
+    const { shop, today } = await shopWithASpentYear();
+
+    const before = await getCashProjection({
+      companyId: shop.companyId,
+      weeks: 13,
+      today,
+    });
+    // Two months' rent over a thirteen-week window, and nothing else in it.
+    expect(Number(before.weeklyRunningCost)).toBeCloseTo(40_000 / 13, 2);
+
+    await closeEveryMonth(shop);
+    await closeFiscalYear({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      fiscalYearId: shop.yearId,
+    });
+
+    const after = await getCashProjection({
+      companyId: shop.companyId,
+      weeks: 13,
+      today,
+    });
+
+    expect(Number(after.weeklyRunningCost)).toBeCloseTo(
+      Number(before.weeklyRunningCost),
+      2,
+    );
+    // Said separately, because the sign is the part that does the damage: a
+    // running cost below nil is added to every week rather than taken off it.
+    expect(Number(after.weeklyRunningCost)).toBeGreaterThan(0);
+  }, 120_000);
+
+  it("still runs the projected cash down week by week", async () => {
+    // The consequence, rather than the input to it. A shop with no receipts
+    // ahead of it spends its way down; a negative running cost turns that line
+    // around and the projection stops being a warning about anything.
+    const { shop, today } = await shopWithASpentYear();
+
+    await closeEveryMonth(shop);
+    await closeFiscalYear({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      fiscalYearId: shop.yearId,
+    });
+
+    const projection = await getCashProjection({
+      companyId: shop.companyId,
+      weeks: 13,
+      today,
+    });
+
+    const first = projection.weeks.at(0)!;
+    const last = projection.weeks.at(-1)!;
+    expect(Number(last.closingCash)).toBeLessThan(Number(first.closingCash));
+    expect(Number(last.closingCash)).toBeLessThan(
+      Number(projection.openingCash),
+    );
   }, 120_000);
 });
