@@ -79,6 +79,29 @@ export type PartyRow = {
   city: string | null;
   stateCode: string | null;
   creditDays: number;
+  /**
+   * Recorded, not enforced. Customers only.
+   *
+   * `creditDays` earns its place: `createSale` reads it to date the invoice,
+   * and everything that ages a receivable follows from that date. `creditLimit`
+   * has no such reader. It is written by the party form and the importer, shown
+   * in the list, and consulted by nothing — no posting path selects it, and a
+   * credit invoice that takes a customer twice past their limit is accepted
+   * without a word.
+   *
+   * The form used to say "0 means no limit is enforced", which told a
+   * shopkeeper in as many words that a non-zero one was. It now says what the
+   * field does. Enforcing it is a product decision rather than a missing line:
+   * a hard refusal on a credit invoice and a warning beside the stock shortages
+   * the form already lists are different products, and the figure to test
+   * against — what the customer owes after money paid on account — is the one
+   * `unappliedCredit` and `afterUnappliedCredit` already define, so whichever
+   * is chosen has somewhere honest to start.
+   *
+   * `tests/unit/credit-limit.test.ts` holds the claim and the behaviour
+   * together: it fails if a posting path starts reading this without the
+   * description being revisited.
+   */
   creditLimit: string | null;
   openingBalance: string;
   openingNature: AccountNature;
