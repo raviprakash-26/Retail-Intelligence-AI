@@ -342,10 +342,17 @@ function serialise(summary: AgeingSummary) {
 async function controlAccountByParty(
   companyId: string,
   side: "RECEIVABLE" | "PAYABLE",
+  options: {
+    /** Narrow to one party, for a caller asking about one. */
+    partyId?: string;
+    /** Read inside an enclosing transaction. Defaults to the shared client. */
+    client?: DbClient;
+  } = {},
 ): Promise<Map<string, { balance: Decimal; since: Date }>> {
   const empty = new Map<string, { balance: Decimal; since: Date }>();
+  const client = options.client ?? prisma;
 
-  const account = await prisma.account.findFirst({
+  const account = await client.account.findFirst({
     where: {
       companyId,
       systemKey:
@@ -357,7 +364,7 @@ async function controlAccountByParty(
   });
   if (!account) return empty;
 
-  const rows = await prisma.journalLine.groupBy({
+  const rows = await client.journalLine.groupBy({
     by: ["partyId"],
     where: {
       companyId,
@@ -365,7 +372,7 @@ async function controlAccountByParty(
       status: JournalStatus.POSTED,
       partyType:
         side === "RECEIVABLE" ? PartyType.CUSTOMER : PartyType.SUPPLIER,
-      partyId: { not: null },
+      partyId: options.partyId ? options.partyId : { not: null },
     },
     _sum: { debit: true, credit: true },
     _min: { entryDate: true },
@@ -386,6 +393,42 @@ async function controlAccountByParty(
   }
 
   return empty;
+}
+
+/**
+ * What one party owes, as the ledger has it.
+ *
+ * The control account's balance for them, which is the whole answer rather than
+ * a part of it: every invoice, every receipt whether or not it was allocated,
+ * every credit note, and an opening balance carried in from the old books. The
+ * ageing report is this figure split by due date — `withLedgerResidual` adds
+ * the part no document accounts for precisely so the two agree — so a caller
+ * that reads this and a caller that reads the ageing are quoting one number.
+ *
+ * Which matters here more than usual. The credit limit is the only place in
+ * the product that *refuses* on the strength of what somebody owes, and a limit
+ * enforced against a different figure from the one the ageing report, the
+ * reminder and the customer statement all show is a refusal nobody can argue
+ * with.
+ *
+ * Takes a client so the sale can ask inside its own transaction, after it has
+ * taken the row lock on the invoice sequence — which is what stops two
+ * concurrent invoices to the same customer both reading a balance under the
+ * limit and both being allowed.
+ */
+export async function owedByParty(
+  client: DbClient,
+  params: {
+    companyId: string;
+    side: "RECEIVABLE" | "PAYABLE";
+    partyId: string;
+  },
+): Promise<Decimal> {
+  const balances = await controlAccountByParty(params.companyId, params.side, {
+    partyId: params.partyId,
+    client,
+  });
+  return balances.get(params.partyId)?.balance ?? money(0);
 }
 
 /**

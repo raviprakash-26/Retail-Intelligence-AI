@@ -42,6 +42,7 @@ import { reversePostedEntry } from "@/server/documents/reversal";
 import { recordInward, recordOutward } from "@/server/inventory/stock-service";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
+import { owedByParty } from "@/server/settlements/outstanding";
 import { MasterDataError } from "@/server/master-data/errors";
 import { postingBranchId } from "@/server/company/posting-branch";
 
@@ -208,6 +209,7 @@ export async function createSale(params: {
               gstin: true,
               stateCode: true,
               creditDays: true,
+              creditLimit: true,
               archivedAt: true,
             },
           })
@@ -286,6 +288,42 @@ export async function createSale(params: {
         key: "SALE",
         fiscalYearId: fiscalYear.id,
       });
+
+      // --- Credit limit -----------------------------------------------------
+      //
+      // Only a credit sale extends credit. Money taken at the counter changes
+      // nothing about what a customer is trusted with, so a limit has nothing
+      // to say about it.
+      //
+      // Deliberately after the invoice number. Allocating one takes a row lock
+      // on the company's sale sequence, so a second invoice to the same
+      // customer waits there rather than reading the same balance and slipping
+      // under the same limit. A rolled-back insert releases its number, so
+      // refusing here costs nothing and leaves no gap in the series — which is
+      // the thing a tax officer asks about.
+      //
+      // The figure is the control account's balance for this customer, which is
+      // what the ageing report, the reminder and the customer statement all
+      // quote. A refusal measured against a number none of those show is a
+      // refusal nobody can argue with.
+      if (customer && input.paymentMode === "CREDIT") {
+        const limit = money(customer.creditLimit);
+        if (limit.greaterThan(0)) {
+          const owed = await owedByParty(tx, {
+            companyId,
+            side: "RECEIVABLE",
+            partyId: customer.id,
+          });
+          const after = add(owed, totals.totalAmount);
+          if (after.greaterThan(limit)) {
+            throw new SaleError(
+              `${customer.name} owes ${owed.toFixed(2)}, and this invoice would take them to ${after.toFixed(2)} against a credit limit of ${limit.toFixed(2)}. Take a payment against what is outstanding, raise the limit, or invoice this one for cash.`,
+              "CREDIT_LIMIT_EXCEEDED",
+              "customerId",
+            );
+          }
+        }
+      }
 
       const dueDate =
         input.paymentMode === "CREDIT" && customer

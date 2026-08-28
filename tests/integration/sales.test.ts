@@ -11,6 +11,7 @@ import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
 import { createSale, voidSale, SaleError } from "@/server/sales/sale-service";
+import { createReceipt } from "@/server/settlements/settlement-service";
 import {
   disconnectTestDb,
   ensurePlatformData,
@@ -956,4 +957,169 @@ describe("audit trail", () => {
     expect(voidMeta?.reason).toBe("Wrong customer");
     expect(voidMeta?.reversalEntry).toMatch(/^JV-/);
   });
+});
+
+/**
+ * The credit limit, enforced.
+ *
+ * It was recorded and read by nothing for as long as it had existed, while the
+ * form said "0 means no limit is enforced" — which tells a shopkeeper in as
+ * many words that a non-zero one is.
+ *
+ * What it is tested against is `owedByParty`: the control account's balance for
+ * that customer, which is the figure the ageing report, the payment reminder
+ * and the customer statement all quote. A refusal measured against a number
+ * none of those show is a refusal nobody can argue with — which is why the case
+ * below about money paid on account matters as much as the ones about the
+ * limit itself.
+ */
+describe("a customer's credit limit", () => {
+  /** A shop, a product at ₹100, and a customer with the limit asked for. */
+  async function shopWithLimit(creditLimit: number) {
+    const fixture = await createCompany();
+    const product = await createProduct({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: productInput(fixture),
+    });
+    const customer = await createParty({
+      companyId: fixture.companyId,
+      kind: "CUSTOMER",
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: customerInput({ creditLimit }),
+    });
+    return { fixture, product, customer };
+  }
+
+  /** One credit invoice for `quantity` units at ₹100 plus 18% tax. */
+  async function invoice(
+    context: Awaited<ReturnType<typeof shopWithLimit>>,
+    quantity: number,
+  ) {
+    return createSale({
+      companyId: context.fixture.companyId,
+      userId: context.fixture.userId,
+      actorEmail: context.fixture.actorEmail,
+      branchId: null,
+      input: saleInput(context.product.id, {
+        paymentMode: "CREDIT",
+        customerId: context.customer.id,
+        lines: [
+          {
+            productId: context.product.id,
+            description: "",
+            quantity,
+            rate: 100,
+            discountPercent: 0,
+          },
+        ],
+      }),
+    });
+  }
+
+  it("lets through an invoice that stays inside it", async () => {
+    // The control. Without it every case below could pass by refusing
+    // everything.
+    const shop = await shopWithLimit(5000);
+    const sale = await invoice(shop, 10);
+    expect(sale.id).toBeTruthy();
+  }, 60_000);
+
+  it("refuses the one that would go past it, and says by how much", async () => {
+    const shop = await shopWithLimit(5000);
+    await invoice(shop, 40); // ₹4,720 with tax.
+
+    // ₹4,720 owed, another ₹1,180 asked for, against ₹5,000.
+    await expect(invoice(shop, 10)).rejects.toThrow(
+      /owes 4720.00, and this invoice would take them to 5900.00 against a credit limit of 5000.00/,
+    );
+  }, 60_000);
+
+  it("leaves no gap in the invoice series when it refuses", async () => {
+    // The refusal comes after the number is allocated, so that two invoices to
+    // one customer serialise on the sequence lock rather than both reading the
+    // same balance. A rolled-back insert has to release its number — a missing
+    // invoice number is the thing a tax officer asks about.
+    const shop = await shopWithLimit(5000);
+    await invoice(shop, 40);
+    await expect(invoice(shop, 10)).rejects.toThrow();
+    const next = await invoice(shop, 1);
+
+    const numbers = await prisma.sale.findMany({
+      where: { companyId: shop.fixture.companyId },
+      select: { invoiceNumber: true },
+      orderBy: { invoiceNumber: "asc" },
+    });
+    expect(numbers.map((row) => row.invoiceNumber)).toEqual([
+      expect.stringMatching(/0001$/),
+      expect.stringMatching(/0002$/),
+    ]);
+    expect(next.id).toBeTruthy();
+  }, 60_000);
+
+  it("says nothing about a cash sale", async () => {
+    // A limit is what a customer is trusted with. Money taken at the counter
+    // is not trust, and blocking it would stop a shop selling to somebody
+    // standing in front of it with cash in hand.
+    const shop = await shopWithLimit(5000);
+    await invoice(shop, 40);
+
+    const cash = await createSale({
+      companyId: shop.fixture.companyId,
+      userId: shop.fixture.userId,
+      actorEmail: shop.fixture.actorEmail,
+      branchId: null,
+      input: saleInput(shop.product.id, {
+        paymentMode: "CASH",
+        customerId: shop.customer.id,
+        lines: [
+          {
+            productId: shop.product.id,
+            description: "",
+            quantity: 50,
+            rate: 100,
+            discountPercent: 0,
+          },
+        ],
+      }),
+    });
+    expect(cash.id).toBeTruthy();
+  }, 60_000);
+
+  it("counts a limit of nought as no limit", async () => {
+    const shop = await shopWithLimit(0);
+    const sale = await invoice(shop, 60);
+    expect(sale.id).toBeTruthy();
+  }, 60_000);
+
+  it("sees money paid on account without being told which invoice", async () => {
+    // The case that decides whether this is enforced against the right figure.
+    // A receipt with no allocation moves the control account and moves no
+    // invoice's `paidAmount`, so per-document arithmetic cannot see it — and a
+    // customer who has just paid would be refused for a debt they have settled.
+    const shop = await shopWithLimit(5000);
+    await invoice(shop, 40); // ₹4,720 owed, ₹280 of room left.
+
+    await createReceipt({
+      companyId: shop.fixture.companyId,
+      userId: shop.fixture.userId,
+      actorEmail: shop.fixture.actorEmail,
+      input: {
+        kind: "CUSTOMER",
+        partyId: shop.customer.id,
+        date: new Date().toISOString().slice(0, 10),
+        amount: 4000,
+        paymentMode: "CASH",
+        referenceNo: "",
+        notes: "",
+        allocations: [],
+      },
+    });
+
+    // ₹720 owed now. The next ₹1,180 invoice fits where it would not have.
+    const sale = await invoice(shop, 10);
+    expect(sale.id).toBeTruthy();
+  }, 60_000);
 });

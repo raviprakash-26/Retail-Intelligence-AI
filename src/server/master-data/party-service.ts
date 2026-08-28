@@ -80,27 +80,22 @@ export type PartyRow = {
   stateCode: string | null;
   creditDays: number;
   /**
-   * Recorded, not enforced. Customers only.
+   * Enforced on credit sales. Customers only.
    *
-   * `creditDays` earns its place: `createSale` reads it to date the invoice,
-   * and everything that ages a receivable follows from that date. `creditLimit`
-   * has no such reader. It is written by the party form and the importer, shown
-   * in the list, and consulted by nothing — no posting path selects it, and a
-   * credit invoice that takes a customer twice past their limit is accepted
-   * without a word.
+   * It was not, for as long as it had existed. The field was written by the
+   * party form and the importer, shown in the list, and consulted by nothing —
+   * while the form said "0 means no limit is enforced", which tells a
+   * shopkeeper in as many words that a non-zero one is. Someone typing ₹50,000
+   * against a customer was being told the software would stop them.
    *
-   * The form used to say "0 means no limit is enforced", which told a
-   * shopkeeper in as many words that a non-zero one was. It now says what the
-   * field does. Enforcing it is a product decision rather than a missing line:
-   * a hard refusal on a credit invoice and a warning beside the stock shortages
-   * the form already lists are different products, and the figure to test
-   * against — what the customer owes after money paid on account — is the one
-   * `unappliedCredit` and `afterUnappliedCredit` already define, so whichever
-   * is chosen has somewhere honest to start.
+   * `createSale` now refuses a credit invoice that would take a customer past
+   * it, and the form says so. A cash sale is untouched: money taken at the
+   * counter changes nothing about what a customer is trusted with.
    *
-   * `tests/unit/credit-limit.test.ts` holds the claim and the behaviour
-   * together: it fails if a posting path starts reading this without the
-   * description being revisited.
+   * The figure tested against is `owedByParty` — the control account's balance
+   * for that customer, which is what the ageing report, the payment reminder
+   * and the customer statement all quote. A refusal measured against a number
+   * none of those show is a refusal nobody can argue with.
    */
   creditLimit: string | null;
   openingBalance: string;
