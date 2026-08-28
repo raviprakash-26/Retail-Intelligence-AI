@@ -22,6 +22,7 @@ import {
 } from "@/lib/tax/gst";
 import {
   type Decimal,
+  type MoneyInput,
   add,
   compare,
   divide,
@@ -903,19 +904,9 @@ export async function listPurchases(params: {
         where: { ...where, status: DocumentStatus.POSTED },
         _sum: { totalAmount: true },
       }),
-      prisma.purchase.aggregate({
-        where: {
-          companyId: params.companyId,
-          status: DocumentStatus.POSTED,
-          itcEligible: true,
-        },
-        _sum: {
-          cgstAmount: true,
-          sgstAmount: true,
-          igstAmount: true,
-          cessAmount: true,
-        },
-      }),
+      // Net of the credit given up on debit notes, which the ledger behind
+      // this page and the GST working paper prepared from it both take off.
+      claimableInputCredit(prisma, { companyId: params.companyId }),
       // The bills themselves rather than a sum of them: what each still owes
       // needs the debit notes raised against it, and those are per document.
       prisma.purchase.findMany({
@@ -1005,14 +996,7 @@ export async function listPurchases(params: {
     page,
     pageCount: Math.max(1, Math.ceil(total / PURCHASE_PAGE_SIZE)),
     postedTotal: toStorageString(postedTotals._sum.totalAmount ?? 0),
-    inputCredit: toStorageString(
-      add(
-        credit._sum.cgstAmount ?? 0,
-        credit._sum.sgstAmount ?? 0,
-        credit._sum.igstAmount ?? 0,
-        credit._sum.cessAmount ?? 0,
-      ),
-    ),
+    inputCredit: toStorageString(credit),
     payablesOutstanding: toStorageString(payablesOutstanding),
   };
 }
@@ -1162,4 +1146,67 @@ export async function netPurchases(
   ]);
 
   return subtract(billed._sum.totalAmount ?? 0, returned._sum.totalAmount ?? 0);
+}
+
+/**
+ * Input tax credit the business is actually holding.
+ *
+ * Bills where the credit was claimed, less the credit given up on the debit
+ * notes raised against them.
+ *
+ * The giving-up is not optional and the ledger already does it: a purchase
+ * return against an `itcEligible` bill credits the GST input accounts, because
+ * goods sent back to a supplier take the credit on them with them. The GST
+ * working paper nets it too — its inward rows carry the debit note's negative
+ * ones.
+ *
+ * The purchases page did not. It summed the tax on eligible bills and stopped,
+ * so the headline a shop reads to know what credit it holds was overstated by
+ * the tax on every debit note it had ever raised — while the ledger behind it
+ * and the return prepared from it both said something smaller.
+ *
+ * A debit note whose bill has since been deleted is not counted: `purchaseId`
+ * is nullable, and a note with no bill cannot be said to have given up a credit
+ * that bill claimed.
+ */
+export async function claimableInputCredit(
+  client: DbClient,
+  params: { companyId: string },
+): Promise<Decimal> {
+  const eligible = {
+    companyId: params.companyId,
+    status: DocumentStatus.POSTED,
+  };
+  const tax = {
+    cgstAmount: true,
+    sgstAmount: true,
+    igstAmount: true,
+    cessAmount: true,
+  } as const;
+
+  const [claimed, givenUp] = await Promise.all([
+    client.purchase.aggregate({
+      where: { ...eligible, itcEligible: true },
+      _sum: tax,
+    }),
+    client.purchaseReturn.aggregate({
+      where: { ...eligible, purchase: { itcEligible: true } },
+      _sum: tax,
+    }),
+  ]);
+
+  const total = (sums: {
+    cgstAmount: unknown;
+    sgstAmount: unknown;
+    igstAmount: unknown;
+    cessAmount: unknown;
+  }) =>
+    add(
+      (sums.cgstAmount as MoneyInput) ?? 0,
+      (sums.sgstAmount as MoneyInput) ?? 0,
+      (sums.igstAmount as MoneyInput) ?? 0,
+      (sums.cessAmount as MoneyInput) ?? 0,
+    );
+
+  return subtract(total(claimed._sum), total(givenUp._sum));
 }

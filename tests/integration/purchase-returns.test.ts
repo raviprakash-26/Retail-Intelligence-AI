@@ -868,3 +868,90 @@ describe("what a debit note refuses to do", () => {
     expect(after.status).toBe(DocumentStatus.POSTED);
   }, 90_000);
 });
+
+/**
+ * The credit the purchases page says the business is holding.
+ *
+ * A debit note against an eligible bill credits the GST input accounts —
+ * goods sent back to a supplier take the credit on them with them. The ledger
+ * has always done that, and the GST working paper nets it too, because its
+ * inward rows carry the debit note's negative ones.
+ *
+ * The purchases page did not. It summed the tax on eligible bills and stopped,
+ * so the headline a shop reads to know what credit it holds was overstated by
+ * the tax on every debit note it had ever raised — while the ledger behind it
+ * and the return prepared from it both said something smaller.
+ */
+describe("input credit on the purchases page", () => {
+  it("is what the ledger is actually holding", async () => {
+    const fixture = await createCompany();
+    const bill = await buy(fixture, 10);
+    const line = await firstLine(fixture, bill.id);
+    const { listPurchases } =
+      await import("@/server/purchases/purchase-service");
+
+    // ₹1,000 at 18% claimed: ₹90 CGST + ₹90 SGST.
+    const before = await listPurchases({ companyId: fixture.companyId });
+    expect(Number(before.inputCredit)).toBeCloseTo(180, 2);
+
+    await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: today,
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: line.lineId, quantity: 4 }],
+      },
+    });
+
+    // ₹400 of it went back, so ₹36 + ₹36 of credit went with it.
+    const after = await listPurchases({ companyId: fixture.companyId });
+    expect(Number(after.inputCredit)).toBeCloseTo(108, 2);
+
+    // And that is the ledger's own figure, which is the point: the headline
+    // and the accounts behind it must not be able to disagree.
+    const ledger =
+      Number(
+        await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.GST_INPUT_CGST),
+      ) +
+      Number(
+        await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.GST_INPUT_SGST),
+      );
+    expect(Number(after.inputCredit)).toBeCloseTo(ledger, 2);
+  }, 120_000);
+
+  it("counts nothing back from a bill that never claimed any", async () => {
+    // A bill recorded without claiming the credit puts the tax into the cost
+    // of the goods, so there is no credit for a debit note against it to give
+    // up. Subtracting one would take the headline below what the ledger holds.
+    const fixture = await createCompany();
+    const bill = await buy(fixture, 10, 100, false);
+    const line = await firstLine(fixture, bill.id);
+    const { listPurchases } =
+      await import("@/server/purchases/purchase-service");
+
+    await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: today,
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: line.lineId, quantity: 4 }],
+      },
+    });
+
+    expect(
+      Number(
+        (await listPurchases({ companyId: fixture.companyId })).inputCredit,
+      ),
+    ).toBe(0);
+  }, 120_000);
+});
