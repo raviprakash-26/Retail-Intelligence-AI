@@ -111,6 +111,8 @@ async function createCompanyWithBank(): Promise<Fixture> {
 
   const bank = await createBankAccount({
     companyId: result.companyId,
+    userId: result.userId,
+    actorEmail: email,
     input: bankInput({
       name: "Current Account — Canara Bank",
       accountId: ledger.id,
@@ -244,6 +246,8 @@ describe("describing a bank account", () => {
     await expect(
       createBankAccount({
         companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
         input: bankInput({
           name: "Nonsense",
           accountId: sales.id,
@@ -260,6 +264,8 @@ describe("describing a bank account", () => {
     await expect(
       createBankAccount({
         companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
         input: bankInput({
           name: "A second name for the same account",
           accountId: fixture.ledgerAccountId,
@@ -277,6 +283,8 @@ describe("describing a bank account", () => {
     await expect(
       createBankAccount({
         companyId: mine.companyId,
+        userId: mine.userId,
+        actorEmail: mine.actorEmail,
         input: bankInput({
           name: "Borrowed",
           accountId: theirs.ledgerAccountId,
@@ -445,6 +453,36 @@ describe("importing a statement", () => {
       select: { metadata: true },
     });
     expect(log?.metadata).toMatchObject({ imported: 1 });
+  }, 60_000);
+
+  it("writes one for the bank account itself, with the number masked", async () => {
+    // Importing a statement was recorded, and so was matching a line to an
+    // entry, and unmatching it, and recording a receipt from one. Adding the
+    // account those four hang off was not — the record that names a bank, an
+    // account number, an IFSC and the ledger account every later
+    // reconciliation reads.
+    const fixture = await createCompanyWithBank();
+
+    const log = await prisma.auditLog.findFirst({
+      where: {
+        companyId: fixture.companyId,
+        action: "banking.account_created",
+      },
+      select: { metadata: true, entityId: true, actorEmail: true },
+    });
+
+    expect(log?.entityId).toBe(fixture.bankAccountId);
+    expect(log?.actorEmail).toBe(fixture.actorEmail);
+    expect(log?.metadata).toMatchObject({
+      name: "Current Account — Canara Bank",
+      ledgerAccountId: fixture.ledgerAccountId,
+    });
+
+    // The log cannot be deleted from, so a full account number written into it
+    // is written for good. `maskAccountNumber` exists for the screen; it has to
+    // apply here too.
+    const stored = (log?.metadata ?? {}) as Record<string, unknown>;
+    expect(String(stored.accountNumber)).toMatch(/^••••\d{4}$/);
   }, 60_000);
 });
 
