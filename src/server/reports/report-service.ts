@@ -545,7 +545,12 @@ async function purchaseRegisterReport(
   );
 
   const notes = [
-    `Input tax credit accumulated from posted, eligible bills: ${first.inputCredit}.`,
+    // The figure stopped being a plain accumulation when the headline it comes
+    // from started netting debit notes. A note describing a number it no longer
+    // describes is worse than no note: this one is printed on a register an
+    // accountant reconciles against the GST working paper, which nets the same
+    // way, and the two agreeing is the whole point of saying it here.
+    `Input tax credit held on posted, eligible bills, less what debit notes gave back: ${first.inputCredit}.`,
     "A bill marked in cost is one whose tax cannot be claimed, so it was landed onto the stock instead.",
   ];
   if (first.total > bills.length) {
