@@ -11,6 +11,7 @@ import {
 import { getFinancialStatements } from "@/server/accounting/statements-service";
 import { TrialBalanceUnbalancedError } from "@/server/accounting/trial-balance-service";
 import { getStockSummary } from "@/server/inventory/inventory-report";
+import { netPurchases } from "@/server/purchases/purchase-service";
 import {
   payablesAgeing,
   receivablesAgeing,
@@ -108,7 +109,10 @@ export async function getDashboardOverview(params: {
       receivablesAgeing(companyId),
       payablesAgeing(companyId),
       getStockSummary({ companyId }),
-      postedPurchasesTotal({ companyId, from, to }),
+      // Read from the module that owns the fact, like every other figure
+      // here. This was a private helper that summed posted bills and stopped,
+      // which is the one thing this file's own comment says it must not do.
+      netPurchases(prisma, { companyId, from, to }),
       financialStatements({ companyId, from, to }),
     ]);
 
@@ -151,7 +155,7 @@ export async function getDashboardOverview(params: {
       costOfSales: statements.trading.costOfSalesTotal,
       grossProfit: statements.trading.grossProfit,
       grossMarginPercent: statements.trading.grossMarginPercent,
-      purchases,
+      purchases: toStorageString(purchases),
       expenses: statements.profitAndLoss.expensesTotal,
       netProfit: statements.profitAndLoss.netProfit,
     },
@@ -183,31 +187,6 @@ async function financialStatements(params: {
     if (error instanceof TrialBalanceUnbalancedError) return null;
     throw error;
   }
-}
-
-/**
- * What the shop bought in the window.
- *
- * Not a figure the profit and loss account can answer. This system keeps
- * perpetual inventory, so a bill debits stock rather than a Purchases account —
- * the trading account reports the cost of what was *sold*, and a Purchases line
- * on it would print zero forever. What was bought is a fact the purchase
- * documents hold, so it is read from them.
- */
-async function postedPurchasesTotal(params: {
-  companyId: string;
-  from: Date;
-  to: Date;
-}): Promise<string> {
-  const total = await prisma.purchase.aggregate({
-    where: {
-      companyId: params.companyId,
-      status: "POSTED",
-      billDate: { gte: params.from, lte: params.to },
-    },
-    _sum: { totalAmount: true },
-  });
-  return toStorageString(total._sum.totalAmount ?? 0);
 }
 
 /**

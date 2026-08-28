@@ -179,7 +179,7 @@ export default async function DashboardPage() {
               }
               pending={!overview.trading}
               pendingNote="Needs a ledger that balances."
-              hint="What was bought on posted bills. Stock is held at cost, so this is not the cost of what was sold."
+              hint="What was bought on posted bills, less debit notes, in the selected year. Stock is held at cost, so this is not the cost of what was sold."
             />
             <KpiCard
               label="Expenses"

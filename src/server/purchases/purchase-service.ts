@@ -1114,3 +1114,52 @@ export async function getPurchase(params: {
 
   return { purchase, entry };
 }
+
+/**
+ * What the shop bought over a window, less what went back to the supplier.
+ *
+ * Not a figure the profit and loss account can answer. This system keeps
+ * perpetual inventory, so a bill debits stock rather than a Purchases account —
+ * the trading account reports the cost of what was *sold*, and a Purchases line
+ * on it would print zero forever. What was bought is a fact the purchase
+ * documents hold, so it is read from them.
+ *
+ * **A debit note reduces it.** That is the half the dashboard did not have. It
+ * summed posted bills and stopped, while the analytics page netted the returns
+ * off — so the same words meant two numbers for any shop that had ever sent
+ * goods back, and the front page and the ratios disagreed by the value of every
+ * debit note.
+ *
+ * The screen showed the asymmetry on its own face: the tile beside it said
+ * revenue was "from posted invoices, less credit notes", and the purchases tile
+ * said "what was bought on posted bills". Netting one side and not the other is
+ * not a rounding difference — it is two definitions of the same year's trading.
+ *
+ * Bill totals rather than taxable values, because the payables balance the
+ * ratio divides this into carries the tax too.
+ */
+export async function netPurchases(
+  client: DbClient,
+  params: { companyId: string; from: Date; to: Date },
+): Promise<Decimal> {
+  const [billed, returned] = await Promise.all([
+    client.purchase.aggregate({
+      where: {
+        companyId: params.companyId,
+        status: DocumentStatus.POSTED,
+        billDate: { gte: params.from, lte: params.to },
+      },
+      _sum: { totalAmount: true },
+    }),
+    client.purchaseReturn.aggregate({
+      where: {
+        companyId: params.companyId,
+        status: DocumentStatus.POSTED,
+        returnDate: { gte: params.from, lte: params.to },
+      },
+      _sum: { totalAmount: true },
+    }),
+  ]);
+
+  return subtract(billed._sum.totalAmount ?? 0, returned._sum.totalAmount ?? 0);
+}
