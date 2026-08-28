@@ -55,6 +55,23 @@ export type EmployeeListResult = {
 
 const isoDay = (date: Date) => date.toISOString().slice(0, 10);
 
+/**
+ * Still on the staff, as against a former employee.
+ *
+ * Somebody on leave has not left. `includeFormer` has to be asked for before
+ * they are hidden from the list, which is right — maternity leave, medical
+ * leave and a sabbatical are all employment.
+ *
+ * Exported because payroll has to mean the same thing by it. It did not: the
+ * run selected on ACTIVE alone, so an employee on leave was on the staff list
+ * and absent from the payroll — no payslip, no salary posted, nothing said.
+ * One definition, in one place, is what stops the two drifting apart again.
+ */
+export const CURRENT_EMPLOYEE_STATUSES: readonly EmployeeStatus[] = [
+  EmployeeStatus.ACTIVE,
+  EmployeeStatus.ON_LEAVE,
+];
+
 export async function listEmployees(params: {
   companyId: string;
   query?: string;
@@ -64,14 +81,11 @@ export async function listEmployees(params: {
   const page = Math.max(1, params.page ?? 1);
   const query = params.query?.trim() ?? "";
 
-  const currentStatuses: EmployeeStatus[] = [
-    EmployeeStatus.ACTIVE,
-    EmployeeStatus.ON_LEAVE,
-  ];
-
   const where: Prisma.EmployeeWhereInput = {
     companyId: params.companyId,
-    ...(params.includeFormer ? {} : { status: { in: currentStatuses } }),
+    ...(params.includeFormer
+      ? {}
+      : { status: { in: [...CURRENT_EMPLOYEE_STATUSES] } }),
     ...(query.length >= 1
       ? {
           OR: [
@@ -120,7 +134,10 @@ export async function listEmployees(params: {
       take: EMPLOYEE_PAGE_SIZE,
     }),
     prisma.employee.aggregate({
-      where: { companyId: params.companyId, status: { in: currentStatuses } },
+      where: {
+        companyId: params.companyId,
+        status: { in: [...CURRENT_EMPLOYEE_STATUSES] },
+      },
       _sum: { basicSalary: true, allowances: true },
     }),
   ]);
