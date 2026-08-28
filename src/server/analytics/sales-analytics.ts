@@ -1,5 +1,5 @@
 import "server-only";
-import { Prisma } from "@prisma/client";
+import { Prisma, VoucherType } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   add,
@@ -86,11 +86,20 @@ export async function revenueTrend(params: {
              SUM(CASE WHEN a."type" = 'EXPENSE' THEN l.debit - l.credit ELSE 0 END) AS cost_of_sales
       FROM journal_lines l
       JOIN accounts a ON a.id = l."accountId"
+      JOIN journal_entries e ON e.id = l."journalEntryId"
       WHERE l."companyId" = ${params.companyId}::uuid
         AND l.status = 'POSTED'
         AND l."entryDate" >= ${params.from}
         AND l."entryDate" <= ${params.to}
         AND a."section" = 'TRADING'
+        -- The year-end transfer is not trading. It moves every income and
+        -- expense account by the whole of its balance on one day, so a window
+        -- containing it carries the year straight back out again and the
+        -- buckets sum to nil against a profit and loss account showing the real
+        -- figure. BalanceWindow.excludeClosingEntries is the same rule for the
+        -- readers that go through accountBalances; this one reads the lines
+        -- itself and needs it said here.
+        AND e."voucherType" <> ${VoucherType.CLOSING_ENTRY}::"VoucherType"
       GROUP BY 1
       ORDER BY 1
     `,

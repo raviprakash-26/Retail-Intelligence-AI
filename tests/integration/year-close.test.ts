@@ -1434,3 +1434,79 @@ describe("the cash projection, across a year end", () => {
     );
   }, 120_000);
 });
+
+/**
+ * The revenue trend, after the year it charts has been closed.
+ *
+ * `sales-analytics` states the guarantee in its own words:
+ *
+ *   > **The trend reads the ledger.** Revenue per week is the movement on the
+ *   > trading-account income accounts, exactly as the profit and loss account
+ *   > defines it, so the buckets add up to the revenue on the statements rather
+ *   > than to something close to it.
+ *
+ * The README repeats it — "the trend buckets add up to the revenue on the
+ * statements because both read the same lines".
+ *
+ * They stopped being the same lines. The statements engine learned to leave
+ * closing entries out of period movement; this query did not, and it reads
+ * `journal_lines` in raw SQL, so the sweep that guards the other readers of
+ * that rule could not see it. A closing entry debits every income account by
+ * the whole of its year, so the last bucket carries the year back out again and
+ * the buckets sum to nil against a profit and loss account showing the real
+ * figure.
+ *
+ * It is worth being plain about the order of events: before the statements were
+ * fixed both were wrong in the same direction, so they agreed, and the
+ * guarantee held for the wrong reason. Fixing one side is what made the
+ * disagreement real.
+ */
+describe("the revenue trend, across a year end", () => {
+  it("still adds up to the revenue on the statements", async () => {
+    const shop = await shopReadyToClose();
+    const { revenueTrend } = await import("@/server/analytics/sales-analytics");
+
+    const window = {
+      companyId: shop.companyId,
+      from: shop.from,
+      to: shop.to,
+      granularity: "month" as const,
+    };
+    const statementsFor = () =>
+      getFinancialStatements({
+        companyId: shop.companyId,
+        from: isoDay(shop.from),
+        to: isoDay(shop.to),
+      });
+    const trendTotal = async () =>
+      (await revenueTrend(window)).reduce(
+        (total, point) => total + Number(point.revenue),
+        0,
+      );
+
+    // The control: they agree before the close, which is the guarantee.
+    const before = await statementsFor();
+    expect(Number(before.trading.revenueTotal)).toBeGreaterThan(0);
+    expect(await trendTotal()).toBeCloseTo(
+      Number(before.trading.revenueTotal),
+      2,
+    );
+
+    await closeEveryMonth(shop);
+    await closeFiscalYear({
+      companyId: shop.companyId,
+      userId: shop.userId,
+      actorEmail: "owner@example.com",
+      fiscalYearId: shop.yearId,
+    });
+
+    const after = await statementsFor();
+    expect(Number(after.trading.revenueTotal)).toBe(
+      Number(before.trading.revenueTotal),
+    );
+    expect(await trendTotal()).toBeCloseTo(
+      Number(after.trading.revenueTotal),
+      2,
+    );
+  }, 120_000);
+});

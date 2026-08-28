@@ -138,3 +138,91 @@ describe("windowed balance reads", () => {
     expect(stale).toEqual([]);
   });
 });
+
+/**
+ * The same rule, for the queries that do not go through `accountBalances`.
+ *
+ * The sweep above watches call sites. It could not see `revenueTrend`, which
+ * reads `journal_lines` in raw SQL — and that is where the fourth reader of
+ * this rule was found, months after the other three.
+ *
+ * `sales-analytics` states the guarantee about itself: revenue per week is
+ * "the movement on the trading-account income accounts, exactly as the profit
+ * and loss account defines it, so the buckets add up to the revenue on the
+ * statements". The README repeats it. Both stopped being true the moment the
+ * statements engine learned to leave closing entries out and this query did
+ * not — before that they were wrong together, so they agreed, and the guarantee
+ * held for the wrong reason.
+ *
+ * So a raw query that reads account movement over a window has to answer the
+ * same question the call sites do.
+ */
+
+/** Raw queries over the ledger that need no such filter, and why. */
+const RAW_DELIBERATE: Record<string, string> = {
+  "src/server/accounting/ledger-service.ts":
+    "The account ledger lists the entries themselves. A closing entry is a real entry and belongs in the list, on the date it was made — leaving it out would show a year's income account never returning to nil.",
+  "src/server/auditor/checks.ts":
+    "The running cash balance. A closing entry moves income and expense accounts into retained earnings and never touches cash, so it cannot appear in this query's rows at all.",
+};
+
+/** A raw query body, from the opening backtick to the closing one. */
+function rawQueries(source: string): string[] {
+  const found: string[] = [];
+  const pattern = /\$(?:queryRaw|executeRaw)</g;
+  for (const match of source.matchAll(/\$(?:queryRaw|executeRaw)[^`]*`/g)) {
+    const start = match.index + match[0].length;
+    const end = source.indexOf("`", start);
+    if (end > start) found.push(source.slice(start, end));
+  }
+  void pattern;
+  return found;
+}
+
+describe("windowed ledger reads in raw SQL", () => {
+  const files = globSync("src/server/**/*.ts", { cwd: process.cwd() });
+
+  /** Queries reading account movement across a date window. */
+  function movementQueries(): Array<{ file: string; declares: boolean }> {
+    const found: Array<{ file: string; declares: boolean }> = [];
+    for (const file of files) {
+      const source = readFileSync(file, "utf8");
+      for (const query of rawQueries(source)) {
+        if (!/journal_lines/.test(query)) continue;
+        if (!/entryDate"?\s*(>=|<=|>|<)/.test(query)) continue;
+        found.push({
+          file,
+          declares: /CLOSING_ENTRY/.test(query),
+        });
+      }
+    }
+    return found;
+  }
+
+  it("finds the queries this is about", () => {
+    // Three read the ledger in raw SQL and all three are windowed. A scan that
+    // stopped matching would make the check below vacuously true.
+    const queries = movementQueries();
+    expect(queries.length).toBeGreaterThanOrEqual(3);
+    expect(queries.some((query) => query.declares)).toBe(true);
+  });
+
+  it("every one of them says what it does about closing entries", () => {
+    const silent = movementQueries()
+      .filter((query) => !query.declares && !(query.file in RAW_DELIBERATE))
+      .map((query) => query.file);
+
+    expect(silent).toEqual([]);
+  });
+
+  it("keeps the raw exemption list honest", () => {
+    const stale = Object.keys(RAW_DELIBERATE).filter(
+      (file) =>
+        !movementQueries().some(
+          (query) => query.file === file && !query.declares,
+        ),
+    );
+
+    expect(stale).toEqual([]);
+  });
+});

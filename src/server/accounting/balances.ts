@@ -21,10 +21,26 @@ import {
 /**
  * What every account is worth, at a date.
  *
- * This is the one place account balances are computed. The ledger, the trial
- * balance, the profit and loss account, the balance sheet and every ratio built
- * on them all read from here, so there is exactly one answer to "what is in
- * Cash in Hand" and no report can disagree with another.
+ * Every report that states a *balance* is computed here: the trial balance, the
+ * profit and loss account, the balance sheet, the year-end close and every
+ * ratio built on them. So there is one answer to "what is in Cash in Hand" and
+ * no two reports can disagree about it.
+ *
+ * Two readings are deliberately not from here, and saying which is the point —
+ * this comment used to claim the account ledger among them, and it never was.
+ *
+ * The **account ledger** builds its own running total in SQL, because a balance
+ * carried down line by line is a window function over the rows in order and not
+ * a sum. It reads the same posted lines with the same date bounds, so it agrees
+ * with this figure; what it does not inherit is anything added here later.
+ * `excludeClosingEntries` is exactly that, and the ledger is right not to have
+ * it — a closing entry is a real entry and belongs in a ledger, on the date it
+ * was made.
+ *
+ * The **revenue trend** reads the lines itself for the same reason: it buckets
+ * by month. That one *did* need the rule and did not get it, because a sweep
+ * watching call sites cannot see raw SQL. See
+ * `tests/unit/closing-entry-windows.test.ts`, which now watches both.
  *
  * Three rules hold it together.
  *
