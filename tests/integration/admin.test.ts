@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CompanyStatus } from "@prisma/client";
 import { findTenantMoney, mentionsAmount } from "@/lib/admin/scope";
@@ -214,6 +215,75 @@ describe("what the panel may not show", () => {
     expect(mentionsAmount(detail, 34_250)).toBe(false);
     expect(mentionsAmount(detail, 50_000)).toBe(false);
   }, 90_000);
+
+  /**
+   * Every reader the panel has, not the two that were thought of first.
+   *
+   * `listTenants` and `getTenantDetail` were swept for tenant money; the other
+   * three were exercised for what they return and never checked for what they
+   * must not. The boundary in `lib/admin/scope.ts` is stated about the panel,
+   * not about two of its five functions — and the platform dashboard is
+   * precisely where somebody would add a total-value-across-tenants figure as
+   * a business metric, which is the disclosure that file exists to refuse.
+   *
+   * The companion case below holds this list against the module's exports, so
+   * a sixth reader cannot be added and left out of it.
+   */
+  it("shows no tenant money from any of its readers", async () => {
+    const { companyId } = await createTradingCompany();
+
+    const returns: Array<[string, unknown]> = [
+      ["getPlatformOverview", await getPlatformOverview()],
+      ["listTenants", await listTenants({ page: 1 })],
+      ["getTenantDetail", await getTenantDetail(companyId)],
+      ["listPlans", await listPlans()],
+      ["listAdminActions", await listAdminActions(20)],
+    ];
+
+    for (const [name, value] of returns) {
+      const leak = findTenantMoney(value, { allow: PLATFORM_OWN_FIGURES });
+      expect(leak, `${name} exposes ${leak}`).toBeNull();
+      // The figures this tenant actually holds, in every shape money leaves
+      // this codebase in. A name-based rule cannot catch a field somebody
+      // called `thisMonth`.
+      expect(mentionsAmount(value, 34_250), `${name} names the sale`).toBe(
+        false,
+      );
+      expect(mentionsAmount(value, 50_000), `${name} names the cash`).toBe(
+        false,
+      );
+    }
+  }, 120_000);
+
+  it("keeps that list level with what the module exports", async () => {
+    // The half that makes the case above stay true. A reader added to the
+    // admin service and not to the sweep is exactly how the first three came
+    // to be unswept.
+    const source = readFileSync("src/server/admin/admin-service.ts", "utf8");
+    const exported = [
+      ...source.matchAll(/^export async function ([A-Za-z0-9_]+)/gm),
+    ].map((match) => match[1]!);
+
+    // Readers only. The three writers are what an administrator *does*, and
+    // they are guarded by the permission gate and the audit log rather than by
+    // this boundary.
+    const writers = [
+      "setCompanyStatus",
+      "setEntitlementOverride",
+      "updatePlan",
+    ];
+    const readers = exported.filter((name) => !writers.includes(name));
+
+    expect(readers.sort()).toEqual(
+      [
+        "getPlatformOverview",
+        "getTenantDetail",
+        "listAdminActions",
+        "listPlans",
+        "listTenants",
+      ].sort(),
+    );
+  });
 
   it("does not name the businesses a tenant trades with", async () => {
     // Who a shop's customers are is worth as much as what it sold them.
