@@ -441,3 +441,121 @@ describe("the figures on the front page", () => {
     expect(overview.books.balanced).toBe(true);
   }, 90_000);
 });
+
+/**
+ * Purchases, on the front page and in the ratios.
+ *
+ * This file's own module says what it is for:
+ *
+ *   > **Nothing here computes a figure a second way.** Each one is read from
+ *   > the module that owns it — the balance engine for positions, the
+ *   > statements for trading, the ageing for what is owed, the stock report for
+ *   > what is on the shelves.
+ *
+ * Purchases was the exception, and it was computing a second way. A private
+ * helper summed posted bills and stopped, while the analytics page netted the
+ * debit notes off — so the same words meant two numbers for any shop that had
+ * ever sent goods back.
+ *
+ * The screen showed the asymmetry on its own face. The tile beside it says
+ * revenue is "from posted invoices, less credit notes"; the purchases tile said
+ * "what was bought on posted bills". Netting one side and not the other is not
+ * a rounding difference — it is two definitions of the same year's trading.
+ */
+describe("what the shop bought", () => {
+  async function shopWithAReturn() {
+    const fixture = await tradingShop();
+
+    const bill = await prisma.purchase.findFirstOrThrow({
+      where: { companyId: fixture.companyId },
+      select: { id: true, totalAmount: true },
+    });
+    const line = await prisma.purchaseItem.findFirstOrThrow({
+      where: { purchaseId: bill.id },
+      select: { id: true },
+    });
+
+    return { fixture, bill, lineId: line.id };
+  }
+
+  it("comes down when goods go back to the supplier", async () => {
+    const { fixture, bill, lineId } = await shopWithAReturn();
+    const { createPurchaseReturn } =
+      await import("@/server/returns/purchase-return-service");
+
+    const before = await getDashboardOverview({
+      companyId: fixture.companyId,
+      from: fixture.from,
+      to: fixture.to,
+    });
+    expect(Number(before.trading?.purchases)).toBeCloseTo(
+      Number(bill.totalAmount),
+      2,
+    );
+
+    // Ten of the forty bought, back to the supplier on credit.
+    const note = await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: "owner@example.com",
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: new Date().toISOString().slice(0, 10),
+        reason: "Short shipped",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lineId, quantity: 10 }],
+      },
+    });
+
+    const after = await getDashboardOverview({
+      companyId: fixture.companyId,
+      from: fixture.from,
+      to: fixture.to,
+    });
+
+    expect(Number(note.totalAmount)).toBeGreaterThan(0);
+    expect(Number(after.trading?.purchases)).toBeCloseTo(
+      Number(bill.totalAmount) - Number(note.totalAmount),
+      2,
+    );
+  }, 120_000);
+
+  it("is the same figure the ratios divide into payables", async () => {
+    // The point of one definition. The front page and the payable-days
+    // denominator are the same question, and a shop reading both must not be
+    // shown two answers.
+    const { fixture, bill, lineId } = await shopWithAReturn();
+    const { createPurchaseReturn } =
+      await import("@/server/returns/purchase-return-service");
+    const { netPurchases } =
+      await import("@/server/purchases/purchase-service");
+
+    await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: "owner@example.com",
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: new Date().toISOString().slice(0, 10),
+        reason: "Short shipped",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lineId, quantity: 10 }],
+      },
+    });
+
+    const overview = await getDashboardOverview({
+      companyId: fixture.companyId,
+      from: fixture.from,
+      to: fixture.to,
+    });
+    const shared = await netPurchases(prisma, {
+      companyId: fixture.companyId,
+      from: fixture.from,
+      to: fixture.to,
+    });
+
+    expect(Number(overview.trading?.purchases)).toBeCloseTo(Number(shared), 2);
+  }, 120_000);
+});

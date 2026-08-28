@@ -19,6 +19,7 @@ import {
   type AccountBalance,
 } from "@/server/accounting/balances";
 import { getFinancialStatements } from "@/server/accounting/statements-service";
+import { netPurchases } from "@/server/purchases/purchase-service";
 import {
   categoryMix,
   customerPerformance,
@@ -311,6 +312,12 @@ export async function getAnalytics(params: {
   // Purchases as the payable-days denominator: what suppliers billed the shop
   // in the window, less what went back to them.
   //
+  // Read from the purchases module rather than computed here. This was the
+  // same pair of aggregates the dashboard also ran — except the dashboard did
+  // not net the returns, so the front page and this ratio disagreed by the
+  // value of every debit note. One definition now, in the module that owns the
+  // fact.
+  //
   // Read from the bills rather than from the Inventory account's debit side,
   // which is what this used and which is not the same question. Three things
   // debit Inventory: a purchase, a sales return — goods a customer brought
@@ -323,32 +330,11 @@ export async function getAnalytics(params: {
   // ratio it cannot compute honestly is null rather than zero. A shop that had
   // never bought anything and took one return had that guard silently
   // satisfied, and the page told it that it pays its suppliers in nil days.
-  //
-  // Bill totals rather than taxable values, because the payables balance this
-  // is divided into carries the tax too. Returns are netted for the reason
-  // everything else in this file nets them: a debit note reduces what is owed.
-  const [billed, returned] = await Promise.all([
-    prisma.purchase.aggregate({
-      where: {
-        companyId: params.companyId,
-        status: "POSTED",
-        billDate: { gte: from, lte: to },
-      },
-      _sum: { totalAmount: true },
-    }),
-    prisma.purchaseReturn.aggregate({
-      where: {
-        companyId: params.companyId,
-        status: "POSTED",
-        returnDate: { gte: from, lte: to },
-      },
-      _sum: { totalAmount: true },
-    }),
-  ]);
-  const purchases = subtract(
-    billed._sum.totalAmount ?? 0,
-    returned._sum.totalAmount ?? 0,
-  );
+  const purchases = await netPurchases(prisma, {
+    companyId: params.companyId,
+    from,
+    to,
+  });
 
   const ratios = computeRatios({
     days,
