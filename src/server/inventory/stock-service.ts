@@ -17,6 +17,7 @@ import {
   toStorageString,
   type MoneyInput,
 } from "@/lib/money";
+import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 
 /**
  * Stock positions and the ledger behind them.
@@ -141,20 +142,46 @@ async function rebuildLayers(
  * Per company rather than per product, and deliberately. Every path touches
  * stock after its document number and before its journal number, so one lock
  * taken at that point gives a single order — document sequence, then stock,
- * then journal sequence — that no path can take the other way round, and
- * nothing here can deadlock against anything else. A per-product lock would be
- * finer and would oblige every caller to take a document's lines in a fixed
- * order to stay safe; a shop posts a handful of stock movements a minute, and
- * serialising those is not a cost it can measure.
+ * then journal sequence — that no path can take the other way round. A
+ * per-product lock would be finer and would oblige every caller to take a
+ * document's lines in a fixed order to stay safe; a shop posts a handful of
+ * stock movements a minute, and serialising those is not a cost it can measure.
  *
- * Transaction-scoped, so it is released on commit or rollback without anything
- * having to remember to.
+ * **The calendar is settled before the lock is taken, and that order is the
+ * whole reason this function does two things.** `ensureFiscalYearFor` holds an
+ * advisory lock of its own while it opens a fiscal year the calendar has not
+ * reached yet, and it too is held to commit. A sale meets it early — it needs a
+ * year to hang the invoice number off — so a sale's order is calendar, then
+ * stock. An adjustment takes no document number, so nothing made it think about
+ * the calendar until `postJournalEntry` settled the year on its way past: stock,
+ * then calendar. Two orders is a cycle, and the cycle is a deadlock Postgres
+ * resolves by aborting one of them — on the first morning of a new fiscal year,
+ * which is the one morning the calendar lock is ever contended, and precisely
+ * the morning `fiscal-calendar` describes when it explains why that lock exists.
+ * Settling the calendar here means no caller can arrive holding stock and
+ * wanting a year, whatever it did before it got here.
+ *
+ * The date is the movement's own, which is the date its journal entry carries
+ * on every path that posts one — so this opens no year that was not about to be
+ * opened a few statements later, and refuses the same dates `postJournalEntry`
+ * would have refused.
+ *
+ * Transaction-scoped, so both are released on commit or rollback without
+ * anything having to remember to.
  */
-async function lockStock(tx: DbClient, companyId: string): Promise<void> {
+async function lockStock(
+  tx: DbClient,
+  params: { companyId: string; movementDate: Date },
+): Promise<void> {
+  await ensureFiscalYearFor(tx, {
+    companyId: params.companyId,
+    date: params.movementDate,
+  });
+
   // `$executeRaw` rather than `$queryRaw`: the lock function returns void, and
   // asking for rows back from it fails to deserialise.
   await tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(hashtextextended(${`stock:${companyId}`}, 0))
+    SELECT pg_advisory_xact_lock(hashtextextended(${`stock:${params.companyId}`}, 0))
   `;
 }
 
@@ -313,7 +340,10 @@ export async function recordOutward(
     createdById?: string | null;
   },
 ): Promise<MovementResult> {
-  await lockStock(tx, params.companyId);
+  await lockStock(tx, {
+    companyId: params.companyId,
+    movementDate: params.movementDate,
+  });
   const position = await readPosition(tx, params);
 
   const consumption = consume(params.method, {
@@ -390,7 +420,10 @@ export async function recordInward(
     createdById?: string | null;
   },
 ): Promise<MovementResult> {
-  await lockStock(tx, params.companyId);
+  await lockStock(tx, {
+    companyId: params.companyId,
+    movementDate: params.movementDate,
+  });
   const position = await readPosition(tx, params);
 
   const value = multiply(params.quantity, params.unitCost);
