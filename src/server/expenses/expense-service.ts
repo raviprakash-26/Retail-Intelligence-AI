@@ -26,6 +26,7 @@ import { reversePostedEntry } from "@/server/documents/reversal";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 import { MasterDataError } from "@/server/master-data/errors";
+import { postingBranchId } from "@/server/company/posting-branch";
 
 /**
  * Expenses.
@@ -102,15 +103,10 @@ export async function createExpense(params: {
 
       const expenseDate = new Date(`${input.expenseDate}T00:00:00.000Z`);
 
-      const branchId =
-        params.branchId ??
-        (
-          await tx.branch.findFirst({
-            where: { companyId, isPrimary: true },
-            select: { id: true },
-          })
-        )?.id ??
-        null;
+      const branchId = await postingBranchId(tx, {
+        companyId,
+        memberBranchId: params.branchId,
+      });
 
       // --- Category ---------------------------------------------------------
       const category = await tx.expenseCategory.findFirst({

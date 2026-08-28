@@ -193,6 +193,50 @@ export async function readPosition(
   };
 }
 
+/**
+ * What each of several products holds at one branch.
+ *
+ * The batched form of the quantity `readPosition` returns, for a picker that
+ * has just matched twenty products and has to show a figure beside each of
+ * them.
+ *
+ * **The branch is a parameter rather than a filter that can be left off**, and
+ * that is the whole reason this exists. Stock is held per branch; `recordOutward`
+ * reads the position at the branch a sale is posting to and refuses to go below
+ * nil *there*. The invoice form was adding every branch's balance together, so
+ * the badge beside a product, the shortage warning under the line and the
+ * refusal on submit were three answers to one question, and only the last of
+ * them was about the shelf the goods were coming off.
+ *
+ * A product with no balance row at this branch is absent from the map. A caller
+ * reads that as nil, which is what an empty shelf is.
+ */
+export async function branchQuantities(
+  client: DbClient,
+  params: {
+    companyId: string;
+    branchId: string | null;
+    productIds: readonly string[];
+  },
+): Promise<Map<string, Decimal>> {
+  if (params.productIds.length === 0) return new Map();
+
+  const balances = await client.inventoryBalance.findMany({
+    where: {
+      companyId: params.companyId,
+      // Exactly this branch, null included — the same lookup `readPosition`
+      // does, and for the reason given there: null is a position of its own.
+      branchId: params.branchId,
+      productId: { in: [...params.productIds] },
+    },
+    select: { productId: true, quantity: true },
+  });
+
+  return new Map(
+    balances.map((balance) => [balance.productId, money(balance.quantity)]),
+  );
+}
+
 async function writeBalance(
   tx: DbClient,
   params: {

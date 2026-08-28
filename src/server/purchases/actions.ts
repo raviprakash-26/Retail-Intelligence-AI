@@ -19,6 +19,8 @@ import {
   type ActionResult,
 } from "@/server/auth/action-result";
 import { billingRefusal } from "@/server/billing/guards";
+import { postingBranchId } from "@/server/company/posting-branch";
+import { branchQuantities } from "@/server/inventory/stock-service";
 import { assertPermission } from "@/server/auth/context";
 import {
   NoFiscalPeriodError,
@@ -172,6 +174,15 @@ export async function searchPurchasableProductsAction(
   const context = await assertPermission("purchases.create");
   const trimmed = query.trim();
 
+  // The branch this member's bill will bring the goods into. Nothing refuses a
+  // purchase over it, so this is a figure somebody reads rather than one the
+  // server checks — which is the whole of its use: how many are already on this
+  // shelf is the question a reorder quantity is decided on.
+  const branchId = await postingBranchId(prisma, {
+    companyId: context.company.id,
+    memberBranchId: context.membership.branchId,
+  });
+
   const products = await prisma.product.findMany({
     where: {
       companyId: context.company.id,
@@ -199,10 +210,15 @@ export async function searchPurchasableProductsAction(
       isStockTracked: true,
       unit: { select: { code: true } },
       taxRate: { select: { ratePercent: true } },
-      inventoryBalances: { select: { quantity: true } },
     },
     orderBy: { name: "asc" },
     take: 20,
+  });
+
+  const onHand = await branchQuantities(prisma, {
+    companyId: context.company.id,
+    branchId,
+    productIds: products.map((product) => product.id),
   });
 
   return products.map((product) => ({
@@ -215,12 +231,7 @@ export async function searchPurchasableProductsAction(
     hsnCode: product.hsnCode,
     isStockTracked: product.isStockTracked,
     stockOnHand: product.isStockTracked
-      ? toStorageString(
-          product.inventoryBalances.reduce(
-            (total, balance) => total.plus(balance.quantity),
-            new Prisma.Decimal(0),
-          ),
-        )
+      ? toStorageString(onHand.get(product.id) ?? 0)
       : null,
   }));
 }

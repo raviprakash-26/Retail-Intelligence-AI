@@ -43,6 +43,7 @@ import { recordInward, recordOutward } from "@/server/inventory/stock-service";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 import { MasterDataError } from "@/server/master-data/errors";
+import { postingBranchId } from "@/server/company/posting-branch";
 
 /**
  * Sales invoices.
@@ -192,15 +193,10 @@ export async function createSale(params: {
       const method = company.inventoryMethod as InventoryMethod;
       const invoiceDate = new Date(`${input.invoiceDate}T00:00:00.000Z`);
 
-      const branchId =
-        params.branchId ??
-        (
-          await tx.branch.findFirst({
-            where: { companyId, isPrimary: true },
-            select: { id: true },
-          })
-        )?.id ??
-        null;
+      const branchId = await postingBranchId(tx, {
+        companyId,
+        memberBranchId: params.branchId,
+      });
 
       // --- Party and place of supply ------------------------------------
       const customer = input.customerId

@@ -20,6 +20,8 @@ import {
   type ActionResult,
 } from "@/server/auth/action-result";
 import { billingRefusal } from "@/server/billing/guards";
+import { postingBranchId } from "@/server/company/posting-branch";
+import { branchQuantities } from "@/server/inventory/stock-service";
 import { assertPermission } from "@/server/auth/context";
 import {
   NoFiscalPeriodError,
@@ -172,6 +174,14 @@ export async function searchSellableProductsAction(
   const context = await assertPermission("sales.create");
   const trimmed = query.trim();
 
+  // The branch this member's invoice will post to, because that is the branch
+  // whose shelf the sale will be refused against. Summing every branch told a
+  // cashier at the second shop that the first shop's stock was theirs to sell.
+  const branchId = await postingBranchId(prisma, {
+    companyId: context.company.id,
+    memberBranchId: context.membership.branchId,
+  });
+
   const products = await prisma.product.findMany({
     where: {
       companyId: context.company.id,
@@ -199,10 +209,15 @@ export async function searchSellableProductsAction(
       isStockTracked: true,
       unit: { select: { code: true } },
       taxRate: { select: { ratePercent: true } },
-      inventoryBalances: { select: { quantity: true } },
     },
     orderBy: { name: "asc" },
     take: 20,
+  });
+
+  const onHand = await branchQuantities(prisma, {
+    companyId: context.company.id,
+    branchId,
+    productIds: products.map((product) => product.id),
   });
 
   return products.map((product) => ({
@@ -215,12 +230,7 @@ export async function searchSellableProductsAction(
     hsnCode: product.hsnCode,
     isStockTracked: product.isStockTracked,
     stockOnHand: product.isStockTracked
-      ? toStorageString(
-          product.inventoryBalances.reduce(
-            (total, balance) => total.plus(balance.quantity),
-            new Prisma.Decimal(0),
-          ),
-        )
+      ? toStorageString(onHand.get(product.id) ?? 0)
       : null,
   }));
 }

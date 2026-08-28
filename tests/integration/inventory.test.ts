@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { StockMovementType } from "@prisma/client";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
-import { recordInward, recordOutward } from "@/server/inventory/stock-service";
+import {
+  branchQuantities,
+  recordInward,
+  recordOutward,
+} from "@/server/inventory/stock-service";
+import { createBranch } from "@/server/company/branch-service";
+import { postingBranchId } from "@/server/company/posting-branch";
+import type { BranchInput } from "@/lib/validation/company";
 import { toStorageString } from "@/lib/money";
 import type { RegisterInput } from "@/lib/validation/auth";
 import type { CustomerInput, ProductInput } from "@/lib/validation/master-data";
@@ -1149,4 +1156,219 @@ describe("stock at one branch and a sale at another", () => {
     expect(Number(result.quantityAfter)).toBe(95);
     expect(Number(result.unitCost)).toBeGreaterThan(0);
   }, 90_000);
+});
+
+/**
+ * Stock at a branch, and the figure the form shows for it.
+ *
+ * Stock is held per branch. A sale takes it out of the branch it posts to and
+ * `recordOutward` refuses to go below nil *there* — so "what is in stock",
+ * asked by the invoice form, and "what is in stock", answered by the sale, are
+ * one question with one answer.
+ *
+ * The form was adding every branch's balance together. A cashier at the second
+ * shop saw the first shop's stock in the badge beside the product, saw no
+ * shortage warning under a quantity their own shelf could not cover, and was
+ * refused on submit with a different number in the message. The stock
+ * adjustment form had been given the rule already, in as many words: "the same
+ * branch the adjustment will post against, so the figure shown beside the count
+ * box is the one it will be compared with." The sales form had not.
+ *
+ * `postingBranchId` is now the one place that decides which branch a member's
+ * document lands on, and `branchQuantities` the one place that reads a shelf.
+ * The cases below hold the two together.
+ */
+describe("stock at a branch", () => {
+  async function twoBranchShop() {
+    const fixture = await createCompany();
+    const primary = await prisma.branch.findFirstOrThrow({
+      where: { companyId: fixture.companyId, isPrimary: true },
+      select: { id: true },
+    });
+    const second = await createBranch({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        code: "BR2",
+        name: "Jayanagar",
+        addressLine1: "",
+        city: "Bengaluru",
+        stateCode: "29",
+        pincode: "",
+        phone: "",
+      } satisfies BranchInput,
+    });
+
+    return { fixture, primaryId: primary.id, secondId: second.id };
+  }
+
+  it("is held on the branch it arrived at, and nowhere else", async () => {
+    const { fixture, primaryId, secondId } = await twoBranchShop();
+
+    const atPrimary = await branchQuantities(prisma, {
+      companyId: fixture.companyId,
+      branchId: primaryId,
+      productIds: [fixture.productId],
+    });
+    const atSecond = await branchQuantities(prisma, {
+      companyId: fixture.companyId,
+      branchId: secondId,
+      productIds: [fixture.productId],
+    });
+
+    // Opening stock was placed on the primary branch. The second shop has an
+    // empty shelf, and an absent row is what an empty shelf looks like.
+    expect(Number(atPrimary.get(fixture.productId))).toBe(100);
+    expect(atSecond.get(fixture.productId)).toBeUndefined();
+  });
+
+  it("reads the same figure the sale will be refused against", async () => {
+    const { fixture, secondId } = await twoBranchShop();
+
+    // What the invoice form would put in the badge for a cashier at the second
+    // shop, and what it would compare the line quantity with.
+    const available = await branchQuantities(prisma, {
+      companyId: fixture.companyId,
+      branchId: secondId,
+      productIds: [fixture.productId],
+    });
+    const shown = Number(available.get(fixture.productId) ?? 0);
+
+    await expect(
+      createSale({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        branchId: secondId,
+        input: {
+          customerId: fixture.customerId,
+          invoiceDate: TODAY,
+          paymentMode: "CREDIT",
+          placeOfSupply: "",
+          priceIncludesTax: false,
+          notes: "",
+          lines: [
+            {
+              productId: fixture.productId,
+              description: "",
+              quantity: 20,
+              rate: 100,
+              discountPercent: 0,
+            },
+          ],
+        } satisfies SaleInput,
+      }),
+    ).rejects.toThrow(/Only 0 .* in stock/);
+
+    // The point of the case: the form's number and the refusal's number are the
+    // same number. Read from the whole business it was 100, and the cashier was
+    // shown no warning at all before being refused.
+    expect(shown).toBe(0);
+  });
+
+  it("sells what the branch actually holds", async () => {
+    // The other half, so the case above cannot pass by refusing everything.
+    const { fixture, primaryId } = await twoBranchShop();
+
+    const available = await branchQuantities(prisma, {
+      companyId: fixture.companyId,
+      branchId: primaryId,
+      productIds: [fixture.productId],
+    });
+    expect(Number(available.get(fixture.productId))).toBe(100);
+
+    const sale = await createSale({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: primaryId,
+      input: {
+        customerId: fixture.customerId,
+        invoiceDate: TODAY,
+        paymentMode: "CREDIT",
+        placeOfSupply: "",
+        priceIncludesTax: false,
+        notes: "",
+        lines: [
+          {
+            productId: fixture.productId,
+            description: "",
+            quantity: 20,
+            rate: 100,
+            discountPercent: 0,
+          },
+        ],
+      } satisfies SaleInput,
+    });
+    expect(sale.id).toBeTruthy();
+
+    const after = await branchQuantities(prisma, {
+      companyId: fixture.companyId,
+      branchId: primaryId,
+      productIds: [fixture.productId],
+    });
+    expect(Number(after.get(fixture.productId))).toBe(80);
+  });
+
+  it("shows nobody else's shelf", async () => {
+    const mine = await createCompany();
+    const theirs = await createCompany();
+    const theirPrimary = await prisma.branch.findFirstOrThrow({
+      where: { companyId: theirs.companyId, isPrimary: true },
+      select: { id: true },
+    });
+
+    // Another tenant's branch id with this tenant's company id resolves to
+    // nothing rather than to their stock.
+    const quantities = await branchQuantities(prisma, {
+      companyId: mine.companyId,
+      branchId: theirPrimary.id,
+      productIds: [theirs.productId, mine.productId],
+    });
+
+    expect(quantities.size).toBe(0);
+  });
+});
+
+describe("the branch a member's document posts to", () => {
+  it("is the member's own branch where they have one", async () => {
+    const fixture = await createCompany();
+    const second = await createBranch({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        code: "BR3",
+        name: "Malleswaram",
+        addressLine1: "",
+        city: "Bengaluru",
+        stateCode: "29",
+        pincode: "",
+        phone: "",
+      } satisfies BranchInput,
+    });
+
+    await expect(
+      postingBranchId(prisma, {
+        companyId: fixture.companyId,
+        memberBranchId: second.id,
+      }),
+    ).resolves.toBe(second.id);
+  });
+
+  it("is the primary branch for a member restricted to none", async () => {
+    const fixture = await createCompany();
+    const primary = await prisma.branch.findFirstOrThrow({
+      where: { companyId: fixture.companyId, isPrimary: true },
+      select: { id: true },
+    });
+
+    await expect(
+      postingBranchId(prisma, {
+        companyId: fixture.companyId,
+        memberBranchId: null,
+      }),
+    ).resolves.toBe(primary.id);
+  });
 });

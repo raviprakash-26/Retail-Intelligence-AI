@@ -14,6 +14,7 @@ import { postJournalEntry } from "@/server/accounting/post-journal-entry";
 import { recordAuditLog } from "@/server/audit/audit-log";
 import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { readPosition, recordInward, recordOutward } from "./stock-service";
+import { postingBranchId } from "@/server/company/posting-branch";
 
 /**
  * Bringing the books into line with what is actually on the shelf.
@@ -128,15 +129,10 @@ export async function createStockAdjustment(params: {
     // the primary one. Stock positions are held per branch, so falling back to
     // "no branch" would read a position of nil and turn every adjustment into
     // an apparent gain of the whole counted quantity.
-    const branchId =
-      params.branchId ??
-      (
-        await tx.branch.findFirst({
-          where: { companyId, isPrimary: true },
-          select: { id: true },
-        })
-      )?.id ??
-      null;
+    const branchId = await postingBranchId(tx, {
+      companyId,
+      memberBranchId: params.branchId,
+    });
     const method = company.inventoryMethod as InventoryMethod;
 
     const position = await readPosition(tx, {
