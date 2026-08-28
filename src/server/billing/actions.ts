@@ -1,4 +1,5 @@
 "use server";
+import { logger } from "@/lib/observability/logger";
 
 import { revalidatePath } from "next/cache";
 import {
@@ -106,7 +107,10 @@ export async function startPlanUpgradeAction(
         code: error.code,
       });
     }
-    console.error("Starting a plan upgrade failed", error);
+    logger.error("Starting a plan upgrade failed", {
+      module: "Billing",
+      error,
+    });
     return fail(
       "Something went wrong starting the payment. Nothing has been charged.",
       { code: ACTION_ERROR.UNEXPECTED },

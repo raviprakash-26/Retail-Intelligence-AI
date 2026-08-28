@@ -1,4 +1,5 @@
 "use server";
+import { logger } from "@/lib/observability/logger";
 
 import { revalidatePath } from "next/cache";
 import {
@@ -50,7 +51,7 @@ function fromServiceError(error: unknown): ActionResult<never> {
       fieldErrors: { code: "That code is already in use." },
     });
   }
-  console.error("Account action failed", error);
+  logger.error("Account action failed", { module: "Accounting", error });
   return fail("Something went wrong. Nothing was changed — please try again.", {
     code: ACTION_ERROR.UNEXPECTED,
   });

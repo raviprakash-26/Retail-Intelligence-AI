@@ -1,5 +1,6 @@
 import "server-only";
 import { env } from "@/lib/env";
+import { logger } from "@/lib/observability/logger";
 
 /**
  * Outbound email.
@@ -58,7 +59,12 @@ class UnconfiguredMailer implements Mailer {
 
   async send(message: EmailMessage): Promise<EmailResult> {
     const reason = `The "${this.driver}" email driver is selected but not implemented yet.`;
-    console.error(`Email not sent to ${message.to}: ${reason}`);
+    logger.error("Email not sent", {
+      module: "Email",
+      driver: this.driver,
+      to: message.to,
+      reason,
+    });
     return { delivered: false, driver: this.driver, reason };
   }
 }

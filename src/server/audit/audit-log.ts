@@ -2,6 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma, type DbClient } from "@/lib/db";
 import { redactValue } from "@/lib/redaction";
+import { logger } from "@/lib/observability/logger";
 
 /**
  * Audit logging.
@@ -90,10 +91,12 @@ export async function recordAuditLog(
       },
     });
   } catch (error) {
-    console.error("Failed to write audit log entry", {
+    // Only the action and the module, never the metadata: the redaction that
+    // would have cleaned it is exactly what did not run.
+    logger.error("Failed to write audit log entry", {
       action: entry.action,
       module: entry.module,
-      error: error instanceof Error ? error.message : String(error),
+      error,
     });
   }
 }

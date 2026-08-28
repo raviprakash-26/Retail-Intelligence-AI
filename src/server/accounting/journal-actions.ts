@@ -1,4 +1,5 @@
 "use server";
+import { logger } from "@/lib/observability/logger";
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
@@ -57,7 +58,7 @@ function fromServiceError(error: unknown): ActionResult<never> {
   ) {
     return fail(error.message, { code: "PERIOD_UNAVAILABLE" });
   }
-  console.error("Journal action failed", error);
+  logger.error("Journal action failed", { module: "Accounting", error });
   return fail("Something went wrong. Nothing was posted — please try again.", {
     code: ACTION_ERROR.UNEXPECTED,
   });

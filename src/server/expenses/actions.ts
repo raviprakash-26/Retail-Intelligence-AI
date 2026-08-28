@@ -1,4 +1,5 @@
 "use server";
+import { logger } from "@/lib/observability/logger";
 
 import { revalidatePath } from "next/cache";
 import {
@@ -59,7 +60,7 @@ function fromServiceError(error: unknown): ActionResult<never> {
   ) {
     return fail(error.message, { code: "PERIOD_UNAVAILABLE" });
   }
-  console.error("Expense action failed", error);
+  logger.error("Expense action failed", { module: "Expenses", error });
   return fail(
     "Something went wrong. Nothing was recorded — please try again.",
     {

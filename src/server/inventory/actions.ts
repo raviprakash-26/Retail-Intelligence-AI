@@ -1,4 +1,5 @@
 "use server";
+import { logger } from "@/lib/observability/logger";
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
@@ -87,7 +88,7 @@ export async function createStockAdjustmentAction(
     ) {
       return fail(error.message, { code: "PERIOD_UNAVAILABLE" });
     }
-    console.error("Stock adjustment failed", error);
+    logger.error("Stock adjustment failed", { module: "Inventory", error });
     return fail(
       "Something went wrong. Nothing was changed — please try again.",
       { code: ACTION_ERROR.UNEXPECTED },

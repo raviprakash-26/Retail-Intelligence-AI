@@ -1,4 +1,5 @@
 "use server";
+import { logger } from "@/lib/observability/logger";
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -89,7 +90,7 @@ function fromTeamError(error: unknown): ActionResult<never> {
       fieldErrors: error.field ? { [error.field]: error.message } : undefined,
     });
   }
-  console.error("Company action failed", error);
+  logger.error("Company action failed", { module: "Settings", error });
   return fail("Something went wrong. Nothing was changed — please try again.", {
     code: ACTION_ERROR.UNEXPECTED,
   });

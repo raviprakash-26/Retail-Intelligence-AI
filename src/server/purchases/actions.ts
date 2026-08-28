@@ -1,4 +1,5 @@
 "use server";
+import { logger } from "@/lib/observability/logger";
 
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
@@ -66,7 +67,7 @@ function fromServiceError(error: unknown): ActionResult<never> {
   ) {
     return fail(error.message, { code: "PERIOD_UNAVAILABLE" });
   }
-  console.error("Purchase action failed", error);
+  logger.error("Purchase action failed", { module: "Purchases", error });
   return fail(
     "Something went wrong. Nothing was recorded — please try again.",
     {
