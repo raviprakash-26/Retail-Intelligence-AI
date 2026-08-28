@@ -346,10 +346,27 @@ export async function getCashProjection(params: {
         select: { entryDate: true },
       }),
       accountBalances({ companyId: params.companyId, to: today }),
+      // The last quarter's movement, with the year-end closing entry left out.
+      //
+      // A closing entry credits every expense account by the whole of its
+      // year's balance on one day. This window is thirteen weeks wide and ends
+      // today, so from the first of April until about the end of June it
+      // contains that day — the whole of the first quarter of every year, for
+      // every shop that closes its books.
+      //
+      // Inside that quarter the sum below is a quarter's debits against a
+      // year's credit, which does not merely fall to nil: it goes *negative*.
+      // `weeklyRunningCost` is then subtracted from each projected week, so a
+      // negative one adds money every week instead of taking it away. The
+      // shortfall week disappears and the shop is told it never runs out —
+      // which is the one thing this projection exists to say, failing in the
+      // direction that does the damage, in the quarter a shop is least sure of
+      // its cash.
       accountBalances({
         companyId: params.companyId,
         from: costWindowFrom,
         to: today,
+        excludeClosingEntries: true,
       }),
       dueSchedule({ companyId: params.companyId, kind: "receivable" }),
       dueSchedule({ companyId: params.companyId, kind: "payable" }),

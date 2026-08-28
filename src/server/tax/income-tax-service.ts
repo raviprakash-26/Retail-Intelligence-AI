@@ -679,7 +679,33 @@ export async function getTaxWorkingPaper(params: {
       from: isoDay(from),
       to: isoDay(to),
     }),
-    accountBalances({ companyId: params.companyId, from, to }),
+    // Movement through the year, with the year-end closing entry left out.
+    //
+    // Everything read off this is period movement — `sumSubType` sums
+    // `periodDebit` against `periodCredit` — and a closing entry moves an
+    // income or expense account by the whole of its balance. Read as movement
+    // it cancels the year exactly, so the moment the year was closed every
+    // figure taken from here fell to nil.
+    //
+    // The consequence is not cosmetic. `bookDepreciation` is *added back* to
+    // book profit, because book depreciation is not what the Act allows and
+    // the Appendix I figure goes in below it. Net profit already carries the
+    // charge as an expense; when the add-back reads nil and the Act's figure
+    // is still deducted, the same depreciation comes off twice and the
+    // taxable income is understated by the whole of it. A shop closes its year
+    // in April and files after, so the computation was wrong exactly when it
+    // came to be used — the same shape as the statements defect this flag was
+    // added for, in a reader that did not get it.
+    //
+    // Positions are not read from this call at all: `cashMix` takes the
+    // account list to find the cash and bank ids and nothing else, so the
+    // flag's effect on the closing columns reaches nobody.
+    accountBalances({
+      companyId: params.companyId,
+      from,
+      to,
+      excludeClosingEntries: true,
+    }),
     prisma.fixedAsset.findMany({
       where: {
         companyId: params.companyId,
