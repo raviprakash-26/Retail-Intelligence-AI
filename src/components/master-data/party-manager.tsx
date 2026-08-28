@@ -670,7 +670,8 @@ function PartyDialog({
                         />
                       </FormControl>
                       <FormDescription>
-                        0 means no limit is enforced.
+                        Recorded against the customer for reference. Nothing
+                        stops an invoice that takes them over it.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
