@@ -1,6 +1,7 @@
 import "server-only";
 import { MembershipStatus, UserStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { companyIsReachable } from "@/server/company/company-access";
 import { hashPassword } from "@/lib/auth/password";
 import { expiresAt, hashToken, issueToken, TOKEN_TTL } from "@/lib/auth/tokens";
 import { SYSTEM_ROLE, type PermissionKey } from "@/lib/rbac/permissions";
@@ -470,7 +471,9 @@ export async function previewInvitation(
     record.consumedAt ||
     record.expiresAt.getTime() <= Date.now() ||
     !record.company ||
-    record.company.status === "CANCELLED"
+    // An invitation into a suspended business is an invitation to nothing: the
+    // context the new member would get is refused on their first request.
+    !companyIsReachable(record.company.status)
   ) {
     return null;
   }
@@ -525,6 +528,7 @@ export async function acceptInvitation(params: {
       consumedAt: true,
       expiresAt: true,
       metadata: true,
+      company: { select: { status: true } },
     },
   });
 
@@ -533,7 +537,14 @@ export async function acceptInvitation(params: {
     record.purpose !== "MEMBER_INVITATION" ||
     record.consumedAt ||
     record.expiresAt.getTime() <= Date.now() ||
-    !record.companyId
+    !record.companyId ||
+    // `previewInvitation` refuses to show an invitation into a business nobody
+    // can reach; this refuses to act on one. The preview is what the invitee
+    // sees and this is what the form posts to, so a guard on only the first is
+    // a guard on nothing — the link still works if you follow it twice, and it
+    // never checked the status at all.
+    !record.company ||
+    !companyIsReachable(record.company.status)
   ) {
     throw new TeamOperationError(
       "This invitation is no longer valid. Ask for a new one.",

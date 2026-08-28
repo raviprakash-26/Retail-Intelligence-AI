@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { forbidden, redirect, unauthorized } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { companyIsReachable } from "@/server/company/company-access";
 import type { PermissionKey } from "@/lib/rbac/permissions";
 import {
   getSessionFromCookie,
@@ -90,7 +91,7 @@ export const getUserCompanies = cache(
     });
 
     return memberships
-      .filter((membership) => membership.company.status !== "CANCELLED")
+      .filter((membership) => companyIsReachable(membership.company.status))
       .map((membership) => ({
         id: membership.company.id,
         name: membership.company.name,
@@ -150,7 +151,11 @@ export const getCompanyContext = cache(
     });
 
     if (!membership) return null;
-    if (membership.company.status === "CANCELLED") return null;
+    // A suspended company is as unreachable as a cancelled one, which is what
+    // suspension is for and what it did not do. Both land the caller on
+    // `/onboarding` through `requireCompanyContext`, the same as a user who has
+    // been removed from every company they had.
+    if (!companyIsReachable(membership.company.status)) return null;
 
     return {
       session,
