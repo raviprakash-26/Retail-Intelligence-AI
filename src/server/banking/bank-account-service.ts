@@ -3,6 +3,7 @@ import { AccountSubType } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { toStorageString } from "@/lib/money";
 import type { BankAccountValues } from "@/lib/validation/banking";
+import { recordAuditLog } from "@/server/audit/audit-log";
 
 /**
  * The bank accounts a company keeps, and the ledger accounts behind them.
@@ -127,6 +128,13 @@ export async function bankableAccounts(
 
 export async function createBankAccount(params: {
   companyId: string;
+  /**
+   * Who did it. Required rather than optional, so a call site cannot leave the
+   * entry anonymous by forgetting — the same device the role assignment guard
+   * uses for the permissions it checks against.
+   */
+  userId: string;
+  actorEmail: string;
   input: BankAccountValues;
 }): Promise<{ id: string; name: string }> {
   const { companyId, input } = params;
@@ -196,6 +204,33 @@ export async function createBankAccount(params: {
       openingBalance: toStorageString(0),
     },
     select: { id: true, name: true },
+  });
+
+  // Matching one statement line to one journal entry is recorded here, and so
+  // is unmatching it, and so is importing the statement, and so is recording a
+  // receipt from a line. Adding the bank account itself was not — the one
+  // operation in this module that names a bank, an account number and an IFSC,
+  // and binds them to a ledger account every later reconciliation reads.
+  //
+  // The number is masked for the same reason `maskAccountNumber` exists: the
+  // log is deliberately impossible to delete from, so what goes in has to be
+  // what somebody would still want there in a year.
+  await recordAuditLog({
+    action: "banking.account_created",
+    module: "Banking",
+    companyId,
+    userId: params.userId,
+    actorEmail: params.actorEmail,
+    entityType: "BankAccount",
+    entityId: created.id,
+    metadata: {
+      name: created.name,
+      bankName: input.bankName ?? null,
+      accountNumber: maskAccountNumber(input.accountNumber ?? null),
+      ifsc: input.ifsc?.toUpperCase() ?? null,
+      type: input.type,
+      ledgerAccountId: input.accountId,
+    },
   });
 
   return created;

@@ -96,6 +96,8 @@ export async function createBankAccountAction(
   try {
     const created = await createBankAccount({
       companyId: context.company.id,
+      userId: context.user.id,
+      actorEmail: context.user.email,
       input: parsed.data,
     });
     revalidateBanking();

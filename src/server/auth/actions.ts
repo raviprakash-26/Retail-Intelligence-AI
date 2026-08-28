@@ -735,6 +735,22 @@ export async function resendVerificationAction(): Promise<
     }),
   );
 
+  // Asking for a password reset link is recorded; asking for a verification
+  // link was not, and the two issue the same kind of thing. This one also
+  // consumes every outstanding verification token before minting a new one, so
+  // an unrecorded call is a credential rotated with nothing to say it happened.
+  // The rate limiter above knows it, and a rate limiter's counter is not a
+  // record anybody can read six months later.
+  const context = await getRequestContext();
+  await recordAuditLog({
+    action: AUDIT_ACTION.VERIFICATION_RESENT,
+    module: "Auth",
+    userId: session.user.id,
+    actorEmail: session.user.email,
+    ipAddress: context.ipAddress,
+    userAgent: context.userAgent,
+  });
+
   return ok({ sent: true });
 }
 

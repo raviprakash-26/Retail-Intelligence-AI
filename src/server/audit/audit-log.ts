@@ -24,6 +24,7 @@ export const AUDIT_ACTION = {
   SIGN_OUT: "auth.sign_out",
   REGISTER: "auth.register",
   EMAIL_VERIFIED: "auth.email_verified",
+  VERIFICATION_RESENT: "auth.verification_resent",
   PASSWORD_RESET_REQUESTED: "auth.password_reset_requested",
   PASSWORD_RESET_COMPLETED: "auth.password_reset_completed",
   PASSWORD_CHANGED: "auth.password_changed",
