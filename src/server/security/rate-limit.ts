@@ -14,10 +14,40 @@ import { incrementCounter } from "@/lib/observability/metrics";
  * single-instance deploy, because a limiter that silently counts per-replica is
  * a limiter with N times the budget somebody configured.
  *
- * Two independent keys guard every credential endpoint: one per IP address and
- * one per account. IP-only limiting lets a botnet spread an attack on a single
- * account across thousands of addresses; account-only limiting lets one address
- * spray a whole user list. Both are needed.
+ * **Two independent keys guard an endpoint that takes a guess at a credential:**
+ * one per IP address and one per account. IP-only limiting lets a botnet spread
+ * an attack on a single account across thousands of addresses; account-only
+ * limiting lets one address spray a whole user list. Both are needed, and
+ * `tests/unit/credential-rate-limits.test.ts` refuses an endpoint that has only
+ * one.
+ *
+ * That sentence used to say "every credential endpoint", which was not true of
+ * three of them and hid a real gap in a fourth. What decides whether an
+ * endpoint needs both keys is not whether it touches a password — it is
+ * whether an attacker gets to *guess*.
+ *
+ *   guessing      sign-in takes an email and a password, and both are
+ *                 guessable. So does accepting an invitation into an address
+ *                 that already has an account, which was rate limited on the
+ *                 IP alone while issuing a session — an IP-limited password
+ *                 oracle, and the reason that sentence was worth checking.
+ *
+ *   not guessing  a password-reset or verification link carries 32 random
+ *                 bytes. 256 bits is not guessable at any rate, so a counter
+ *                 adds nothing to the security of those endpoints and takes
+ *                 something away: a mail scanner that prefetches links, or a
+ *                 person clicking twice, would spend a budget meant for an
+ *                 attacker who cannot use it. Both validate the token before
+ *                 doing any expensive work, so an invalid one costs a single
+ *                 indexed lookup rather than a password hash.
+ *
+ *   no account    registration has no account to key on yet. The IP axis is
+ *                 the only one that exists, and the address is what it is
+ *                 protecting against.
+ *
+ *   known actor   resending a verification email needs a session, so the actor
+ *                 is already identified and the account axis is the one that
+ *                 means anything.
  */
 
 export type RateLimitResult = {
