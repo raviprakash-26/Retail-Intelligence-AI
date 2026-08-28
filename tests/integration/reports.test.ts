@@ -683,3 +683,83 @@ describe("what a report refuses to do", () => {
     expect(ours.rows.at(-1)!.cells.debit).not.toBe(theirTrial.totalDebit);
   }, 120_000);
 });
+
+/**
+ * What the purchase register says about the input credit it prints.
+ *
+ * The note under that report describes a figure it does not compute — the
+ * headline comes from `listPurchases`, and the note is a sentence about it.
+ * When the headline started netting the credit given up on debit notes, the
+ * note went on saying the figure was "accumulated from posted, eligible bills",
+ * which had stopped being what it was.
+ *
+ * Nothing pinned it, which is why it went stale in the first place. This does:
+ * an accountant reconciles this register against the GST working paper, which
+ * nets the same way, and the sentence is what tells them the two should agree.
+ */
+describe("the purchase register's note about input credit", () => {
+  it("prints the figure net of what debit notes gave back, and says so", async () => {
+    const fixture = await createCompany();
+    const { createPurchase: buy } =
+      await import("@/server/purchases/purchase-service");
+    const { createPurchaseReturn } =
+      await import("@/server/returns/purchase-return-service");
+
+    const bill = await buy({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        supplierId: fixture.supplierId,
+        supplierBillNo: "",
+        billDate: today,
+        paymentMode: "CREDIT",
+        priceIncludesTax: false,
+        claimInputCredit: true,
+        notes: "",
+        lines: [
+          {
+            productId: fixture.productId,
+            description: "",
+            quantity: 10,
+            rate: 100,
+            discountPercent: 0,
+          },
+        ],
+      } satisfies PurchaseInput,
+    });
+
+    const { testDb } = await import("../helpers/test-db");
+    const line = await testDb().purchaseItem.findFirstOrThrow({
+      where: { purchaseId: bill.id },
+      select: { id: true },
+    });
+    await createPurchaseReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        purchaseId: bill.id,
+        returnDate: today,
+        reason: "",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: line.id, quantity: 4 }],
+      },
+    });
+
+    const report = await run(fixture.companyId, "purchase-register");
+    const note = report.notes.find((entry) =>
+      entry.includes("Input tax credit"),
+    );
+
+    expect(note).toBeDefined();
+    // The sentence has to name the netting, or a reader reconciling this
+    // against the GST working paper is told the wrong thing about a figure
+    // that happens to be right.
+    expect(note).toMatch(/debit notes/i);
+    // ₹1,000 at 18% is ₹180 claimed; ₹400 back gives up ₹72.
+    expect(note).toContain("108");
+  }, 120_000);
+});
