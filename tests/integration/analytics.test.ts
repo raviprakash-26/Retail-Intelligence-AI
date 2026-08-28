@@ -952,3 +952,121 @@ describe("the breakdowns cannot disagree with the trend either", () => {
     expect(served).toBe(1);
   });
 });
+
+/**
+ * Which days earn, once what came back is taken off them.
+ *
+ * The panel is titled "Which days earn" and its subtitle names a strongest day
+ * as a fact. It ran gross of returns while the three breakdowns beside it —
+ * products, customers, categories — all ran net, so a shop whose biggest
+ * Tuesday came back was being told the wrong one.
+ *
+ * The obvious fix is wrong here, which is why these cases pin the direction.
+ * The other three net a return against the dimension the sale carried — the
+ * product, the customer, the category — and those are identical on both
+ * documents, so taking the return on its own date lands it in the right
+ * bucket. Here the dimension *is* the date: a Tuesday sale returned on Thursday
+ * would take value off Thursday and leave Tuesday standing at full, which
+ * reports the wrong strongest day twice over.
+ */
+describe("the weekday pattern", () => {
+  const TUESDAY = 2;
+  const THURSDAY = 4;
+
+  async function shopThatSoldAndTookItBack() {
+    const fixture = await createCompany();
+
+    // Sold on a Tuesday, returned on a Thursday.
+    const sale = await sell(fixture, {
+      productId: fixture.riceId,
+      quantity: 10,
+      rate: 100,
+      date: "2026-05-12",
+    });
+    const line = await prisma.saleItem.findFirstOrThrow({
+      where: { saleId: sale.id },
+      select: { id: true },
+    });
+
+    return { fixture, sale, lineId: line.id };
+  }
+
+  it("takes a return off the day the sale was made, not the day it came back", async () => {
+    const { fixture, lineId } = await shopThatSoldAndTookItBack();
+    const { weekdayPattern } =
+      await import("@/server/analytics/sales-analytics");
+    const window = {
+      companyId: fixture.companyId,
+      from: fixture.fiscalYearStart,
+      to: fixture.fiscalYearEnd,
+    };
+
+    const before = await weekdayPattern(window);
+    const tuesdayBefore = Number(before[TUESDAY]!.revenue);
+    const thursdayBefore = Number(before[THURSDAY]!.revenue);
+    expect(tuesdayBefore).toBeCloseTo(1000, 2);
+
+    await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: (await shopReturnTarget(fixture)).id,
+        returnDate: "2026-05-14",
+        reason: "Four bags were damaged in transit",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lineId, quantity: 4 }],
+      },
+    });
+
+    const after = await weekdayPattern(window);
+
+    // Four of ten came back: ₹400 off Tuesday, the day it was sold.
+    expect(Number(after[TUESDAY]!.revenue)).toBeCloseTo(tuesdayBefore - 400, 2);
+    // Thursday is untouched. Taking it off here is the wrong-bucket mistake
+    // that copying the sibling breakdowns would have made.
+    expect(Number(after[THURSDAY]!.revenue)).toBeCloseTo(thursdayBefore, 2);
+  }, 120_000);
+
+  it("does not drop the bill count when goods come back", async () => {
+    // The rule `customerPerformance` states about its own count: the customer
+    // was invoiced, and a count that fell when goods came back would say a shop
+    // had served somebody fewer times than it did.
+    const { fixture, lineId } = await shopThatSoldAndTookItBack();
+    const { weekdayPattern } =
+      await import("@/server/analytics/sales-analytics");
+    const window = {
+      companyId: fixture.companyId,
+      from: fixture.fiscalYearStart,
+      to: fixture.fiscalYearEnd,
+    };
+
+    const bills = (await weekdayPattern(window))[TUESDAY]!.bills;
+
+    await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: (await shopReturnTarget(fixture)).id,
+        returnDate: "2026-05-14",
+        reason: "Four bags were damaged in transit",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lineId, quantity: 4 }],
+      },
+    });
+
+    expect((await weekdayPattern(window))[TUESDAY]!.bills).toBe(bills);
+  }, 120_000);
+});
+
+/** The single sale a weekday fixture made, for the return to point at. */
+async function shopReturnTarget(fixture: { companyId: string }) {
+  return prisma.sale.findFirstOrThrow({
+    where: { companyId: fixture.companyId },
+    select: { id: true },
+    orderBy: { createdAt: "desc" },
+  });
+}
