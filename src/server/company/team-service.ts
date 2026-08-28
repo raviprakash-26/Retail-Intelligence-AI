@@ -2,7 +2,8 @@ import "server-only";
 import { MembershipStatus, UserStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { companyIsReachable } from "@/server/company/company-access";
-import { hashPassword } from "@/lib/auth/password";
+import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { evaluatePasswordStrength } from "@/lib/auth/password-policy";
 import { expiresAt, hashToken, issueToken, TOKEN_TTL } from "@/lib/auth/tokens";
 import { SYSTEM_ROLE, type PermissionKey } from "@/lib/rbac/permissions";
 import type {
@@ -565,8 +566,58 @@ export async function acceptInvitation(params: {
   }
 
   const companyId = record.companyId;
-  const passwordHash = await hashPassword(input.password);
   const now = new Date();
+
+  // Whether the invited address already has an account decides what the
+  // password in this request means, so it is resolved before the transaction
+  // and the work is done outside it — hashing and verifying are both
+  // deliberately slow, and a transaction held open across one is a lock held
+  // open across one.
+  const account = await prisma.user.findUnique({
+    where: { email: record.email },
+    select: { id: true, passwordHash: true },
+  });
+
+  if (account) {
+    // **The password is proof, not a formality.**
+    //
+    // Accepting an invitation signs the caller straight in — the action creates
+    // a session on the strength of what this returns. For an address that
+    // already has an account that makes this a credential check, and it was
+    // not one: the typed password was hashed, ignored, and the session issued
+    // anyway. Anyone holding the link was signed in as that user with any
+    // string that passed the strength meter. The form says "this just confirms
+    // it is you", and nothing confirmed anything.
+    //
+    // The strength rule deliberately does not apply here. It is a rule about
+    // choosing a password, and this is a rule about knowing one — an existing
+    // password that predates the current policy is still the right answer, and
+    // refusing it would lock somebody out of an invitation over a credential
+    // that works everywhere else in the product.
+    const matches = await verifyPassword(input.password, account.passwordHash);
+    if (!matches) {
+      throw new TeamOperationError(
+        "That password does not match the account for this address. Use the password you already sign in with, or reset it first.",
+        "INVALID_CREDENTIALS",
+        "password",
+      );
+    }
+  } else {
+    const strength = evaluatePasswordStrength(input.password, {
+      name: input.fullName,
+    });
+    if (!strength.acceptable) {
+      throw new TeamOperationError(
+        strength.issues[0] ?? "Please choose a stronger password.",
+        "WEAK_PASSWORD",
+        "password",
+      );
+    }
+  }
+
+  // Only a new account needs one, and hashing a password that is about to be
+  // discarded is the shape that hid the missing check.
+  const passwordHash = account ? null : await hashPassword(input.password);
 
   const result = await prisma.$transaction(async (tx) => {
     // Consume by id *and* unconsumed state so two parallel submissions of the
@@ -582,6 +633,8 @@ export async function acceptInvitation(params: {
       );
     }
 
+    // Re-read inside the transaction: the check above decided what the request
+    // means, this decides what to write.
     const existing = await tx.user.findUnique({
       where: { email: record.email },
       select: { id: true, status: true },
@@ -592,8 +645,9 @@ export async function acceptInvitation(params: {
 
     if (existing) {
       userId = existing.id;
-      // An existing user keeps their password; the one they typed is ignored
-      // rather than silently overwriting a credential they already rely on.
+      // An existing user keeps their password. The one they typed was checked
+      // against it above rather than overwriting it — the invitation proves
+      // control of the mailbox, and the password proves who is holding it.
       await tx.user.update({
         where: { id: userId },
         data: {
@@ -612,7 +666,7 @@ export async function acceptInvitation(params: {
           email: record.email,
           fullName: input.fullName,
           mobile: input.mobile || null,
-          passwordHash,
+          passwordHash: passwordHash!,
           // Following the link proves control of the mailbox.
           emailVerifiedAt: now,
           // Accepting signs them straight in; this is a real sign-in.
