@@ -447,9 +447,15 @@ describe("accepting an invitation", () => {
         token: invitation.token,
         fullName: "Ravi Prakash",
         mobile: "",
-        // A different password from their real one; it must be ignored.
-        password: "SomeOtherPassword99!",
-        confirmPassword: "SomeOtherPassword99!",
+        // Their real one. This line used to read "a different password from
+        // their real one; it must be ignored" — which was true of the code and
+        // was the vulnerability written down as the rule. Accepting signs the
+        // caller in, so for an address that already has an account the password
+        // is proof rather than a formality, and a wrong one is refused. What
+        // this case is actually about is the half below: attaching a second
+        // business must not disturb the credential they already sign in with.
+        password: "MountainRiver42!",
+        confirmPassword: "MountainRiver42!",
       },
     });
 
@@ -704,4 +710,167 @@ describe("membership guards", () => {
       }),
     ).rejects.toMatchObject({ code: "MEMBER_NOT_FOUND" });
   }, 90_000);
+});
+
+/**
+ * Accepting an invitation as somebody who already has an account.
+ *
+ * The action that wraps `acceptInvitation` creates a session on the strength of
+ * what it returns, so for an address that already has an account this is a
+ * credential endpoint. It was not treated as one. The typed password was
+ * hashed, ignored, and the session issued anyway — anyone holding the link was
+ * signed in as that user with any string that passed the strength meter, while
+ * the form under the box said "this just confirms it is you".
+ *
+ * The shape that hid it is visible in the code that was there: the password was
+ * hashed before the branch and the existing-user branch simply did not use it,
+ * with a comment explaining that it must not overwrite the stored credential.
+ * That reasoning is right and it is only half the question — not overwriting a
+ * password is not the same as checking one.
+ */
+describe("an invitation to somebody who already has an account", () => {
+  const PASSWORD = "MountainRiver42!";
+
+  async function invitedExistingUser() {
+    const fixture = await createCompanyFixture();
+
+    // A second registered owner, so the invited address is a real account with
+    // a password of its own.
+    const theirEmail = newEmail("existing");
+    const them = await registerOwner(registrationInput(theirEmail));
+    createdCompanies.push(them.companyId);
+
+    const invitation = await invite(fixture, SYSTEM_ROLE.CASHIER, theirEmail);
+    return { fixture, them, theirEmail, invitation };
+  }
+
+  it("refuses the wrong password", async () => {
+    const { invitation } = await invitedExistingUser();
+
+    await expect(
+      acceptInvitation({
+        input: {
+          token: invitation.token,
+          fullName: "Deepa Iyer",
+          mobile: "",
+          password: "AnotherValidLooking42!",
+          confirmPassword: "AnotherValidLooking42!",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
+  }, 60_000);
+
+  it("adds nobody to the business when it refuses", async () => {
+    // The refusal has to happen before anything is written. A membership
+    // created and a session issued are the two things this endpoint hands out,
+    // and the caller of `acceptInvitation` issues the session from its return.
+    const { fixture, them, invitation } = await invitedExistingUser();
+
+    await expect(
+      acceptInvitation({
+        input: {
+          token: invitation.token,
+          fullName: "Deepa Iyer",
+          mobile: "",
+          password: "AnotherValidLooking42!",
+          confirmPassword: "AnotherValidLooking42!",
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect(
+      await prisma.membership.count({
+        where: { userId: them.userId, companyId: fixture.companyId },
+      }),
+    ).toBe(0);
+  }, 60_000);
+
+  it("leaves the invitation usable after a wrong guess", async () => {
+    // A failed attempt must not burn the link, or a stranger guessing once
+    // would lock the real person out of joining.
+    const { fixture, them, invitation } = await invitedExistingUser();
+
+    await expect(
+      acceptInvitation({
+        input: {
+          token: invitation.token,
+          fullName: "Deepa Iyer",
+          mobile: "",
+          password: "AnotherValidLooking42!",
+          confirmPassword: "AnotherValidLooking42!",
+        },
+      }),
+    ).rejects.toThrow();
+
+    const accepted = await acceptInvitation({
+      input: {
+        token: invitation.token,
+        fullName: "Deepa Iyer",
+        mobile: "",
+        password: PASSWORD,
+        confirmPassword: PASSWORD,
+      },
+    });
+
+    expect(accepted.userId).toBe(them.userId);
+    expect(accepted.isNewUser).toBe(false);
+    expect(
+      await prisma.membership.count({
+        where: { userId: them.userId, companyId: fixture.companyId },
+      }),
+    ).toBe(1);
+  }, 60_000);
+
+  it("does not change the password they already sign in with", async () => {
+    // The half that was always right, kept: the invitation proves control of
+    // the mailbox and the password proves who is holding it, and neither is a
+    // reason to replace the credential.
+    const { them, theirEmail, invitation } = await invitedExistingUser();
+    const before = await prisma.user.findUniqueOrThrow({
+      where: { id: them.userId },
+      select: { passwordHash: true },
+    });
+
+    await acceptInvitation({
+      input: {
+        token: invitation.token,
+        fullName: "Deepa Iyer",
+        mobile: "",
+        password: PASSWORD,
+        confirmPassword: PASSWORD,
+      },
+    });
+
+    const after = await prisma.user.findUniqueOrThrow({
+      where: { email: theirEmail },
+      select: { passwordHash: true },
+    });
+    expect(after.passwordHash).toBe(before.passwordHash);
+  }, 60_000);
+});
+
+describe("accepting an invitation as somebody new", () => {
+  it("still refuses a password too weak to keep", async () => {
+    // The strength rule moved out of the action, where it was applied to
+    // everybody including the existing users whose password it then discarded.
+    // It has to still apply to the people it was written for.
+    const fixture = await createCompanyFixture();
+    const invitation = await invite(
+      fixture,
+      SYSTEM_ROLE.CASHIER,
+      newEmail("fresh"),
+    );
+
+    await expect(
+      acceptInvitation({
+        input: {
+          token: invitation.token,
+          fullName: "Deepa Iyer",
+          mobile: "",
+          password: "password123",
+          confirmPassword: "password123",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "WEAK_PASSWORD" });
+  }, 60_000);
 });

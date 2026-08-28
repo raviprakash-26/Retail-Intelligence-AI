@@ -18,7 +18,6 @@ import {
   type CompanyProfileInput,
   type InviteMemberInput,
 } from "@/lib/validation/company";
-import { evaluatePasswordStrength } from "@/lib/auth/password-policy";
 import {
   ACTION_ERROR,
   fail,
@@ -49,12 +48,13 @@ import {
   updateBranch,
 } from "./branch-service";
 import {
+  TeamOperationError,
   acceptInvitation,
   changeMemberRole,
   inviteMember,
+  previewInvitation,
   revokeInvitation,
   setMemberStatus,
-  TeamOperationError,
 } from "./team-service";
 import {
   updateCompanyAccounting,
@@ -467,16 +467,27 @@ export async function acceptInvitationAction(
     );
   }
 
-  const strength = evaluatePasswordStrength(parsed.data.password, {
-    name: parsed.data.fullName,
-  });
-  if (!strength.acceptable) {
-    return fail("Please choose a stronger password.", {
-      code: ACTION_ERROR.INVALID_INPUT,
-      fieldErrors: {
-        password: strength.issues[0] ?? "This password is not acceptable.",
-      },
-    });
+  // What the password means depends on whether the address already has an
+  // account, so both the strength rule and the credential check live in
+  // `acceptInvitation` where that is known. Applying the strength rule here to
+  // every caller was part of how the missing check stayed hidden: an existing
+  // user was made to type a *strong* password that was then thrown away.
+  //
+  // An account that already exists makes this a credential endpoint, so it
+  // carries the account-axis budget every other one does. Without it the link
+  // holder would have an IP-limited password oracle.
+  const invited = await previewInvitation(parsed.data.token);
+  if (invited?.hasAccount) {
+    const byAccount = await checkRateLimit("SIGN_IN_ACCOUNT", invited.email);
+    if (!byAccount.allowed) {
+      return fail(
+        "Too many attempts for this account. Please wait a few minutes and try again.",
+        {
+          code: ACTION_ERROR.RATE_LIMITED,
+          retryAfterSeconds: byAccount.retryAfterSeconds,
+        },
+      );
+    }
   }
 
   try {
