@@ -16,6 +16,7 @@ import {
   PurchaseError,
 } from "@/server/purchases/purchase-service";
 import { createSale } from "@/server/sales/sale-service";
+import { reconcileStock } from "@/server/inventory/inventory-report";
 import {
   disconnectTestDb,
   ensurePlatformData,
@@ -31,7 +32,11 @@ const createdEmails: string[] = [];
 
 type Registration = "REGULAR" | "COMPOSITION" | "UNREGISTERED";
 
-function registrationInput(email: string, scheme: Registration): RegisterInput {
+function registrationInput(
+  email: string,
+  scheme: Registration,
+  inventoryMethod: "FIFO" | "WEIGHTED_AVERAGE" = "WEIGHTED_AVERAGE",
+): RegisterInput {
   return {
     account: {
       fullName: "Ravi Prakash",
@@ -57,7 +62,7 @@ function registrationInput(email: string, scheme: Registration): RegisterInput {
       currency: "INR",
       openingCashBalance: 0,
       openingBankBalance: 0,
-      inventoryMethod: "WEIGHTED_AVERAGE",
+      inventoryMethod,
       loadDemoData: false,
     },
   };
@@ -73,10 +78,13 @@ type Fixture = {
 
 async function createCompany(
   scheme: Registration = "REGULAR",
+  inventoryMethod: "FIFO" | "WEIGHTED_AVERAGE" = "WEIGHTED_AVERAGE",
 ): Promise<Fixture> {
   const email = `purch-${uniqueSlug("x").replace(/-/g, "")}@example.com`;
   createdEmails.push(email);
-  const result = await registerOwner(registrationInput(email, scheme));
+  const result = await registerOwner(
+    registrationInput(email, scheme, inventoryMethod),
+  );
   createdCompanies.push(result.companyId);
 
   const taxonomy = await getProductTaxonomy(result.companyId);
@@ -194,8 +202,11 @@ async function assertTrialBalances(companyId: string): Promise<void> {
   expect(trial.difference.toString()).toBe("0");
 }
 
-async function fixtureWithParties(scheme: Registration = "REGULAR") {
-  const fixture = await createCompany(scheme);
+async function fixtureWithParties(
+  scheme: Registration = "REGULAR",
+  inventoryMethod: "FIFO" | "WEIGHTED_AVERAGE" = "WEIGHTED_AVERAGE",
+) {
+  const fixture = await createCompany(scheme, inventoryMethod);
   const [supplier, product] = await Promise.all([
     createParty({
       companyId: fixture.companyId,
@@ -893,5 +904,163 @@ describe("tenant isolation", () => {
       select: { status: true },
     });
     expect(untouched.status).toBe("POSTED");
+  });
+});
+
+/**
+ * What a void takes back off the shelf.
+ *
+ * Voiding a bill reverses the entry that recorded it, line for line, so it
+ * credits Inventory with what the bill said the goods cost. The stock ledger has
+ * to move by the same figure — `reconcileStock` compares the two with no
+ * tolerance, and a difference is a HIGH finding saying stock and books disagree.
+ *
+ * It used to let the valuation method decide instead, which answers "what are
+ * these units worth now". That is the right question for a sale and the wrong
+ * one for an un-recording, and both methods got it wrong in opposite directions:
+ * weighted average pooled the cost, FIFO drained whichever layer was oldest.
+ * Voiding the *first* bill under FIFO came out right, which is most of why it
+ * went unnoticed.
+ *
+ * What a weighted-average void still cannot undo is the cost that has already
+ * left through cost of sales on units sold in between. That stays where it went;
+ * the two records still move together, which is the part that has to hold.
+ */
+describe("voiding a bill whose cost has moved on", () => {
+  async function billFor(
+    fixture: Awaited<ReturnType<typeof fixtureWithParties>>,
+    quantity: number,
+    rate: number,
+  ) {
+    return createPurchase({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: billInput(fixture.supplierId, fixture.productId, {
+        lines: [
+          {
+            productId: fixture.productId,
+            description: "",
+            quantity,
+            rate,
+            discountPercent: 0,
+          },
+        ],
+      }),
+    });
+  }
+
+  function voidIt(
+    fixture: Awaited<ReturnType<typeof fixtureWithParties>>,
+    purchaseId: string,
+  ) {
+    return voidPurchase({
+      companyId: fixture.companyId,
+      purchaseId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      reason: "Recorded against the wrong supplier",
+    });
+  }
+
+  it("takes back what the bill brought, not a share of the pool", async () => {
+    const fixture = await fixtureWithParties();
+    const first = await billFor(fixture, 3, 100);
+    await billFor(fixture, 3, 20);
+
+    // Six units at ₹60 apiece under weighted average. A share of the pool is
+    // ₹180 against the ₹300 the reversal credits, and the two used to part
+    // company by the ₹120 between them.
+    await voidIt(fixture, first.id);
+
+    const reconciliation = await reconcileStock(fixture.companyId);
+    expect(reconciliation.agrees).toBe(true);
+    expect(reconciliation.accountBalance).toBe(toStorageString(60));
+    expect(reconciliation.ledgerValue).toBe(toStorageString(60));
+
+    // And what is left is the other bill, at what it cost.
+    const balance = await prisma.inventoryBalance.findFirstOrThrow({
+      where: { companyId: fixture.companyId, productId: fixture.productId },
+      select: { quantity: true, averageCost: true },
+    });
+    expect(balance.quantity.toString()).toBe("3");
+    expect(balance.averageCost.toString()).toBe("20");
+  });
+
+  it("reaches past an older FIFO layer to the bill's own", async () => {
+    const fixture = await fixtureWithParties("REGULAR", "FIFO");
+    await billFor(fixture, 3, 20);
+    const second = await billFor(fixture, 3, 100);
+
+    // FIFO drains oldest first, so this used to take the ₹20 layer — ₹60
+    // against the same ₹300 credit, and ₹240 apart.
+    await voidIt(fixture, second.id);
+
+    const reconciliation = await reconcileStock(fixture.companyId);
+    expect(reconciliation.agrees).toBe(true);
+    expect(reconciliation.accountBalance).toBe(toStorageString(60));
+  });
+
+  it("still voids the bill that nothing has happened since", async () => {
+    // The case a shopkeeper actually meets: a bill typed in wrong and taken
+    // straight back out again. It has to keep working under both methods.
+    for (const method of ["WEIGHTED_AVERAGE", "FIFO"] as const) {
+      const fixture = await fixtureWithParties("REGULAR", method);
+      const bill = await billFor(fixture, 3, 100);
+
+      await expect(voidIt(fixture, bill.id)).resolves.toBeDefined();
+
+      const reconciliation = await reconcileStock(fixture.companyId);
+      expect(reconciliation.agrees).toBe(true);
+      expect(reconciliation.accountBalance).toBe(toStorageString(0));
+    }
+  }, 60_000);
+
+  it("refuses when the cost has already gone out through a sale", async () => {
+    const fixture = await fixtureWithParties();
+    const dear = await billFor(fixture, 10, 100);
+    await billFor(fixture, 10, 1);
+
+    // Twenty units holding ₹1,010, so ₹50.50 each. Selling ten takes ₹505 of
+    // that away with them, and the shelf can no longer give back the ₹1,000 the
+    // first bill put in — the quantity is there and the value is not.
+    await createSale({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        customerId: "",
+        invoiceDate: new Date().toISOString().slice(0, 10),
+        paymentMode: "CASH",
+        placeOfSupply: "",
+        priceIncludesTax: false,
+        notes: "",
+        lines: [
+          {
+            productId: fixture.productId,
+            description: "",
+            quantity: 10,
+            rate: 150,
+            discountPercent: 0,
+          },
+        ],
+      },
+    });
+
+    await expect(voidIt(fixture, dear.id)).rejects.toThrow(
+      /brought in 1000.00 and the shelf is now holding 505.00/,
+    );
+
+    const untouched = await prisma.purchase.findUniqueOrThrow({
+      where: { id: dear.id },
+      select: { status: true },
+    });
+    expect(untouched.status).toBe("POSTED");
+
+    // Nothing half-done: the refusal rolls back the movements it had written.
+    const reconciliation = await reconcileStock(fixture.companyId);
+    expect(reconciliation.agrees).toBe(true);
   });
 });

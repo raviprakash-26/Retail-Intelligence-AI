@@ -316,12 +316,39 @@ export type MovementResult = {
 };
 
 /**
+ * Raised when a movement is asked to remove more value than the shelf holds.
+ *
+ * Only reachable with an explicit `cost`. What the valuation method works out
+ * for itself is a share of the position and can never exceed it.
+ */
+export class InsufficientStockValueError extends Error {
+  constructor(
+    readonly available: Decimal,
+    readonly requested: Decimal,
+  ) {
+    super(
+      `The position holds ${available.toString()}; ${requested.toString()} was asked for.`,
+    );
+    this.name = "InsufficientStockValueError";
+  }
+}
+
+/**
  * Takes stock out and reports what it cost.
  *
  * Refuses to go negative. Stock the business does not have cannot have a cost,
  * so allowing it would post a fabricated cost of goods sold and leave a
  * negative asset on the balance sheet — the invoice would look fine and the
  * accounts would be wrong.
+ *
+ * **`cost` is for un-recording, and only for that.** Stock leaving in the
+ * ordinary way is worth whatever the method says the position is worth, and no
+ * caller gets to have an opinion about that — a sale cannot decide what its own
+ * goods cost. Undoing a document is not stock leaving, though: a void says the
+ * receipt never happened, so what comes off is what that receipt put on, and the
+ * pooled rate is the wrong question. Without it `voidPurchase` took units back
+ * at today's average while its reversal credited what the bill had said, and the
+ * two parted company by the difference.
  */
 export async function recordOutward(
   tx: DbClient,
@@ -331,6 +358,8 @@ export async function recordOutward(
     branchId: string | null;
     method: InventoryMethod;
     quantity: MoneyInput;
+    /** What this movement is worth, when undoing one that named its own value. */
+    cost?: MoneyInput;
     movementType: StockMovementType;
     movementDate: Date;
     sourceType: string;
@@ -346,6 +375,7 @@ export async function recordOutward(
   });
   const position = await readPosition(tx, params);
 
+  // Run even when the cost is given, for the quantity guard it carries.
   const consumption = consume(params.method, {
     onHandQuantity:
       params.method === "FIFO"
@@ -358,6 +388,17 @@ export async function recordOutward(
 
   const quantityAfter = subtract(position.quantity, params.quantity);
 
+  if (params.cost !== undefined) {
+    const asked = money(params.cost);
+    // The quantity can be there while the value is not: units sold in between
+    // took their share of the pool with them, and what is left may be worth
+    // less than the receipt being undone. Taking it anyway would leave a
+    // negative asset, which is the thing this function exists to refuse.
+    if (asked.greaterThan(position.stockValue)) {
+      throw new InsufficientStockValueError(position.stockValue, asked);
+    }
+  }
+
   // A shelf sold down to nothing is worth nothing, whatever the method makes of
   // the units.
   //
@@ -367,7 +408,12 @@ export async function recordOutward(
   // becomes a layer of three at ₹29.9967 and costs ₹89.9901 to clear. The pool
   // is what the books hold and the layers are a reconstruction of it, so where
   // the two disagree the pool is right.
-  const cost = quantityAfter.isZero() ? position.stockValue : consumption.cost;
+  const cost =
+    params.cost !== undefined
+      ? money(params.cost)
+      : quantityAfter.isZero()
+        ? position.stockValue
+        : consumption.cost;
   const unitCost = money(params.quantity).isZero()
     ? money(0)
     : divide(cost, params.quantity);
@@ -378,12 +424,18 @@ export async function recordOutward(
     productId: params.productId,
     branchId: params.branchId,
     quantity: quantityAfter,
-    // Weighted average is unchanged by an outward movement; FIFO's headline
-    // average follows the value left behind.
-    averageCost:
-      params.method === "FIFO" && quantityAfter.greaterThan(0)
-        ? valueAfter.dividedBy(quantityAfter)
-        : position.averageCost,
+    // The average is what is left, over what is left of it.
+    //
+    // For stock leaving in the ordinary way this changes nothing — value goes
+    // out at the pooled rate, so the ratio it came from is the ratio it leaves
+    // behind — and it used to be spelled that way, as "weighted average is
+    // unchanged by an outward movement" with only FIFO recomputing. That stops
+    // being true the moment a caller names its own cost: undoing a ₹300 receipt
+    // from six units holding ₹360 leaves three units holding ₹60, and an
+    // average still reading ₹60 describes a shelf worth ₹180 that is not there.
+    averageCost: quantityAfter.greaterThan(0)
+      ? divide(valueAfter, quantityAfter)
+      : position.averageCost,
     stockValue: valueAfter,
     movementDate: params.movementDate,
   });
