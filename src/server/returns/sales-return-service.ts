@@ -298,7 +298,7 @@ export async function createSalesReturn(params: {
           // The cost captured when the sale issued it. Bringing it back at
           // today's average would invent a profit or loss on goods that only
           // travelled to the customer and back.
-          unitCost: entry.item.unitCost,
+          cost: multiply(entry.quantity, entry.item.unitCost),
           movementType: StockMovementType.SALES_RETURN,
           movementDate: returnDate,
           sourceType: "SalesReturn",

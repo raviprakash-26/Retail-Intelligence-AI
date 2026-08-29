@@ -368,16 +368,24 @@ export async function createPurchase(params: {
           ? entry.result.taxableAmount
           : add(entry.result.taxableAmount, lineTax);
 
+        // The rate on the bill line, which is a record of the document rather
+        // than a figure anything values stock from. `recordInward` derives the
+        // same rate for the movement's own column, from the same total.
         const unitCost = divide(lineCost, entry.line.quantity);
 
         if (entry.product.isStockTracked) {
-          await recordInward(tx, {
+          const movement = await recordInward(tx, {
             companyId,
             productId: entry.product.id,
             branchId,
             method,
             quantity: entry.line.quantity,
-            unitCost,
+            // The cost whole, rather than divided into a rate this would then
+            // multiply back out. See `recordInward`: the rate is four decimals
+            // wide and the round trip does not always land where it started,
+            // which put the Inventory account and the stock ledger a hundredth
+            // of a paisa apart on a bill with a discount on it.
+            cost: lineCost,
             movementType: StockMovementType.PURCHASE,
             movementDate: billDate,
             sourceType: PURCHASE_SOURCE,
@@ -385,7 +393,10 @@ export async function createPurchase(params: {
             referenceNo: billNumber,
             createdById: params.userId,
           });
-          stockValue = add(stockValue, lineCost);
+          // What the stock ledger took in, as `createPurchaseReturn` credits
+          // what it gave up. The two are the same figure now that the cost goes
+          // in whole, and taking it from the movement is what keeps them so.
+          stockValue = add(stockValue, movement.value);
         } else {
           // Nothing to hold in stock — freight, packing, a service on the same
           // bill. It is a cost of trading the moment it is incurred.

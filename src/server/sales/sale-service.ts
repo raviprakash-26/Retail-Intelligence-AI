@@ -688,17 +688,35 @@ export async function voidSale(params: {
       const method = company.inventoryMethod as InventoryMethod;
 
       // --- Put the stock back ---------------------------------------------
-      for (const item of sale.items) {
-        if (!item.product.isStockTracked) continue;
+      //
+      // Row for row against what the sale took out, rather than each line's
+      // quantity times the rate stored on it. That rate is the movement's cost
+      // divided by its quantity and rounded to four places, and under FIFO the
+      // division rarely comes back: three units drawn from a ₹10 layer and a
+      // ₹20 one cost ₹40, store ₹13.3333 each, and put ₹39.9999 back — while
+      // the reversal below credits the ₹40 the sale actually charged. The stock
+      // ledger and the Inventory account then part company by the difference
+      // and stay parted, which is a HIGH auditor finding on an invoice that was
+      // simply cancelled.
+      const taken = await tx.inventoryMovement.findMany({
+        where: {
+          companyId: params.companyId,
+          sourceType: SALE_SOURCE,
+          sourceId: sale.id,
+        },
+        select: { productId: true, quantity: true, value: true },
+      });
+
+      for (const movement of taken) {
         await recordInward(tx, {
           companyId: params.companyId,
-          productId: item.productId,
+          productId: movement.productId,
           branchId: sale.branchId,
           method,
-          quantity: item.quantity,
-          // Returned at the cost it left at, so the void nets the inventory
-          // account back to exactly where it started.
-          unitCost: item.unitCost,
+          quantity: money(movement.quantity).abs(),
+          // Returned at exactly what it left at, so the void nets the inventory
+          // account back to where it started.
+          cost: money(movement.value).abs(),
           movementType: StockMovementType.ADJUSTMENT_IN,
           movementDate: sale.invoiceDate,
           sourceType: SALE_VOID_SOURCE,

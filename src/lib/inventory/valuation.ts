@@ -58,7 +58,8 @@ export class InsufficientStockError extends Error {
  */
 export function consumeWeightedAverage(params: {
   onHandQuantity: MoneyInput;
-  averageCost: MoneyInput;
+  /** What the pool is worth, which is the figure the books hold. */
+  onHandValue: MoneyInput;
   quantity: MoneyInput;
 }): ConsumptionResult {
   const requested = money(params.quantity);
@@ -68,12 +69,28 @@ export function consumeWeightedAverage(params: {
     throw new InsufficientStockError(available, requested);
   }
 
-  const unitCost = money(params.averageCost);
-  return {
-    cost: multiply(requested, unitCost),
-    unitCost,
-    remaining: [],
-  };
+  if (isZero(requested)) {
+    return { cost: money(0), unitCost: money(0), remaining: [] };
+  }
+
+  // The share of the pool's value these units carry, rather than the quantity
+  // times a rounded average.
+  //
+  // The two agree whenever the average divides exactly and part company when it
+  // does not, and the case where that matters is the whole pool leaving. An
+  // average is four decimal places wide, so three units holding ₹89.99 average
+  // ₹29.9967 and cost ₹89.9901 to sell — a hundredth of a paisa more than the
+  // shelf ever held. The quantity reaches nil and the value does not, and a
+  // shelf with nothing on it is left worth a fraction of a paisa, in the
+  // Inventory account, on the balance sheet, for good.
+  //
+  // Taking the share rather than the rate needs no special case for the whole
+  // pool: value × q ÷ q comes back to the value it started from, where value ÷ q
+  // × q does not.
+  const held = money(params.onHandValue);
+  const cost = divide(multiply(held, requested), available);
+
+  return { cost, unitCost: divide(cost, requested), remaining: [] };
 }
 
 /**
@@ -128,7 +145,7 @@ export function consume(
   method: InventoryMethod,
   params: {
     onHandQuantity: MoneyInput;
-    averageCost: MoneyInput;
+    onHandValue: MoneyInput;
     layers: readonly CostLayer[];
     quantity: MoneyInput;
   },
@@ -137,7 +154,7 @@ export function consume(
     ? consumeFifo({ layers: params.layers, quantity: params.quantity })
     : consumeWeightedAverage({
         onHandQuantity: params.onHandQuantity,
-        averageCost: params.averageCost,
+        onHandValue: params.onHandValue,
         quantity: params.quantity,
       });
 }
@@ -147,22 +164,28 @@ export function consume(
  *
  * Kept here rather than in the purchase module because a sale reversal puts
  * stock back and has to blend it the same way.
+ *
+ * Both sides come in as values rather than as a quantity and a rate. What is on
+ * hand is worth what the books say it is worth, and re-deriving that as quantity
+ * times the stored average blends a figure the balance sheet does not hold — the
+ * average is four decimal places wide, and multiplying it back out does not
+ * always land on the value it came from.
  */
 export function blendAverageCost(params: {
   onHandQuantity: MoneyInput;
+  onHandValue: MoneyInput;
+  /** Stands when there is nothing to average. */
   averageCost: MoneyInput;
   inwardQuantity: MoneyInput;
-  inwardUnitCost: MoneyInput;
+  inwardValue: MoneyInput;
 }): Decimal {
-  const existingValue = multiply(params.onHandQuantity, params.averageCost);
-  const inwardValue = multiply(params.inwardQuantity, params.inwardUnitCost);
   const totalQuantity = add(params.onHandQuantity, params.inwardQuantity);
 
   // Nothing on hand and nothing coming in leaves the previous cost standing:
   // zero would misreport the next receipt's margin as pure profit.
   if (isZero(totalQuantity)) return money(params.averageCost);
 
-  return divide(add(existingValue, inwardValue), totalQuantity);
+  return divide(add(params.onHandValue, params.inwardValue), totalQuantity);
 }
 
 /** Quantity available across the layers a FIFO consumption would draw on. */

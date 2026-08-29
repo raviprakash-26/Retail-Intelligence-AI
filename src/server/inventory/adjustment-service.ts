@@ -4,7 +4,13 @@ import { prisma } from "@/lib/db";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import type { DraftJournalLine } from "@/lib/accounting/double-entry";
 import type { InventoryMethod } from "@/lib/inventory/valuation";
-import { compare, money, subtract, toStorageString } from "@/lib/money";
+import {
+  compare,
+  money,
+  multiply,
+  subtract,
+  toStorageString,
+} from "@/lib/money";
 import {
   ADJUSTMENT_REASON_LABELS,
   type AdjustmentReason,
@@ -200,9 +206,9 @@ export async function createStockAdjustment(params: {
           quantity,
           // Found stock comes back at what the rest of it is worth. Inventing a
           // price would move the average cost on no evidence.
-          unitCost:
+          cost:
             compare(position.averageCost, 0) > 0
-              ? position.averageCost
+              ? multiply(quantity, position.averageCost)
               : money(0),
           movementType: StockMovementType.ADJUSTMENT_IN,
           movementDate: adjustmentDate,
