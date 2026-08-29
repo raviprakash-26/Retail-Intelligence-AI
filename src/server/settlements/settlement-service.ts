@@ -91,13 +91,41 @@ const RECEIPT_COUNTER: Record<ReceiptSource, string | null> = {
   OTHER_INCOME: SYSTEM_ACCOUNT.OTHER_INCOME,
 };
 
-/** The other side of a payment that is not a supplier settlement. */
+/**
+ * The other side of a payment that is not a supplier settlement.
+ *
+ * The five payroll ones settle a debt rather than incurring a cost, and that is
+ * the whole of why they exist. A run posts what the month owes — net pay to the
+ * staff, the provident fund, the state insurance, the state's professional tax
+ * and the tax withheld — and charges the wages to the profit and loss account
+ * once, there and then. Nothing could then debit those liabilities. The money
+ * going out had to be recorded as an expense of its own, through "Other" into
+ * miscellaneous expenses or through the expense form's own `Salary` category
+ * straight back into `SALARY_EXPENSE`, so the same wages were charged twice and
+ * the debts stood for as long as the business ran payroll.
+ */
 const PAYMENT_COUNTER: Record<PaymentPurpose, string | null> = {
   SUPPLIER: null,
+  STAFF_PAY: SYSTEM_ACCOUNT.SALARY_PAYABLE,
+  PROVIDENT_FUND: SYSTEM_ACCOUNT.PF_PAYABLE,
+  EMPLOYEE_INSURANCE: SYSTEM_ACCOUNT.ESI_PAYABLE,
+  PROFESSIONAL_TAX: SYSTEM_ACCOUNT.PROFESSIONAL_TAX_PAYABLE,
+  TDS: SYSTEM_ACCOUNT.TDS_PAYABLE,
   DRAWINGS: SYSTEM_ACCOUNT.DRAWINGS,
   LOAN_REPAYMENT: SYSTEM_ACCOUNT.LOANS_PAYABLE,
   OTHER: SYSTEM_ACCOUNT.MISCELLANEOUS_EXPENSE,
 };
+
+/**
+ * Every account a payment might land on, from the map itself.
+ *
+ * Listed by hand, this was a second place to remember: a purpose added to the
+ * map above and forgotten here resolves to an account that was never loaded and
+ * fails at the moment somebody uses it, which is the far side of a form.
+ */
+const PAYMENT_COUNTER_ACCOUNTS = [
+  ...new Set(Object.values(PAYMENT_COUNTER).filter((key) => key !== null)),
+];
 
 type AllocationTarget = {
   id: string;
@@ -519,9 +547,7 @@ export async function createPayment(params: {
       SYSTEM_ACCOUNT.CASH,
       SYSTEM_ACCOUNT.BANK,
       SYSTEM_ACCOUNT.ACCOUNTS_PAYABLE,
-      SYSTEM_ACCOUNT.DRAWINGS,
-      SYSTEM_ACCOUNT.LOANS_PAYABLE,
-      SYSTEM_ACCOUNT.MISCELLANEOUS_EXPENSE,
+      ...PAYMENT_COUNTER_ACCOUNTS,
     ]);
 
     const sourceAccountId = accountId(MONEY_ACCOUNT[input.paymentMode]);

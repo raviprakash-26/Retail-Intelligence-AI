@@ -5,6 +5,8 @@ import { subtract, toStorageString } from "@/lib/money";
 import type { RegisterInput } from "@/lib/validation/auth";
 import type { EmployeeInput } from "@/lib/validation/master-data";
 import { registerOwner } from "@/server/auth/registration";
+import { createPayment } from "@/server/settlements/settlement-service";
+import type { PaymentInput } from "@/lib/validation/settlements";
 import { createEmployee } from "@/server/master-data/employee-service";
 import {
   createPayrollRun,
@@ -579,4 +581,129 @@ describe("who is on a run", () => {
 
     expect(preview.payslips).toHaveLength(2);
   }, 90_000);
+});
+
+/**
+ * Paying what the run said was owed.
+ *
+ * A run charges the wages to the profit and loss account once and posts what is
+ * owed — the staff's net pay and four withholdings, to four authorities. Every
+ * one of those is a credit to a liability, and nothing could debit them: the
+ * payments screen offered supplier, drawings, loan repayment and "other", and
+ * other goes to miscellaneous expenses.
+ *
+ * So the money leaving had to be recorded as an expense of its own — through
+ * "other", or through the expense form's `Salary` category and straight back
+ * into `SALARY_EXPENSE`, which the expenses page invites in as many words. The
+ * same wages were charged twice, the profit was understated by a month's
+ * payroll every month, and the debts stood for as long as the business ran
+ * payroll.
+ */
+describe("settling what a payroll run owes", () => {
+  function pay(fixture: Fixture, kind: PaymentInput["kind"], amount: number) {
+    return createPayment({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        kind,
+        partyId: "",
+        date: today,
+        paymentMode: "BANK",
+        amount,
+        referenceNo: "",
+        notes: "",
+        allocations: [],
+      } satisfies PaymentInput,
+    });
+  }
+
+  it("clears every debt it created and charges the wages once", async () => {
+    // Gross of ₹16,000: inside the ESI limit, over the professional tax
+    // threshold this business has set, and PF on the basic. All four
+    // withholdings apply, so all four debts are on the books to settle.
+    const fixture = await createCompany({
+      providentFund: true,
+      esi: true,
+      professionalTax: 200,
+      professionalTaxThreshold: 15_000,
+    });
+    await hire(fixture, "Anita Rao", 12_000, 4_000);
+
+    const posted = await run(fixture);
+
+    // What the run says is owed, before anything is paid.
+    const owed = {
+      staff: await accountBalance(
+        fixture.companyId,
+        SYSTEM_ACCOUNT.SALARY_PAYABLE,
+      ),
+      pf: await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.PF_PAYABLE),
+      esi: await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.ESI_PAYABLE),
+      tax: await accountBalance(
+        fixture.companyId,
+        SYSTEM_ACCOUNT.PROFESSIONAL_TAX_PAYABLE,
+      ),
+    };
+    // Credits, so the net debit is negative.
+    expect(Number(owed.staff)).toBeLessThan(0);
+    expect(Number(owed.pf)).toBeLessThan(0);
+    expect(Number(owed.esi)).toBeLessThan(0);
+    expect(Number(owed.tax)).toBeLessThan(0);
+
+    const wagesAfterRun = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.SALARY_EXPENSE,
+    );
+    expect(wagesAfterRun).toBe(toStorageString(posted.grossAmount));
+
+    await pay(fixture, "STAFF_PAY", -Number(owed.staff));
+    await pay(fixture, "PROVIDENT_FUND", -Number(owed.pf));
+    await pay(fixture, "EMPLOYEE_INSURANCE", -Number(owed.esi));
+    await pay(fixture, "PROFESSIONAL_TAX", -Number(owed.tax));
+
+    // Every debt back to nil.
+    for (const key of [
+      SYSTEM_ACCOUNT.SALARY_PAYABLE,
+      SYSTEM_ACCOUNT.PF_PAYABLE,
+      SYSTEM_ACCOUNT.ESI_PAYABLE,
+      SYSTEM_ACCOUNT.PROFESSIONAL_TAX_PAYABLE,
+    ]) {
+      expect(await accountBalance(fixture.companyId, key)).toBe(
+        toStorageString(0),
+      );
+    }
+
+    // And the wages charged once, not twice. This is the figure the whole
+    // thing is about: paying staff is settling a debt, not incurring a cost.
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.SALARY_EXPENSE),
+    ).toBe(wagesAfterRun);
+    expect(
+      await accountBalance(
+        fixture.companyId,
+        SYSTEM_ACCOUNT.MISCELLANEOUS_EXPENSE,
+      ),
+    ).toBe(toStorageString(0));
+
+    await assertTrialBalances(fixture.companyId);
+  }, 90_000);
+
+  it("still sends a payment with no debt behind it to expenses", async () => {
+    // The new purposes settle debts; "other" is still what it was, and has to
+    // stay that way — a shopkeeper paying for something the books have never
+    // heard of is incurring a cost, not clearing one.
+    const fixture = await createCompany();
+
+    await pay(fixture, "OTHER", 500);
+
+    expect(
+      await accountBalance(
+        fixture.companyId,
+        SYSTEM_ACCOUNT.MISCELLANEOUS_EXPENSE,
+      ),
+    ).toBe(toStorageString(500));
+
+    await assertTrialBalances(fixture.companyId);
+  }, 60_000);
 });
