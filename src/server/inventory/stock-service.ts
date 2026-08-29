@@ -11,8 +11,8 @@ import {
 import {
   type Decimal,
   add,
+  divide,
   money,
-  multiply,
   subtract,
   toStorageString,
   type MoneyInput,
@@ -351,13 +351,27 @@ export async function recordOutward(
       params.method === "FIFO"
         ? layersQuantity(position.layers)
         : position.quantity,
-    averageCost: position.averageCost,
+    onHandValue: position.stockValue,
     layers: position.layers,
     quantity: params.quantity,
   });
 
   const quantityAfter = subtract(position.quantity, params.quantity);
-  const valueAfter = subtract(position.stockValue, consumption.cost);
+
+  // A shelf sold down to nothing is worth nothing, whatever the method makes of
+  // the units.
+  //
+  // Weighted average reaches this on its own now that it takes a share of the
+  // pool's value. FIFO cannot: its layers are rebuilt from the movement ledger
+  // and carry a *rounded* unit cost, so a receipt of three units at ₹89.99
+  // becomes a layer of three at ₹29.9967 and costs ₹89.9901 to clear. The pool
+  // is what the books hold and the layers are a reconstruction of it, so where
+  // the two disagree the pool is right.
+  const cost = quantityAfter.isZero() ? position.stockValue : consumption.cost;
+  const unitCost = money(params.quantity).isZero()
+    ? money(0)
+    : divide(cost, params.quantity);
+  const valueAfter = subtract(position.stockValue, cost);
 
   await writeBalance(tx, {
     companyId: params.companyId,
@@ -382,8 +396,8 @@ export async function recordOutward(
       movementType: params.movementType,
       movementDate: params.movementDate,
       quantity: toStorageString(money(params.quantity).negated()),
-      unitCost: toStorageString(consumption.unitCost),
-      value: toStorageString(consumption.cost.negated()),
+      unitCost: toStorageString(unitCost),
+      value: toStorageString(cost.negated()),
       balanceQuantity: toStorageString(quantityAfter),
       balanceValue: toStorageString(valueAfter),
       sourceType: params.sourceType,
@@ -394,14 +408,27 @@ export async function recordOutward(
     },
   });
 
-  return {
-    value: consumption.cost,
-    unitCost: consumption.unitCost,
-    quantityAfter,
-  };
+  return { value: cost, unitCost, quantityAfter };
 }
 
-/** Puts stock in at a known cost, blending the weighted average. */
+/**
+ * Puts stock in at a known cost, blending the weighted average.
+ *
+ * **The cost is the total, not the rate.** A per-unit figure is four decimal
+ * places wide, and a caller that has a total has to divide by the quantity to
+ * get one — a division that does not always multiply back. A bill for three
+ * units of ₹89.99 gives ₹29.9967 each and ₹89.9901 back, so the Inventory
+ * account was debited with what the bill said and the stock ledger recorded a
+ * hundredth of a paisa more. The two are one fact, and `reconcileStock` compares
+ * them with no tolerance and is right to: the difference raises a HIGH finding
+ * that says stock and books disagree, on an ordinary bill, and nothing the shop
+ * can do will clear it.
+ *
+ * So the total comes in whole and the rate is derived from it here, for the
+ * movement's own column and for the average. `createPurchaseReturn` states the
+ * rule from the other side — "the Inventory account has to match the stock
+ * ledger" — and takes what the ledger gave up rather than what the bill said.
+ */
 export async function recordInward(
   tx: DbClient,
   params: {
@@ -410,7 +437,8 @@ export async function recordInward(
     branchId: string | null;
     method: InventoryMethod;
     quantity: MoneyInput;
-    unitCost: MoneyInput;
+    /** What these goods cost in total. */
+    cost: MoneyInput;
     movementType: StockMovementType;
     movementDate: Date;
     sourceType: string;
@@ -426,15 +454,19 @@ export async function recordInward(
   });
   const position = await readPosition(tx, params);
 
-  const value = multiply(params.quantity, params.unitCost);
+  const value = money(params.cost);
   const quantityAfter = add(position.quantity, params.quantity);
   const valueAfter = add(position.stockValue, value);
+  const unitCost = money(params.quantity).isZero()
+    ? money(0)
+    : divide(value, params.quantity);
 
   const averageCost = blendAverageCost({
     onHandQuantity: position.quantity,
+    onHandValue: position.stockValue,
     averageCost: position.averageCost,
     inwardQuantity: params.quantity,
-    inwardUnitCost: params.unitCost,
+    inwardValue: value,
   });
 
   await writeBalance(tx, {
@@ -455,7 +487,7 @@ export async function recordInward(
       movementType: params.movementType,
       movementDate: params.movementDate,
       quantity: toStorageString(params.quantity),
-      unitCost: toStorageString(params.unitCost),
+      unitCost: toStorageString(unitCost),
       value: toStorageString(value),
       balanceQuantity: toStorageString(quantityAfter),
       balanceValue: toStorageString(valueAfter),
@@ -467,5 +499,5 @@ export async function recordInward(
     },
   });
 
-  return { value, unitCost: money(params.unitCost), quantityAfter };
+  return { value, unitCost, quantityAfter };
 }

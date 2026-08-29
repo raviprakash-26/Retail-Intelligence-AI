@@ -22,7 +22,7 @@ describe("weighted average", () => {
   it("costs everything at the pooled rate", () => {
     const result = consumeWeightedAverage({
       onHandQuantity: 100,
-      averageCost: "42.50",
+      onHandValue: "4250",
       quantity: 30,
     });
 
@@ -34,7 +34,7 @@ describe("weighted average", () => {
     expect(() =>
       consumeWeightedAverage({
         onHandQuantity: 5,
-        averageCost: 10,
+        onHandValue: 50,
         quantity: 6,
       }),
     ).toThrow(InsufficientStockError);
@@ -43,17 +43,43 @@ describe("weighted average", () => {
   it("allows selling the last of it exactly", () => {
     const result = consumeWeightedAverage({
       onHandQuantity: 5,
-      averageCost: 10,
+      onHandValue: 50,
       quantity: 5,
     });
     expect(result.cost.toString()).toBe("50");
+  });
+
+  it("gives up exactly what the pool holds when all of it leaves", () => {
+    // Three units holding ₹89.99 average ₹29.9967 — four decimal places is as
+    // close as an average gets. Quantity times that rate is ₹89.9901, a
+    // hundredth of a paisa more than the shelf ever held, so the quantity would
+    // reach nil and the value would not. What is left behind is an empty shelf
+    // worth a fraction of a paisa, sitting in the Inventory account.
+    const result = consumeWeightedAverage({
+      onHandQuantity: 3,
+      onHandValue: "89.99",
+      quantity: 3,
+    });
+
+    expect(result.cost.toString()).toBe("89.99");
+    expect(result.unitCost.toString()).toBe("29.9967");
+  });
+
+  it("takes a share of the value when part of the pool leaves", () => {
+    const result = consumeWeightedAverage({
+      onHandQuantity: 4,
+      onHandValue: "100",
+      quantity: 1,
+    });
+
+    expect(result.cost.toString()).toBe("25");
   });
 
   it("reports what was available so the message can name figures", () => {
     try {
       consumeWeightedAverage({
         onHandQuantity: 3,
-        averageCost: 10,
+        onHandValue: 30,
         quantity: 8,
       });
       expect.unreachable("should have thrown");
@@ -130,7 +156,7 @@ describe("consume", () => {
   it("routes to the method the company keeps", () => {
     const params = {
       onHandQuantity: 20,
-      averageCost: "45",
+      onHandValue: "900",
       layers: [layer(0, "10", "40"), layer(1, "10", "50")],
       quantity: 10,
     };
@@ -149,9 +175,10 @@ describe("blendAverageCost", () => {
     expect(
       blendAverageCost({
         onHandQuantity: 10,
+        onHandValue: 400,
         averageCost: 40,
         inwardQuantity: 10,
-        inwardUnitCost: 50,
+        inwardValue: 500,
       }).toString(),
     ).toBe("45");
   });
@@ -160,9 +187,10 @@ describe("blendAverageCost", () => {
     expect(
       blendAverageCost({
         onHandQuantity: 0,
+        onHandValue: 0,
         averageCost: 0,
         inwardQuantity: 40,
-        inwardUnitCost: "1450",
+        inwardValue: "58000",
       }).toString(),
     ).toBe("1450");
   });
@@ -173,27 +201,31 @@ describe("blendAverageCost", () => {
     expect(
       blendAverageCost({
         onHandQuantity: 0,
+        onHandValue: 0,
         averageCost: "42.50",
         inwardQuantity: 0,
-        inwardUnitCost: 0,
+        inwardValue: 0,
       }).toString(),
     ).toBe("42.5");
   });
 
   it("stays exact across repeated blends", () => {
     let quantity = money(0);
+    let value = money(0);
     let cost = money(0);
 
     for (let receipt = 0; receipt < 30; receipt += 1) {
       const inward = money(3);
-      const price = money("10.33");
+      const inwardValue = money("30.99");
       cost = blendAverageCost({
         onHandQuantity: quantity,
+        onHandValue: value,
         averageCost: cost,
         inwardQuantity: inward,
-        inwardUnitCost: price,
+        inwardValue,
       });
       quantity = quantity.plus(inward);
+      value = value.plus(inwardValue);
     }
 
     expect(cost.toFixed(4)).toBe("10.3300");

@@ -991,7 +991,7 @@ describe("two movements at once", () => {
             recordInward(tx, {
               ...shared,
               quantity: 1,
-              unitCost: 60,
+              cost: 60,
               movementType: StockMovementType.PURCHASE,
             }),
           { timeout: 30_000 },
