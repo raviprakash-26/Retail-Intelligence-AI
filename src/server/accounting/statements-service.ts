@@ -154,9 +154,29 @@ function groupLines(balances: readonly AccountBalance[]): StatementGroup[] {
 const totalOf = (groups: readonly StatementGroup[]): Decimal =>
   add(...groups.map((group) => group.total));
 
-/** Percentage of revenue, to one decimal. Null when there is no revenue. */
+/**
+ * Percentage of revenue, to one decimal. Null where revenue cannot carry one.
+ *
+ * Nil revenue was the only case refused, and negative revenue is the one that
+ * mattered. Sales returns are contra-revenue — a debit against the sales
+ * account — so a quiet month in which a customer sends back what they bought
+ * last month has revenue *below* nil. Dividing by it turns a loss into a
+ * healthy-looking margin, because both sides of the ratio have gone negative
+ * and the signs cancel: ₹2,500 of goods coming back against no sales reads
+ * −₹2,500 of revenue and −₹1,000 of gross profit, and 40%.
+ *
+ * The page printed "40% of revenue" beside a gross *loss*, the dashboard tile
+ * said "40% margin", and `summarise` told the shopkeeper that for every ₹100 of
+ * sales ₹40 was left — in the sentence directly above the one saying the period
+ * ended at a loss of ₹1,000.
+ *
+ * `sales-analytics` and the advisor's ranking both had this right already, in
+ * the same words: a percentage of a base, or null when the base cannot carry
+ * one. This is the third reader of that question and was the one the statements
+ * are drawn from.
+ */
 function marginPercent(part: Decimal, revenue: Decimal): number | null {
-  if (revenue.isZero()) return null;
+  if (revenue.lessThanOrEqualTo(0)) return null;
   return Number(part.dividedBy(revenue).times(100).toFixed(1));
 }
 
@@ -377,6 +397,16 @@ export function summarise(statements: FinancialStatements): string[] {
     return notes;
   }
 
+  // More came back than went out. Every ratio to a base like this is
+  // meaningless — and worse than meaningless, because the signs cancel and it
+  // reads as a good month. Say what happened instead.
+  if (revenue.isNegative()) {
+    notes.push(
+      `More was returned than sold in this period, so sales come to ${revenue.toFixed(2)} and there is no margin to read.`,
+    );
+    return notes;
+  }
+
   const grossPercent = statements.trading.grossMarginPercent;
   if (grossPercent !== null) {
     notes.push(
@@ -385,6 +415,10 @@ export function summarise(statements: FinancialStatements): string[] {
   }
 
   if (!expenses.isZero()) {
+    // Its own division rather than `marginPercent`, which rounds to one
+    // decimal: rounding that again to none is not the same as rounding once,
+    // and 40.46% would read 41 instead of 40. The guard it exists for is
+    // already applied — revenue is positive by the time this is reached.
     const share = Number(expenses.dividedBy(revenue).times(100).toFixed(0));
     notes.push(
       `Running the shop cost ${share}% of sales — rent, salaries, power and the rest.`,

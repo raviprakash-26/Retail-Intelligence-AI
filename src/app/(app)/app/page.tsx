@@ -201,7 +201,11 @@ export default async function DashboardPage() {
               }
               note={
                 overview.trading?.grossMarginPercent === null
-                  ? "Nothing sold yet, so there is no margin to read"
+                  ? // Nil revenue is not the only way to get here: a period in
+                    // which more came back than went out has revenue below nil,
+                    // which cannot carry a percentage either. Naming the wrong
+                    // reason is worse than naming none.
+                    "No sales to read a margin against yet"
                   : overview.trading
                     ? `${overview.trading.grossMarginPercent}% margin`
                     : undefined
