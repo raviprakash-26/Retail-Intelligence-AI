@@ -12,8 +12,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { VoidDocumentDialog } from "@/components/documents/void-document-dialog";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { requirePermission } from "@/server/auth/context";
+import { voidPayrollAction } from "@/server/payroll/actions";
 import { getPayrollRun, PayrollError } from "@/server/payroll/payroll-service";
 
 export const metadata: Metadata = {
@@ -57,17 +59,38 @@ export default async function PayrollRunPage({
         All payroll
       </Link>
 
-      <header className="mb-6">
-        <h1 className="flex flex-wrap items-center gap-2.5 text-2xl font-semibold tracking-tight">
-          {label}
-          <Badge variant={run.status === "CANCELLED" ? "danger" : "success"}>
-            {run.status === "CANCELLED" ? "Cancelled" : "Posted"}
-          </Badge>
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {run.reference} · paid {formatDate(run.payDate, { style: "long" })} ·{" "}
-          {run.items.length} {run.items.length === 1 ? "person" : "people"}
-        </p>
+      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="flex flex-wrap items-center gap-2.5 text-2xl font-semibold tracking-tight">
+            {label}
+            <Badge variant={run.status === "CANCELLED" ? "danger" : "success"}>
+              {run.status === "CANCELLED" ? "Cancelled" : "Posted"}
+            </Badge>
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {run.reference} · paid {formatDate(run.payDate, { style: "long" })}{" "}
+            · {run.items.length} {run.items.length === 1 ? "person" : "people"}
+          </p>
+        </div>
+        {run.status !== "CANCELLED" &&
+          context.permissions.has("payroll.manage") && (
+            <VoidDocumentDialog
+              documentId={run.id}
+              documentNumber={run.reference}
+              noun="payroll run"
+              placeholder="Posted against the wrong pay date"
+              onVoid={voidPayrollAction}
+              description={
+                <>
+                  The entry is reversed and the month becomes free to run again.
+                  Nothing is deleted: this run, its reference and every payslip
+                  on it stay readable. It cannot be cancelled once what it owed
+                  has been paid over — the staff, the provident fund, the
+                  insurance, the professional tax or the TDS.
+                </>
+              }
+            />
+          )}
       </header>
 
       <div className="space-y-6">

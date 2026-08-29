@@ -5,8 +5,10 @@ import { prisma } from "@/lib/db";
 import {
   payrollPolicySchema,
   payrollRunSchema,
+  voidPayrollSchema,
   type PayrollPolicyInput,
   type PayrollRunInput,
+  type VoidPayrollInput,
 } from "@/lib/validation/payroll";
 import { logger } from "@/lib/observability/logger";
 import { recordActionFailure } from "@/lib/observability/metrics";
@@ -28,6 +30,7 @@ import { recordAuditLog } from "@/server/audit/audit-log";
 import {
   createPayrollRun,
   PayrollError,
+  voidPayroll,
   type PostedPayroll,
 } from "@/server/payroll/payroll-service";
 
@@ -153,4 +156,46 @@ export async function updatePayrollPolicyAction(
 
   revalidatePayroll();
   return ok(parsed.data);
+}
+
+/**
+ * Cancelling a run.
+ *
+ * Behind `payroll.manage`, the same right that posts one: undoing a month is
+ * not a lesser act than running it.
+ */
+export async function voidPayrollAction(
+  payrollId: string,
+  input: VoidPayrollInput,
+): Promise<ActionResult<{ reference: string; entryNumber: string }>> {
+  const originError = await requireSameOrigin();
+  if (originError) return originError;
+
+  const context = await assertPermission("payroll.manage");
+
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
+
+  const parsed = voidPayrollSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("A reason is required.", {
+      code: ACTION_ERROR.INVALID_INPUT,
+      fieldErrors: zodFieldErrors(parsed.error.issues),
+    });
+  }
+
+  try {
+    const result = await voidPayroll({
+      companyId: context.company.id,
+      payrollId,
+      userId: context.user.id,
+      actorEmail: context.user.email,
+      reason: parsed.data.reason,
+    });
+    revalidatePayroll();
+    revalidatePath(`/app/payroll/${payrollId}`);
+    return ok(result);
+  } catch (error) {
+    return fromServiceError(error);
+  }
 }

@@ -54,5 +54,15 @@ export const payrollRunSchema = z.object({
     .optional(),
 });
 
+/** Why a run is being cancelled. As the other voids: a reason is required. */
+export const voidPayrollSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(5, "Say why this payroll run is being cancelled.")
+    .max(300, "Keep the reason under 300 characters."),
+});
+
+export type VoidPayrollInput = z.infer<typeof voidPayrollSchema>;
 export type PayrollPolicyInput = z.infer<typeof payrollPolicySchema>;
 export type PayrollRunInput = z.infer<typeof payrollRunSchema>;

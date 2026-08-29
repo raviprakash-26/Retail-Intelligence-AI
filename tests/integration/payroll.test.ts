@@ -10,6 +10,7 @@ import type { PaymentInput } from "@/lib/validation/settlements";
 import { createEmployee } from "@/server/master-data/employee-service";
 import {
   createPayrollRun,
+  voidPayroll,
   previewPayroll,
   listPayrollRuns,
   getPayrollRun,
@@ -706,4 +707,182 @@ describe("settling what a payroll run owes", () => {
 
     await assertTrialBalances(fixture.companyId);
   }, 60_000);
+});
+
+/**
+ * Undoing a run.
+ *
+ * The last document in the product that could not be undone. An invoice, a
+ * bill, an expense, a receipt, a payment and a journal voucher all reverse
+ * through `reversePostedEntry`; payroll reversed through nothing. A month
+ * posted with the wrong pay date, or against a salary corrected afterwards, was
+ * permanent — and the period was shut to a second attempt for good, because
+ * `createPayrollRun` refuses one that already has a run.
+ *
+ * That refusal always had an exception for a cancelled run, and nothing ever
+ * set CANCELLED, so the exception was unreachable. Had it been reached the
+ * insert behind it would have failed anyway: the unique index on the period did
+ * not care what the old row's status was. It is partial now, the way the
+ * one-current-fiscal-year and one-primary-branch rules are, so the rule is what
+ * it always said — one *live* run per period.
+ */
+describe("cancelling a payroll run", () => {
+  const cancel = (fixture: Fixture, payrollId: string) =>
+    voidPayroll({
+      companyId: fixture.companyId,
+      payrollId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      reason: "Posted against the wrong pay date",
+    });
+
+  it("reverses the entry and leaves the books where they started", async () => {
+    const fixture = await createCompany({ providentFund: true });
+    await hire(fixture, "Anita Rao", 12_000, 4_000);
+
+    const posted = await run(fixture);
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.SALARY_EXPENSE),
+    ).toBe(toStorageString(posted.grossAmount));
+
+    const cancelled = await cancel(fixture, posted.id);
+    expect(cancelled.reference).toBe(posted.reference);
+
+    // Every account the run touched, back to nil.
+    for (const key of [
+      SYSTEM_ACCOUNT.SALARY_EXPENSE,
+      SYSTEM_ACCOUNT.EMPLOYER_CONTRIBUTIONS,
+      SYSTEM_ACCOUNT.SALARY_PAYABLE,
+      SYSTEM_ACCOUNT.PF_PAYABLE,
+    ]) {
+      expect(await accountBalance(fixture.companyId, key)).toBe(
+        toStorageString(0),
+      );
+    }
+
+    // The original entry stays in the ledger beside its reversal.
+    const entries = await prisma.journalEntry.findMany({
+      where: { companyId: fixture.companyId, voucherType: "PAYROLL" },
+      select: { status: true },
+    });
+    expect(entries).toHaveLength(2);
+    expect(entries.filter((e) => e.status === "REVERSED")).toHaveLength(1);
+    expect(entries.filter((e) => e.status === "POSTED")).toHaveLength(1);
+
+    await assertTrialBalances(fixture.companyId);
+  }, 90_000);
+
+  it("lets the month be run again, which is the point of it", async () => {
+    const fixture = await createCompany();
+    await hire(fixture, "Anita Rao", 12_000, 4_000);
+
+    const first = await run(fixture);
+    await expect(run(fixture)).rejects.toThrow(/has already been run/);
+
+    await cancel(fixture, first.id);
+
+    // The guard's own exception, reachable at last — and the partial index is
+    // what lets the insert behind it through.
+    const second = await run(fixture);
+    expect(second.reference).not.toBe(first.reference);
+    await assertTrialBalances(fixture.companyId);
+  }, 90_000);
+
+  it("still refuses a third run once the replacement is live", async () => {
+    // The period now holds a cancelled run *and* its replacement. Reading any
+    // run and then asking whether that one was cancelled is a different
+    // question from asking whether a live one exists, and `findFirst` has no
+    // ordering — so the guard could pick the cancelled row, pass, and let the
+    // insert hit the unique index. What the shopkeeper saw was a constraint
+    // error rather than the sentence the guard is written to produce.
+    const fixture = await createCompany();
+    await hire(fixture, "Anita Rao", 12_000, 4_000);
+
+    const first = await run(fixture);
+    await cancel(fixture, first.id);
+    await run(fixture);
+
+    await expect(run(fixture)).rejects.toThrow(/has already been run/);
+
+    // And the form says so too, rather than offering to post a third.
+    const preview = await previewPayroll({
+      companyId: fixture.companyId,
+      year: 2026,
+      month: 6,
+    });
+    expect(preview.alreadyRun).toBe(true);
+  }, 90_000);
+
+  it("keeps the cancelled run readable rather than deleting it", async () => {
+    const fixture = await createCompany();
+    await hire(fixture, "Anita Rao", 12_000, 4_000);
+    const posted = await run(fixture);
+
+    await cancel(fixture, posted.id);
+
+    const stored = await prisma.payroll.findUniqueOrThrow({
+      where: { id: posted.id },
+      select: {
+        status: true,
+        reference: true,
+        _count: { select: { items: true } },
+      },
+    });
+    expect(stored.status).toBe("CANCELLED");
+    expect(stored.reference).toBe(posted.reference);
+    // The payslips are the evidence of what was paid and why it was undone.
+    expect(stored._count.items).toBe(1);
+  }, 90_000);
+
+  it("refuses a second cancellation", async () => {
+    const fixture = await createCompany();
+    await hire(fixture, "Anita Rao", 12_000, 4_000);
+    const posted = await run(fixture);
+
+    await cancel(fixture, posted.id);
+    await expect(cancel(fixture, posted.id)).rejects.toThrow(
+      /already been cancelled/,
+    );
+  }, 90_000);
+
+  it("refuses once what it owed has been paid over", async () => {
+    const fixture = await createCompany({ providentFund: true });
+    await hire(fixture, "Anita Rao", 12_000, 4_000);
+    const posted = await run(fixture);
+
+    // The staff are paid. There is no allocation tying that payment to this
+    // run, so what can be asked is whether the debt is still on the books —
+    // and it is not.
+    const owed = await accountBalance(
+      fixture.companyId,
+      SYSTEM_ACCOUNT.SALARY_PAYABLE,
+    );
+    await createPayment({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        kind: "STAFF_PAY",
+        partyId: "",
+        date: today,
+        paymentMode: "BANK",
+        amount: -Number(owed),
+        referenceNo: "",
+        notes: "",
+        allocations: [],
+      } satisfies PaymentInput,
+    });
+
+    await expect(cancel(fixture, posted.id)).rejects.toThrow(
+      /already been paid over/,
+    );
+
+    // And nothing was half-done: the run is still live and the books still add.
+    const stored = await prisma.payroll.findUniqueOrThrow({
+      where: { id: posted.id },
+      select: { status: true },
+    });
+    expect(stored.status).toBe("APPROVED");
+    await assertTrialBalances(fixture.companyId);
+  }, 90_000);
 });
