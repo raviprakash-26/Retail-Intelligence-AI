@@ -64,6 +64,11 @@ export const RECEIPT_SOURCE_LABELS: Record<
 /** Why money went out. */
 export const PAYMENT_PURPOSES = [
   "SUPPLIER",
+  "STAFF_PAY",
+  "PROVIDENT_FUND",
+  "EMPLOYEE_INSURANCE",
+  "PROFESSIONAL_TAX",
+  "TDS",
   "DRAWINGS",
   "LOAN_REPAYMENT",
   "OTHER",
@@ -78,6 +83,31 @@ export const PAYMENT_PURPOSE_LABELS: Record<
   SUPPLIER: {
     label: "Supplier payment",
     hint: "Settles what you owe on their bills.",
+  },
+  // A payroll run posts what the month owes and stops there. These five settle
+  // it — one for the staff and one for each authority the withholdings go to.
+  // Without them the only way to record the money leaving was as a fresh
+  // expense, which charged the same wages to the profit and loss account twice
+  // and left the debts standing.
+  STAFF_PAY: {
+    label: "Wages to staff",
+    hint: "Settles the net pay a payroll run worked out. Not an expense — the run has already charged the wages.",
+  },
+  PROVIDENT_FUND: {
+    label: "Provident fund",
+    hint: "The EPF challan: what you withheld from your staff and your own share, remitted together.",
+  },
+  EMPLOYEE_INSURANCE: {
+    label: "Employee state insurance",
+    hint: "The ESI challan: both shares, as they are remitted.",
+  },
+  PROFESSIONAL_TAX: {
+    label: "Professional tax",
+    hint: "What you withheld for the state, paid over to it.",
+  },
+  TDS: {
+    label: "TDS on salaries",
+    hint: "Tax withheld from your staff's pay, paid to the income tax department.",
   },
   DRAWINGS: {
     label: "Money you took out",
