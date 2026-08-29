@@ -11,6 +11,10 @@ import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
 import { createSale } from "@/server/sales/sale-service";
 import {
+  createSalesReturn,
+  returnableLines,
+} from "@/server/returns/sales-return-service";
+import {
   createExpense,
   listExpenseCategories,
 } from "@/server/expenses/expense-service";
@@ -633,5 +637,69 @@ describe("one shop's own statements", () => {
     // A branch's own books still have to balance, which is the gate this
     // function refuses to answer without.
     expect(branch.balanceSheet.balanced).toBe(true);
+  });
+});
+
+/**
+ * A period in which more came back than went out.
+ *
+ * Sales returns are contra-revenue — a debit against the sales account — so a
+ * quiet month in which a customer sends back what they bought last month has
+ * revenue below nil. Every ratio to that base is meaningless, and the signs
+ * cancel, so it reads as a good month rather than an odd one: ₹2,500 of goods
+ * coming back against no sales is −₹2,500 of revenue and −₹1,000 of gross
+ * profit, which divides to 40%.
+ *
+ * The page printed "40% of revenue" beside a gross loss, the dashboard tile
+ * said "40% margin", and the plain-language reading put "for every ₹100 of
+ * sales, ₹40 was left" directly above "the period ended at a loss of ₹1,000".
+ *
+ * Nil revenue was already refused. Negative was not, and it is the case that
+ * produces a number rather than an absence.
+ */
+describe("a period of net returns", () => {
+  async function monthOfReturns() {
+    const fixture = await createCompany();
+    const sale = await sell(fixture, 25, "2026-05-10"); // ₹2,500 at ₹60 cost
+
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+    });
+    await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: sale.id,
+        returnDate: "2026-06-10",
+        reason: "Customer returned the lot",
+        refundMode: "CREDIT",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 25 }],
+      },
+    });
+
+    return statementsFor(fixture, "2026-06-01", "2026-06-30");
+  }
+
+  it("reads no margin rather than one the signs invented", async () => {
+    const { trading, profitAndLoss } = await monthOfReturns();
+
+    expect(trading.revenueTotal).toBe(toStorageString(-2500));
+    expect(trading.grossProfit).toBe(toStorageString(-1000));
+    // 40% before: both sides negative, so the ratio came out healthy.
+    expect(trading.grossMarginPercent).toBeNull();
+    expect(profitAndLoss.netMarginPercent).toBeNull();
+  });
+
+  it("says what happened instead of quoting a margin", async () => {
+    const notes = summarise(await monthOfReturns());
+
+    expect(notes.join(" ")).toMatch(/More was returned than sold/);
+    expect(notes.join(" ")).toMatch(/no margin to read/);
+    // The sentence that used to sit above "ended at a loss".
+    expect(notes.join(" ")).not.toMatch(/For every ₹100 of sales/);
+    expect(notes.join(" ")).not.toMatch(/Running the shop cost/);
   });
 });
