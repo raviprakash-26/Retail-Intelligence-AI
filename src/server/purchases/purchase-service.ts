@@ -42,7 +42,11 @@ import { recordAuditLog } from "@/server/audit/audit-log";
 import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { writeGstRows } from "@/server/documents/gst-register";
 import { reversePostedEntry } from "@/server/documents/reversal";
-import { recordInward, recordOutward } from "@/server/inventory/stock-service";
+import {
+  InsufficientStockValueError,
+  recordInward,
+  recordOutward,
+} from "@/server/inventory/stock-service";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 import { MasterDataError } from "@/server/master-data/errors";
@@ -687,15 +691,51 @@ export async function voidPurchase(params: {
       const method = company.inventoryMethod as InventoryMethod;
 
       // --- Take the stock back out ------------------------------------------
-      for (const item of purchase.items) {
-        if (!item.product.isStockTracked) continue;
+      //
+      // Row for row against what the bill brought in, as `voidSale` puts back
+      // exactly what the sale took out. A void says the receipt never happened,
+      // so what comes off the shelf is what that receipt put on it.
+      //
+      // Letting the valuation method decide instead is what broke this. It
+      // answers "what are these units worth now", which is the right question
+      // for a sale and the wrong one for an un-recording, and the reversal below
+      // does not ask it — it undoes the original entry line for line and credits
+      // Inventory with what the bill said. Both methods lost it, in opposite
+      // directions. Weighted average pools the cost, so three units at ₹100
+      // beside three at ₹20 come off at ₹60 each: ₹180 against a ₹300 credit.
+      // FIFO keeps receipts apart but drains the oldest first, so voiding the
+      // newer of those two bills reaches past it into the ₹20 layer: ₹60 against
+      // the same ₹300. Voiding the older bill under FIFO happened to come out
+      // right, which is most of why this went unnoticed.
+      //
+      // What a weighted-average void still cannot undo is the cost that has
+      // already left through cost of sales on units sold in between, at a rate
+      // this bill helped set. That stays where it went. The books do not pretend
+      // otherwise, and — the part that matters — the Inventory account and the
+      // stock ledger move by the same figure.
+      const brought = await tx.inventoryMovement.findMany({
+        where: {
+          companyId: params.companyId,
+          sourceType: PURCHASE_SOURCE,
+          sourceId: purchase.id,
+        },
+        select: { productId: true, quantity: true, value: true },
+      });
+
+      const named = new Map(
+        purchase.items.map((item) => [item.productId, item.product]),
+      );
+
+      for (const movement of brought) {
+        const product = named.get(movement.productId);
         try {
           await recordOutward(tx, {
             companyId: params.companyId,
-            productId: item.productId,
+            productId: movement.productId,
             branchId: purchase.branchId,
             method,
-            quantity: item.quantity,
+            quantity: money(movement.quantity).abs(),
+            cost: money(movement.value).abs(),
             movementType: StockMovementType.ADJUSTMENT_OUT,
             movementDate: purchase.billDate,
             sourceType: PURCHASE_VOID_SOURCE,
@@ -707,8 +747,14 @@ export async function voidPurchase(params: {
         } catch (error) {
           if (error instanceof InsufficientStockError) {
             throw new PurchaseError(
-              `${item.product.name} cannot be taken back: only ${error.available.toString()} ${item.product.unit.code} are left of the ${error.requested.toString()} this bill brought in. Some of it has been sold, so record a purchase return instead of voiding.`,
+              `${product?.name ?? "A product on this bill"} cannot be taken back: only ${error.available.toString()} ${product?.unit.code ?? "units"} are left of the ${error.requested.toString()} this bill brought in. Some of it has been sold, so record a purchase return instead of voiding.`,
               "STOCK_ALREADY_SOLD",
+            );
+          }
+          if (error instanceof InsufficientStockValueError) {
+            throw new PurchaseError(
+              `${product?.name ?? "A product on this bill"} cannot be taken back at what the bill paid for it: it brought in ${error.requested.toFixed(2)} and the shelf is now holding ${error.available.toFixed(2)}, because units sold since took their share of the cost with them. Record a purchase return instead of voiding.`,
+              "STOCK_VALUE_ALREADY_SOLD",
             );
           }
           throw error;
