@@ -1,10 +1,6 @@
 import "server-only";
-import {
-  JournalStatus,
-  type Prisma,
-  type StockMovementType,
-} from "@prisma/client";
-import { prisma } from "@/lib/db";
+import { JournalStatus, Prisma, type StockMovementType } from "@prisma/client";
+import { prisma, type DbClient } from "@/lib/db";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import {
   add,
@@ -282,25 +278,48 @@ export type StockReconciliation = {
  *
  * Nothing here repairs anything. A reconciliation that silently corrects what it
  * finds destroys the evidence of how it broke.
+ *
+ * **All three are read as one.** Five statements outside a transaction see the
+ * database five times, and every posting path writes the position, the movement
+ * and the entry together — so the books are never inconsistent, and a reader
+ * that catches a sale between two of its own queries sees them so anyway. The
+ * difference it then reports is the cost of goods on an invoice that was posted
+ * correctly, and there is nothing to find by the time anybody looks. The auditor
+ * keeps what it finds, so that lands on the record as an open HIGH finding about
+ * a disagreement that never existed.
+ *
+ * Repeatable read fixes the reading, not the writing: one snapshot, taken at the
+ * first statement, for all of them. Nothing here writes, so there is no
+ * serialisation failure to retry — the isolation level buys a consistent view
+ * and costs a held connection for the length of five queries.
  */
 export async function reconcileStock(
   companyId: string,
 ): Promise<StockReconciliation> {
-  const [balances, movements, account] = await Promise.all([
-    prisma.inventoryBalance.findMany({
-      where: { companyId },
-      select: { productId: true, stockValue: true },
-    }),
-    prisma.inventoryMovement.groupBy({
-      by: ["productId"],
-      where: { companyId },
-      _sum: { value: true },
-    }),
-    prisma.account.findFirst({
-      where: { companyId, systemKey: SYSTEM_ACCOUNT.INVENTORY },
-      select: { id: true },
-    }),
-  ]);
+  return prisma.$transaction((tx) => reconcileWithin(tx, companyId), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+  });
+}
+
+async function reconcileWithin(
+  tx: DbClient,
+  companyId: string,
+): Promise<StockReconciliation> {
+  // Sequential on one connection now rather than three, which is what a single
+  // snapshot costs and the whole of what it costs.
+  const balances = await tx.inventoryBalance.findMany({
+    where: { companyId },
+    select: { productId: true, stockValue: true },
+  });
+  const movements = await tx.inventoryMovement.groupBy({
+    by: ["productId"],
+    where: { companyId },
+    _sum: { value: true },
+  });
+  const account = await tx.account.findFirst({
+    where: { companyId, systemKey: SYSTEM_ACCOUNT.INVENTORY },
+    select: { id: true },
+  });
 
   const cachedByProduct = new Map<string, Decimal>();
   for (const balance of balances) {
@@ -318,7 +337,7 @@ export async function reconcileStock(
   const movementValue = add(...[...movementByProduct.values()]);
 
   const accountTotals = account
-    ? await prisma.journalLine.aggregate({
+    ? await tx.journalLine.aggregate({
         where: {
           companyId,
           accountId: account.id,
@@ -345,7 +364,7 @@ export async function reconcileStock(
   });
 
   const driftedProducts = driftedIds.length
-    ? await prisma.product.findMany({
+    ? await tx.product.findMany({
         where: { companyId, id: { in: driftedIds } },
         select: { id: true, sku: true, name: true },
       })

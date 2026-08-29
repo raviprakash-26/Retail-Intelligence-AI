@@ -1,6 +1,6 @@
 import "server-only";
-import { GstDirection, JournalStatus } from "@prisma/client";
-import { prisma } from "@/lib/db";
+import { GstDirection, JournalStatus, Prisma } from "@prisma/client";
+import { prisma, type DbClient } from "@/lib/db";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import { applySetOff, type heads, type SetOffResult } from "@/lib/tax/set-off";
 import {
@@ -258,18 +258,19 @@ function groupByHsn(rows: readonly RegisterRow[]): HsnSummary[] {
 
 /** Net balance on a GST account in the general ledger. */
 async function ledgerTax(
+  tx: DbClient,
   companyId: string,
   systemKeys: readonly string[],
   from: Date,
   to: Date,
 ): Promise<Decimal> {
-  const accounts = await prisma.account.findMany({
+  const accounts = await tx.account.findMany({
     where: { companyId, systemKey: { in: [...systemKeys] } },
     select: { id: true },
   });
   if (accounts.length === 0) return money(0);
 
-  const totals = await prisma.journalLine.aggregate({
+  const totals = await tx.journalLine.aggregate({
     where: {
       companyId,
       accountId: { in: accounts.map((account) => account.id) },
@@ -284,17 +285,41 @@ async function ledgerTax(
   return subtract(totals._sum.debit ?? 0, totals._sum.credit ?? 0);
 }
 
+/**
+ * The register and the ledger for one month, read as one.
+ *
+ * The paper's whole purpose is to put the tax computed from the documents beside
+ * the movement on the GST accounts and say whether they agree — written by
+ * different code, compared with no tolerance, and reported at HIGH when they do
+ * not. Reading them in separate statements let a sale land between the two, so
+ * the document was in one figure and not the other and the paper accused the
+ * books of a disagreement they never had. `reconcileStock` had the same shape
+ * and the same fix: one snapshot, taken at the first statement.
+ */
 export async function getGstWorkingPaper(params: {
   companyId: string;
   year: number;
   month: number;
 }): Promise<GstWorkingPaper> {
+  return prisma.$transaction((tx) => workingPaperWithin(tx, params), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+  });
+}
+
+async function workingPaperWithin(
+  tx: DbClient,
+  params: {
+    companyId: string;
+    year: number;
+    month: number;
+  },
+): Promise<GstWorkingPaper> {
   const { companyId, year, month } = params;
   const from = new Date(Date.UTC(year, month - 1, 1));
   const to = new Date(Date.UTC(year, month, 0));
 
   const [rows, company] = await Promise.all([
-    prisma.gstTransaction.findMany({
+    tx.gstTransaction.findMany({
       where: { companyId, periodYear: year, periodMonth: month },
       select: {
         direction: true,
@@ -314,7 +339,7 @@ export async function getGstWorkingPaper(params: {
         isAmendment: true,
       },
     }),
-    prisma.company.findUniqueOrThrow({
+    tx.company.findUniqueOrThrow({
       where: { id: companyId },
       select: { gstRegistration: true },
     }),
@@ -374,6 +399,7 @@ export async function getGstWorkingPaper(params: {
 
   const [outputLedger, inputLedger] = await Promise.all([
     ledgerTax(
+      tx,
       companyId,
       [
         SYSTEM_ACCOUNT.GST_OUTPUT_CGST,
@@ -385,6 +411,7 @@ export async function getGstWorkingPaper(params: {
       to,
     ),
     ledgerTax(
+      tx,
       companyId,
       [
         SYSTEM_ACCOUNT.GST_INPUT_CGST,
