@@ -70,6 +70,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "banking.recorded_from_statement": "Recorded a transaction from a statement",
   "banking.account_created": "Added a bank account",
   "payroll.posted": "Posted a payroll run",
+  "payroll.cancelled": "Cancelled a payroll run",
   "payroll.policy.updated": "Changed the payroll policy",
   "billing.plan_changed": "Changed the subscription plan",
   "billing.cancelled": "Cancelled the subscription",

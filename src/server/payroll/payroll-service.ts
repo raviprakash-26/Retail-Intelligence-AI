@@ -3,7 +3,13 @@ import { PayrollStatus, VoucherType } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import type { DraftJournalLine } from "@/lib/accounting/double-entry";
-import { isZero, toStorageString, type Decimal } from "@/lib/money";
+import {
+  compare,
+  isZero,
+  subtract,
+  toStorageString,
+  type Decimal,
+} from "@/lib/money";
 import {
   computeStatutory,
   totalStatutory,
@@ -11,6 +17,7 @@ import {
   type StatutoryResult,
 } from "@/lib/payroll/statutory";
 import { postJournalEntry } from "@/server/accounting/post-journal-entry";
+import { reversePostedEntry } from "@/server/documents/reversal";
 import { recordAuditLog } from "@/server/audit/audit-log";
 import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
@@ -56,7 +63,10 @@ export class PayrollError extends Error {
       | "ALREADY_RUN"
       | "NOT_FOUND"
       | "NOT_POSTED"
-      | "NOTHING_TO_PAY",
+      | "NOTHING_TO_PAY"
+      | "ALREADY_CANCELLED"
+      | "NO_ENTRY"
+      | "ALREADY_SETTLED",
   ) {
     super(message);
     this.name = "PayrollError";
@@ -244,9 +254,16 @@ export async function previewPayroll(params: {
       },
       orderBy: { employeeCode: "asc" },
     }),
+    // The same question `createPayrollRun` asks, asked the same way: a period
+    // holding a cancelled run and its replacement must read as already run.
     prisma.payroll.findFirst({
-      where: { companyId, periodYear: year, periodMonth: month },
-      select: { id: true, status: true },
+      where: {
+        companyId,
+        periodYear: year,
+        periodMonth: month,
+        status: { not: PayrollStatus.CANCELLED },
+      },
+      select: { id: true },
     }),
   ]);
 
@@ -291,8 +308,7 @@ export async function previewPayroll(params: {
       ...serialise(results[index]!),
     })),
     totals: serialise(totalStatutory(results)),
-    alreadyRun:
-      existing !== null && existing.status !== PayrollStatus.CANCELLED,
+    alreadyRun: existing !== null,
     notes,
   };
 }
@@ -321,12 +337,26 @@ export async function createPayrollRun(params: {
     async (tx) => {
       const payDate = new Date(`${params.payDate}T00:00:00.000Z`);
 
-      const duplicate = await tx.payroll.findFirst({
-        where: { companyId, periodYear: year, periodMonth: month },
-        select: { id: true, status: true },
+      // Asked the way the index asks it: is there a *live* run for this month?
+      //
+      // It used to read any run for the period and then check whether that one
+      // was cancelled, which is a different question once a period holds both —
+      // a cancelled run and the one that replaced it. `findFirst` has no
+      // ordering, so it could return the cancelled row, the guard would pass,
+      // and the insert behind it would hit `payroll_one_live_run_per_period`.
+      // The shopkeeper got a raw constraint error instead of the sentence this
+      // exists to produce, on the third run of a month they had corrected once.
+      const live = await tx.payroll.findFirst({
+        where: {
+          companyId,
+          periodYear: year,
+          periodMonth: month,
+          status: { not: PayrollStatus.CANCELLED },
+        },
+        select: { id: true },
       });
-      if (duplicate && duplicate.status !== PayrollStatus.CANCELLED) {
-        // The table enforces one run per period; this turns the constraint
+      if (live) {
+        // The index enforces one live run per period; this turns the constraint
         // into a sentence somebody can act on.
         throw new PayrollError(
           `Payroll for ${periodLabel(year, month)} has already been run.`,
@@ -545,6 +575,179 @@ export async function createPayrollRun(params: {
     },
     { timeout: 30_000 },
   );
+}
+
+/** Every liability a run credits, so the void can check they are still there. */
+const PAYROLL_LIABILITIES = [
+  SYSTEM_ACCOUNT.SALARY_PAYABLE,
+  SYSTEM_ACCOUNT.PF_PAYABLE,
+  SYSTEM_ACCOUNT.ESI_PAYABLE,
+  SYSTEM_ACCOUNT.PROFESSIONAL_TAX_PAYABLE,
+  SYSTEM_ACCOUNT.TDS_PAYABLE,
+] as const;
+
+/**
+ * Undoing a run.
+ *
+ * The last document in the product that could not be undone. Every other one —
+ * an invoice, a bill, an expense, a receipt, a payment, a journal voucher — goes
+ * through `reversePostedEntry`, and payroll went through nothing: once posted, a
+ * month was permanent, and the period was closed to a second attempt for good by
+ * the guard in `createPayrollRun`. A wrong pay date or a salary corrected after
+ * the fact had no answer.
+ *
+ * The reversal is that same shared path, so what comes back out is what went in,
+ * line for line, whatever the rates were that month. The run is marked cancelled
+ * rather than deleted: its reference, its payslips and its entry all stay
+ * readable, which is what makes the correction explicable afterwards.
+ *
+ * **What it refuses.** A run's five liabilities can be settled — staff paid, the
+ * challans remitted — and once they have been, reversing the entry would drive
+ * those accounts below nil: the debt is gone and the credit that created it
+ * would be taken back anyway. There is no allocation tying a payment to a run,
+ * so the question this can actually answer is whether each account still holds
+ * what this run put into it. Where one does not, the void is refused and says
+ * which, in the same terms `voidPurchase` refuses a bill whose stock has been
+ * sold on.
+ */
+export async function voidPayroll(params: {
+  companyId: string;
+  payrollId: string;
+  userId: string;
+  actorEmail: string;
+  reason: string;
+}): Promise<{ reference: string; entryNumber: string }> {
+  return prisma.$transaction(
+    async (tx) => {
+      const run = await tx.payroll.findFirst({
+        where: { id: params.payrollId, companyId: params.companyId },
+        select: {
+          id: true,
+          reference: true,
+          payDate: true,
+          periodYear: true,
+          periodMonth: true,
+          status: true,
+          journalEntryId: true,
+        },
+      });
+
+      if (!run) {
+        throw new PayrollError(
+          "That payroll run could not be found.",
+          "NOT_FOUND",
+        );
+      }
+      if (run.status === PayrollStatus.CANCELLED) {
+        throw new PayrollError(
+          `${run.reference} has already been cancelled.`,
+          "ALREADY_CANCELLED",
+        );
+      }
+      const entryId = run.journalEntryId;
+      if (!entryId) {
+        throw new PayrollError(
+          "This run has no journal entry to reverse, so it cannot be cancelled safely.",
+          "NO_ENTRY",
+        );
+      }
+
+      // --- Are the debts it created still on the books? ---------------------
+      const accountId = await resolveSystemAccounts(tx, params.companyId, [
+        ...PAYROLL_LIABILITIES,
+      ]);
+
+      for (const key of PAYROLL_LIABILITIES) {
+        const account = accountId(key);
+        const [owedNow, credited] = await Promise.all([
+          balanceOf(tx, params.companyId, account),
+          creditedByEntry(tx, params.companyId, entryId, account),
+        ]);
+
+        // Liabilities sit as credit balances, so both figures are negative here
+        // and "still holds it" means the account owes at least what the run put
+        // on it.
+        if (compare(credited, 0) < 0 && compare(owedNow, credited) > 0) {
+          throw new PayrollError(
+            `${run.reference} put ${credited.abs().toFixed(2)} onto ${label(key)} and only ${owedNow.abs().toFixed(2)} is still owed on it — some of this run has already been paid over. Cancelling would take back a debt that is no longer there.`,
+            "ALREADY_SETTLED",
+          );
+        }
+      }
+
+      const reversal = await reversePostedEntry(tx, {
+        companyId: params.companyId,
+        entryId,
+        branchId: null,
+        entryDate: run.payDate,
+        voucherType: VoucherType.PAYROLL,
+        narration: `Cancellation of payroll ${run.reference} — ${params.reason}`,
+        referenceNo: run.reference,
+        sourceType: "Payroll",
+        sourceId: run.id,
+        createdById: params.userId,
+      });
+
+      await tx.payroll.update({
+        where: { id: run.id },
+        data: { status: PayrollStatus.CANCELLED },
+      });
+
+      await recordAuditLog(
+        {
+          action: "payroll.cancelled",
+          module: "Payroll",
+          companyId: params.companyId,
+          userId: params.userId,
+          actorEmail: params.actorEmail,
+          entityType: "Payroll",
+          entityId: run.id,
+          metadata: {
+            reference: run.reference,
+            period: periodLabel(run.periodYear, run.periodMonth),
+            reason: params.reason,
+            reversalEntry: reversal.entryNumber,
+          },
+        },
+        tx,
+      );
+
+      return { reference: run.reference, entryNumber: reversal.entryNumber };
+    },
+    { timeout: 30_000 },
+  );
+}
+
+/** Net movement on one account, as at now. */
+async function balanceOf(
+  tx: Parameters<typeof postJournalEntry>[0],
+  companyId: string,
+  accountId: string,
+): Promise<Decimal> {
+  const totals = await tx.journalLine.aggregate({
+    where: { companyId, accountId, status: "POSTED" },
+    _sum: { debit: true, credit: true },
+  });
+  return subtract(totals._sum.debit ?? 0, totals._sum.credit ?? 0);
+}
+
+/** What one entry put onto one account, net. */
+async function creditedByEntry(
+  tx: Parameters<typeof postJournalEntry>[0],
+  companyId: string,
+  journalEntryId: string,
+  accountId: string,
+): Promise<Decimal> {
+  const totals = await tx.journalLine.aggregate({
+    where: { companyId, journalEntryId, accountId },
+    _sum: { debit: true, credit: true },
+  });
+  return subtract(totals._sum.debit ?? 0, totals._sum.credit ?? 0);
+}
+
+/** The account's name in the sentence a refusal produces. */
+function label(systemKey: string): string {
+  return systemKey.toLowerCase().replace(/_/g, " ");
 }
 
 export type PayrollRunRow = {

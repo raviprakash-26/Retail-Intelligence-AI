@@ -1905,7 +1905,13 @@ model Payroll {
   company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   items   PayrollItem[]
 
-  @@unique([companyId, periodYear, periodMonth])
+  /// One *live* run per period. Enforced by `payroll_one_live_run_per_period`,
+  /// a partial unique index that excludes cancelled runs — a voided month has
+  /// to be able to be run again, and a plain unique index would refuse it.
+  /// Declared in SQL rather than here because Prisma has no syntax for the
+  /// `WHERE`, the same as the one-current-fiscal-year and one-primary-branch
+  /// rules it sits beside.
+  @@index([companyId, periodYear, periodMonth])
   @@index([companyId, status])
   @@map("payroll")
 }
