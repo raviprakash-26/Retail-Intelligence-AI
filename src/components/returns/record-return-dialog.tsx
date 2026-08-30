@@ -94,6 +94,20 @@ const WORDING: Record<
 
 const REFUND_MODES = ["CREDIT", "CASH", "BANK"] as const;
 
+/**
+ * The settlements this document can actually take.
+ *
+ * "Credit the customer's account" needs an account to credit. A walk-in counter
+ * sale names no customer, so the money can only go back over the counter or
+ * through the bank — and the service refuses the third option outright, because
+ * a receivable owed by nobody is a balance the ageing report cannot see.
+ * Leaving it in the list and letting the server turn it away would be offering
+ * a choice that never works, so it comes out of the list instead.
+ */
+function refundModes(hasParty: boolean) {
+  return hasParty ? REFUND_MODES : (["CASH", "BANK"] as const);
+}
+
 type FormValues = {
   returnDate: string;
   reason: string;
@@ -101,7 +115,11 @@ type FormValues = {
   quantities: number[];
 };
 
-function buildSchema(lines: readonly ReturnableLine[], minDate: string) {
+function buildSchema(
+  lines: readonly ReturnableLine[],
+  minDate: string,
+  hasParty: boolean,
+) {
   return z
     .object({
       returnDate: z
@@ -114,7 +132,7 @@ function buildSchema(lines: readonly ReturnableLine[], minDate: string) {
         .string()
         .trim()
         .max(500, "Keep the reason under 500 characters."),
-      refundMode: z.enum(REFUND_MODES),
+      refundMode: z.enum(refundModes(hasParty)),
       quantities: z.array(z.number().min(0, "A quantity cannot be negative.")),
     })
     .superRefine((values, ctx) => {
@@ -145,6 +163,7 @@ export function RecordReturnDialog({
   direction,
   documentNumber,
   documentDate,
+  hasParty,
   lines,
   onSubmit,
 }: {
@@ -152,6 +171,8 @@ export function RecordReturnDialog({
   documentNumber: string;
   /** ISO date of the invoice or bill; a return cannot precede it. */
   documentDate: string;
+  /** Whether the original document names a customer or a supplier. */
+  hasParty: boolean;
   lines: readonly ReturnableLine[];
   onSubmit: (input: {
     returnDate: string;
@@ -166,10 +187,12 @@ export function RecordReturnDialog({
 
   const today = new Date().toISOString().slice(0, 10);
   const defaultDate = today >= documentDate ? today : documentDate;
+  const modes = refundModes(hasParty);
+  const defaultMode = modes[0];
 
   const schema = React.useMemo(
-    () => buildSchema(lines, documentDate),
-    [lines, documentDate],
+    () => buildSchema(lines, documentDate, hasParty),
+    [lines, documentDate, hasParty],
   );
 
   const form = useForm<FormValues>({
@@ -177,7 +200,7 @@ export function RecordReturnDialog({
     defaultValues: {
       returnDate: defaultDate,
       reason: "",
-      refundMode: "CREDIT",
+      refundMode: defaultMode,
       quantities: lines.map(() => 0),
     },
   });
@@ -213,7 +236,7 @@ export function RecordReturnDialog({
     form.reset({
       returnDate: defaultDate,
       reason: "",
-      refundMode: "CREDIT",
+      refundMode: defaultMode,
       quantities: lines.map(() => 0),
     });
     router.refresh();
@@ -279,7 +302,7 @@ export function RecordReturnDialog({
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {REFUND_MODES.map((mode) => (
+                          {modes.map((mode) => (
                             <SelectItem key={mode} value={mode}>
                               {words.refund[mode]}
                             </SelectItem>
