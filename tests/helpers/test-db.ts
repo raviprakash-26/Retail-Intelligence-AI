@@ -27,11 +27,20 @@ export async function disconnectTestDb(): Promise<void> {
 
 let platformSeeded = false;
 
-/** Ensures permissions, system roles and plans exist. Idempotent and cached. */
+/**
+ * Ensures permissions, system roles and plans exist. Idempotent and cached.
+ *
+ * The cache is per process, and vitest gives each worker its own — so this runs
+ * once per worker, not once per suite. That is why it asks for the templates
+ * only: `syncExistingTenants` walks every company in the database and rewrites
+ * its system roles, and a worker doing that while another test has deliberately
+ * dropped a permission puts it straight back. Nothing here needs the sweep —
+ * every company a test uses is provisioned from the templates as it is created.
+ */
 export async function ensurePlatformData(): Promise<void> {
   if (platformSeeded) return;
   const prisma = testDb();
-  await seedPermissionsAndRoles(prisma);
+  await seedPermissionsAndRoles(prisma, { existingTenants: "skip" });
   await seedSubscriptionPlans(prisma);
   platformSeeded = true;
 }
