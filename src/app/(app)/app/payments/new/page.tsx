@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { PaymentForm } from "@/components/settlements/payment-form";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/server/auth/context";
+import { businessToday } from "@/lib/validation/date";
 
 export const metadata: Metadata = {
   title: "Record payment",
@@ -41,7 +42,10 @@ export default async function NewPaymentPage() {
         </p>
       </header>
 
-      <PaymentForm suppliers={suppliers} />
+      <PaymentForm
+        suppliers={suppliers}
+        today={businessToday(context.company.timezone)}
+      />
     </div>
   );
 }

@@ -51,8 +51,11 @@ import {
  */
 export function AdjustmentForm({
   products,
+  today,
 }: {
   products: Array<{ id: string; sku: string; name: string; unitCode: string }>;
+  /** The shop's own calendar day, worked out from its time zone. */
+  today: string;
 }) {
   const router = useRouter();
 
@@ -60,7 +63,7 @@ export function AdjustmentForm({
     resolver: zodResolver(stockAdjustmentSchema),
     defaultValues: {
       productId: "",
-      adjustmentDate: new Date().toISOString().slice(0, 10),
+      adjustmentDate: today,
       reason: "COUNT",
       countedQuantity: 0,
       notes: "",

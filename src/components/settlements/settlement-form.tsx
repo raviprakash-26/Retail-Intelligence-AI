@@ -111,6 +111,7 @@ export function SettlementForm<TInput extends SettlementValues>({
   loadOpenDocuments,
   submit,
   redirectTo,
+  today,
 }: {
   schema: Parameters<typeof zodResolver>[0];
   kinds: SettlementKindOption[];
@@ -131,6 +132,8 @@ export function SettlementForm<TInput extends SettlementValues>({
   loadOpenDocuments: (partyId: string) => Promise<OpenDocument[]>;
   submit: (values: TInput) => Promise<ActionResult<{ id: string }>>;
   redirectTo: (id: string) => string;
+  /** The shop's own calendar day, worked out from its time zone. */
+  today: string;
 }) {
   const router = useRouter();
 
@@ -140,7 +143,7 @@ export function SettlementForm<TInput extends SettlementValues>({
     defaultValues: {
       kind: kinds[0]?.value ?? "",
       partyId: "",
-      date: new Date().toISOString().slice(0, 10),
+      date: today,
       paymentMode: "CASH",
       amount: 0,
       referenceNo: "",

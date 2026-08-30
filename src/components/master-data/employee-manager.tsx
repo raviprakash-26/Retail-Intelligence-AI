@@ -94,18 +94,14 @@ const STATUS_VARIANT: Record<
   TERMINATED: "muted",
 };
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function emptyValues(): EmployeeInput {
+function emptyValues(today: string): EmployeeInput {
   return {
     name: "",
     email: "",
     phone: "",
     department: "",
     designation: "",
-    joiningDate: today(),
+    joiningDate: today,
     exitDate: "",
     status: "ACTIVE",
     basicSalary: 0,
@@ -119,9 +115,12 @@ function emptyValues(): EmployeeInput {
 export function EmployeeManager({
   result,
   canManage,
+  today,
 }: {
   result: EmployeeListResult;
   canManage: boolean;
+  /** The shop's own calendar day, worked out from its time zone. */
+  today: string;
 }) {
   const router = useRouter();
   const [dialog, setDialog] = React.useState<
@@ -243,6 +242,7 @@ export function EmployeeManager({
 
       <EmployeeDialog
         state={dialog}
+        today={today}
         onClose={() => setDialog(null)}
         onSaved={() => {
           setDialog(null);
@@ -257,16 +257,18 @@ function EmployeeDialog({
   state,
   onClose,
   onSaved,
+  today,
 }: {
   state: { mode: "create" } | { mode: "edit"; employee: EmployeeRow } | null;
   onClose: () => void;
   onSaved: () => void;
+  today: string;
 }) {
   const editing = state?.mode === "edit" ? state.employee : null;
 
   const form = useForm<EmployeeInput>({
     resolver: zodResolver(employeeSchema),
-    defaultValues: emptyValues(),
+    defaultValues: emptyValues(today),
   });
 
   const { formError, applyResult, reset } = useServerFormErrors(form);
@@ -292,7 +294,7 @@ function EmployeeDialog({
             bankAccountNo: editing.bankAccountNo ?? "",
             ifsc: editing.ifsc ?? "",
           }
-        : emptyValues(),
+        : emptyValues(today),
     );
     reset();
   }

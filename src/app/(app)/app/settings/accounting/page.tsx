@@ -3,6 +3,7 @@ import { Lock } from "lucide-react";
 import { AccountingSettingsForm } from "@/components/settings/accounting-settings-form";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { prisma } from "@/lib/db";
+import { asBusinessTimezone } from "@/lib/validation/company";
 import { requirePermission } from "@/server/auth/context";
 import { describeAccountingLocks } from "@/server/company/settings-service";
 
@@ -43,7 +44,10 @@ export default async function AccountingSettingsPage() {
       )}
 
       <AccountingSettingsForm
-        defaultValues={company}
+        defaultValues={{
+          ...company,
+          timezone: asBusinessTimezone(company.timezone),
+        }}
         locks={locks.locks}
         readOnly={!canEdit}
       />

@@ -11,6 +11,9 @@ import {
   type ReportResult,
 } from "@/lib/reports/result";
 import { add, money, toStorageString } from "@/lib/money";
+import { prisma } from "@/lib/db";
+import { asBusinessTimezone } from "@/lib/validation/company";
+import { businessToday } from "@/lib/validation/date";
 import { getFinancialStatements } from "@/server/accounting/statements-service";
 import { getTrialBalance } from "@/server/accounting/trial-balance-service";
 import {
@@ -611,6 +614,7 @@ async function expensesByCategoryReport(
 
 async function stockOnHandReport(
   companyId: string,
+  today: string,
 ): Promise<Omit<ReportResult, "key" | "title">> {
   const stock = await stockRows(companyId);
 
@@ -644,7 +648,7 @@ async function stockOnHandReport(
   );
 
   return {
-    period: `as at ${dayLabel(new Date().toISOString().slice(0, 10))}`,
+    period: `as at ${dayLabel(today)}`,
     columns: [
       TEXT("sku", "SKU"),
       TEXT("product", "Product"),
@@ -667,6 +671,7 @@ async function stockOnHandReport(
 function ageingReport(
   ageing: LedgerAgeing,
   who: string,
+  today: string,
 ): Omit<ReportResult, "key" | "title"> {
   const bucketKeys = Object.keys(ageing.summary.buckets);
 
@@ -696,7 +701,7 @@ function ageingReport(
     .join(" · ");
 
   return {
-    period: `as at ${dayLabel(new Date().toISOString().slice(0, 10))}`,
+    period: `as at ${dayLabel(today)}`,
     columns: [
       TEXT("party", who),
       MONEY("outstanding", "Outstanding"),
@@ -838,13 +843,17 @@ export async function runReport(params: {
     );
   }
 
-  const body = await runBody(companyId, definition.key as ReportKey, {
-    from,
-    to,
-    year,
-    month,
-    entityId,
+  const company = await prisma.company.findUniqueOrThrow({
+    where: { id: companyId },
+    select: { timezone: true },
   });
+
+  const body = await runBody(
+    companyId,
+    definition.key as ReportKey,
+    { from, to, year, month, entityId },
+    businessToday(asBusinessTimezone(company.timezone)),
+  );
 
   return { key: definition.key as ReportKey, title: definition.title, ...body };
 }
@@ -853,6 +862,12 @@ async function runBody(
   companyId: string,
   key: ReportKey,
   period: ReportParams,
+  /**
+   * The business's own calendar day, for the two reports that are "as at now"
+   * rather than as at a date somebody chose. Read once by the caller so a
+   * report and the form that offered its dates agree about what day it is.
+   */
+  today: string,
 ): Promise<Omit<ReportResult, "key" | "title">> {
   switch (key) {
     case "trial-balance":
@@ -893,11 +908,15 @@ async function runBody(
     case "expenses-by-category":
       return expensesByCategoryReport(companyId, period.from!, period.to!);
     case "stock-on-hand":
-      return stockOnHandReport(companyId);
+      return stockOnHandReport(companyId, today);
     case "receivables-ageing":
-      return ageingReport(await receivablesAgeing(companyId), "Customer");
+      return ageingReport(
+        await receivablesAgeing(companyId),
+        "Customer",
+        today,
+      );
     case "payables-ageing":
-      return ageingReport(await payablesAgeing(companyId), "Supplier");
+      return ageingReport(await payablesAgeing(companyId), "Supplier", today);
     case "gst-summary":
       return gstSummaryReport(companyId, period.year!, period.month!);
   }

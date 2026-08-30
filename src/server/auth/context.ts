@@ -3,6 +3,10 @@ import { cache } from "react";
 import { forbidden, redirect, unauthorized } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { companyIsReachable } from "@/server/company/company-access";
+import {
+  asBusinessTimezone,
+  type BusinessTimezone,
+} from "@/lib/validation/company";
 import type { PermissionKey } from "@/lib/rbac/permissions";
 import {
   getSessionFromCookie,
@@ -47,6 +51,16 @@ export type CompanyContext = {
     fiscalYearStartMonth: number;
     stateCode: string | null;
     gstRegistration: "UNREGISTERED" | "REGULAR" | "COMPOSITION" | "SEZ";
+    /**
+     * Which calendar day the business is on.
+     *
+     * Carried here rather than fetched where it is needed because every page
+     * that offers a date already has this context, and a form defaulting to a
+     * different day from the one the shop is living in is the whole reason it
+     * is read at all. Narrowed on the way out of the database, so no caller has
+     * to wonder whether the stored string is a zone anything can use.
+     */
+    timezone: BusinessTimezone;
   };
   /** Every permission this member holds, already resolved. */
   permissions: ReadonlySet<PermissionKey>;
@@ -145,6 +159,7 @@ export const getCompanyContext = cache(
             fiscalYearStartMonth: true,
             stateCode: true,
             gstRegistration: true,
+            timezone: true,
           },
         },
       },
@@ -167,7 +182,10 @@ export const getCompanyContext = cache(
         roleName: membership.role.name,
         branchId: membership.branchId,
       },
-      company: membership.company,
+      company: {
+        ...membership.company,
+        timezone: asBusinessTimezone(membership.company.timezone),
+      },
       permissions: new Set(
         membership.role.permissions.map(
           (entry) => entry.permission.key as PermissionKey,

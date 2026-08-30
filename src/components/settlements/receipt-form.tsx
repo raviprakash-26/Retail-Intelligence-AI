@@ -21,10 +21,18 @@ import {
  * fetched on demand once one is chosen, which is a different question with a
  * different answer every time.
  */
-export function ReceiptForm({ customers }: { customers: PartyOption[] }) {
+export function ReceiptForm({
+  customers,
+  today,
+}: {
+  customers: PartyOption[];
+  /** The shop's own calendar day, worked out from its time zone. */
+  today: string;
+}) {
   return (
     <SettlementForm<ReceiptInput>
       schema={receiptSchema}
+      today={today}
       kinds={RECEIPT_SOURCES.map((source) => ({
         value: source,
         label: RECEIPT_SOURCE_LABELS[source].label,

@@ -13,10 +13,18 @@ import {
 } from "@/server/settlements/actions";
 
 /** The payment side of the shared settlement form. See `ReceiptForm`. */
-export function PaymentForm({ suppliers }: { suppliers: PartyOption[] }) {
+export function PaymentForm({
+  suppliers,
+  today,
+}: {
+  suppliers: PartyOption[];
+  /** The shop's own calendar day, worked out from its time zone. */
+  today: string;
+}) {
   return (
     <SettlementForm<PaymentInput>
       schema={paymentSchema}
+      today={today}
       kinds={PAYMENT_PURPOSES.map((purpose) => ({
         value: purpose,
         label: PAYMENT_PURPOSE_LABELS[purpose].label,

@@ -163,6 +163,7 @@ export function RecordReturnDialog({
   direction,
   documentNumber,
   documentDate,
+  today,
   hasParty,
   lines,
   onSubmit,
@@ -171,6 +172,8 @@ export function RecordReturnDialog({
   documentNumber: string;
   /** ISO date of the invoice or bill; a return cannot precede it. */
   documentDate: string;
+  /** The shop's own calendar day, worked out from its time zone. */
+  today: string;
   /** Whether the original document names a customer or a supplier. */
   hasParty: boolean;
   lines: readonly ReturnableLine[];
@@ -185,7 +188,6 @@ export function RecordReturnDialog({
   const [open, setOpen] = React.useState(false);
   const words = WORDING[direction];
 
-  const today = new Date().toISOString().slice(0, 10);
   const defaultDate = today >= documentDate ? today : documentDate;
   const modes = refundModes(hasParty);
   const defaultMode = modes[0];

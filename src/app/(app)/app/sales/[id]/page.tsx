@@ -30,6 +30,7 @@ import { voidSaleAction } from "@/server/sales/actions";
 import { returnableLines } from "@/server/returns/sales-return-service";
 import { salesReturnsAgainst } from "@/server/returns/return-queries";
 import { MasterDataError } from "@/server/master-data/errors";
+import { businessToday } from "@/lib/validation/date";
 
 export const metadata: Metadata = {
   title: "Invoice",
@@ -122,6 +123,7 @@ export default async function SaleDetailPage({
               documentId={sale.id}
               documentNumber={sale.invoiceNumber}
               documentDate={sale.invoiceDate.toISOString().slice(0, 10)}
+              today={businessToday(context.company.timezone)}
               hasParty={Boolean(sale.customer)}
               lines={returnable}
             />

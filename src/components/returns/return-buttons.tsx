@@ -19,6 +19,8 @@ type Props = {
   documentId: string;
   documentNumber: string;
   documentDate: string;
+  /** The shop's own calendar day, worked out from its time zone. */
+  today: string;
   /**
    * Whether the document names a customer or a supplier.
    *
@@ -34,6 +36,7 @@ export function SalesReturnButton({
   documentId,
   documentNumber,
   documentDate,
+  today,
   hasParty,
   lines,
 }: Props) {
@@ -42,6 +45,7 @@ export function SalesReturnButton({
       direction="sales"
       documentNumber={documentNumber}
       documentDate={documentDate}
+      today={today}
       hasParty={hasParty}
       lines={lines}
       onSubmit={(values) =>
@@ -55,6 +59,7 @@ export function PurchaseReturnButton({
   documentId,
   documentNumber,
   documentDate,
+  today,
   hasParty,
   lines,
 }: Props) {
@@ -63,6 +68,7 @@ export function PurchaseReturnButton({
       direction="purchase"
       documentNumber={documentNumber}
       documentDate={documentDate}
+      today={today}
       hasParty={hasParty}
       lines={lines}
       onSubmit={(values) =>

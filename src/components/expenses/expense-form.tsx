@@ -66,18 +66,17 @@ export type PayeeOption = {
 
 const NO_SUPPLIER = "__other";
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export function ExpenseForm({
   categories,
   suppliers,
   company,
+  today,
 }: {
   categories: ExpenseCategoryOption[];
   suppliers: PayeeOption[];
   company: { stateCode: string | null; gstRegistration: GstRegistration };
+  /** The shop's own calendar day, worked out from its time zone. */
+  today: string;
 }) {
   const router = useRouter();
 
@@ -85,7 +84,7 @@ export function ExpenseForm({
     resolver: zodResolver(expenseSchema),
     defaultValues: {
       categoryId: "",
-      expenseDate: today(),
+      expenseDate: today,
       paymentMode: "CASH",
       supplierId: "",
       payeeName: "",

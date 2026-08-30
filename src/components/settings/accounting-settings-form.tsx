@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/select";
 import { fiscalYearLabel } from "@/lib/constants/india";
 import {
+  BUSINESS_TIMEZONES,
   companyAccountingSchema,
   type CompanyAccountingInput,
 } from "@/lib/validation/company";
@@ -51,15 +52,6 @@ const MONTHS = [
   "October",
   "November",
   "December",
-] as const;
-
-const TIMEZONES = [
-  "Asia/Kolkata",
-  "Asia/Dubai",
-  "Asia/Singapore",
-  "Europe/London",
-  "America/New_York",
-  "UTC",
 ] as const;
 
 export type LockInfo = {
@@ -280,7 +272,7 @@ export function AccountingSettingsForm({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {TIMEZONES.map((zone) => (
+                      {BUSINESS_TIMEZONES.map((zone) => (
                         <SelectItem key={zone} value={zone}>
                           {zone.replace("_", " ")}
                         </SelectItem>

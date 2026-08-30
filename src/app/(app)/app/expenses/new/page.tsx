@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import type { GstRegistration } from "@/lib/tax/gst";
 import { requirePermission } from "@/server/auth/context";
 import { listExpenseCategories } from "@/server/expenses/expense-service";
+import { businessToday } from "@/lib/validation/date";
 
 export const metadata: Metadata = {
   title: "Record expense",
@@ -47,6 +48,7 @@ export default async function NewExpensePage() {
 
       <ExpenseForm
         categories={categories}
+        today={businessToday(context.company.timezone)}
         suppliers={suppliers}
         company={{
           stateCode: context.company.stateCode,

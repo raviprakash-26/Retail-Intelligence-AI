@@ -4,6 +4,7 @@ import { MasterDataHeader } from "@/components/master-data/page-header";
 import { formatCurrency } from "@/lib/format";
 import { requirePermission } from "@/server/auth/context";
 import { listEmployees } from "@/server/master-data/employee-service";
+import { businessToday } from "@/lib/validation/date";
 
 export const metadata: Metadata = {
   title: "Employees",
@@ -53,6 +54,7 @@ export default async function EmployeesPage({
 
       <EmployeeManager
         result={result}
+        today={businessToday(context.company.timezone)}
         canManage={context.permissions.has("employees.manage")}
       />
     </div>

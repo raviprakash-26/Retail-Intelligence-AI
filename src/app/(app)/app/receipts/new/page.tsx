@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { ReceiptForm } from "@/components/settlements/receipt-form";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/server/auth/context";
+import { businessToday } from "@/lib/validation/date";
 
 export const metadata: Metadata = {
   title: "Record receipt",
@@ -48,7 +49,10 @@ export default async function NewReceiptPage() {
         </p>
       </header>
 
-      <ReceiptForm customers={customers} />
+      <ReceiptForm
+        customers={customers}
+        today={businessToday(context.company.timezone)}
+      />
     </div>
   );
 }

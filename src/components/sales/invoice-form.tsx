@@ -68,10 +68,6 @@ export type CustomerOption = {
 
 const NO_CUSTOMER = "__walkin";
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function emptyLine() {
   return {
     productId: "",
@@ -90,6 +86,7 @@ async function searchProducts(query: string): Promise<PickerProduct[]> {
 export function InvoiceForm({
   customers,
   company,
+  today,
 }: {
   customers: CustomerOption[];
   company: {
@@ -97,6 +94,8 @@ export function InvoiceForm({
     stateName: string | null;
     gstRegistration: GstRegistration;
   };
+  /** The shop's own calendar day, worked out from its time zone. */
+  today: string;
 }) {
   const router = useRouter();
 
@@ -104,7 +103,7 @@ export function InvoiceForm({
     resolver: zodResolver(saleSchema),
     defaultValues: {
       customerId: "",
-      invoiceDate: today(),
+      invoiceDate: today,
       paymentMode: "CASH",
       placeOfSupply: "",
       priceIncludesTax: false,
