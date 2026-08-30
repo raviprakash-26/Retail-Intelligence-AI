@@ -1044,3 +1044,89 @@ describe("audit trail", () => {
     ]);
   });
 });
+
+/**
+ * Paging a list whose sort key repeats.
+ *
+ * `OFFSET` counts rows in whatever order the query produced them. Where the
+ * sort key ties, that order is not defined and need not hold between two
+ * queries — so a shop carrying two kinds of "Sugar" could load page one, have
+ * a colleague edit a product, load page two, and be shown one item twice while
+ * another disappeared. The list said thirty and showed twenty-nine.
+ *
+ * Every document list was already broken by its own number. The master-data
+ * lists were sorted by name, which nothing makes unique.
+ */
+describe("paging over rows that sort the same", () => {
+  it("shows every product exactly once across the pages", async () => {
+    const company = await createCompany();
+    const unitId = await firstUnitId(company.companyId);
+
+    // The page is 25, so the boundary falls inside a group of thirty that all
+    // sort identically.
+    for (let n = 0; n < 30; n += 1) {
+      await createProduct({
+        ...actor(company),
+        input: productInput(unitId, {
+          sku: `SUGAR-${String(n).padStart(3, "0")}`,
+          name: "Sugar",
+          isStockTracked: false,
+        }),
+      });
+    }
+
+    const first = await listProducts({ companyId: company.companyId, page: 1 });
+
+    // Somebody edits a product between the two page loads. That moves the row,
+    // which is what changes the arbitrary order among equal names.
+    const touched = await prisma.product.findFirstOrThrow({
+      where: { companyId: company.companyId },
+      select: { id: true },
+    });
+    await prisma.product.update({
+      where: { id: touched.id },
+      data: { sellingPrice: "51" },
+    });
+
+    const second = await listProducts({
+      companyId: company.companyId,
+      page: 2,
+    });
+
+    const seen = [...first.rows, ...second.rows].map((row) => row.sku);
+    expect(seen).toHaveLength(first.total);
+    expect(new Set(seen).size).toBe(first.total);
+  }, 180_000);
+
+  it("shows every employee exactly once across the pages", async () => {
+    const company = await createCompany();
+
+    for (let n = 0; n < 30; n += 1) {
+      await createEmployee({
+        ...actor(company),
+        input: employeeInput({ name: "Ramesh Kumar" }),
+      });
+    }
+
+    const first = await listEmployees({
+      companyId: company.companyId,
+      page: 1,
+    });
+    const touched = await prisma.employee.findFirstOrThrow({
+      where: { companyId: company.companyId },
+      select: { id: true },
+    });
+    await prisma.employee.update({
+      where: { id: touched.id },
+      data: { allowances: "1" },
+    });
+    const second = await listEmployees({
+      companyId: company.companyId,
+      page: 2,
+    });
+
+    const seen = [...first.rows, ...second.rows].map((row) => row.employeeCode);
+    expect(seen).toHaveLength(first.total);
+    expect(new Set(seen).size).toBe(first.total);
+  }, 180_000);
+});

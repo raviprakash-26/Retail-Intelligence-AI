@@ -118,7 +118,11 @@ export async function listProducts(params: {
         archivedAt: true,
         inventoryBalances: { select: { quantity: true } },
       },
-      orderBy: { name: "asc" },
+      // Broken by SKU, which is unique per company. Names are not: a shop
+      // carrying two kinds of "Sugar" has two rows the database may return
+      // in either order, and OFFSET paging over an order that can change
+      // between two page loads shows one product twice and loses another.
+      orderBy: [{ name: "asc" }, { sku: "asc" }],
       skip: (page - 1) * PRODUCT_PAGE_SIZE,
       take: PRODUCT_PAGE_SIZE,
     }),
