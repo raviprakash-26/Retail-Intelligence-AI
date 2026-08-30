@@ -89,8 +89,12 @@ export async function creditNoteDocument(params: {
     },
   });
 
-  const supplierState = company.stateCode
-    ? findStateByCode(company.stateCode)
+  // The state the original supply was made from, as the invoice printed it.
+  // See `taxInvoiceDocument`: a branch in another state is taxed from that
+  // state, and a credit note reversing that tax has to agree with it.
+  const supplierStateCode = note.supplierStateCode ?? company.stateCode;
+  const supplierState = supplierStateCode
+    ? findStateByCode(supplierStateCode)
     : null;
 
   return {
@@ -105,7 +109,7 @@ export async function creditNoteDocument(params: {
       ]),
       gstin: company.gstin,
       stateName: supplierState?.name ?? null,
-      stateCode: company.stateCode,
+      stateCode: supplierStateCode,
     },
     recipient: {
       name: note.partyName,

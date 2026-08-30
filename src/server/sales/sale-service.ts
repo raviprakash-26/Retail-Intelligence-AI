@@ -44,7 +44,10 @@ import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 import { owedByParty } from "@/server/settlements/outstanding";
 import { MasterDataError } from "@/server/master-data/errors";
-import { postingBranchId } from "@/server/company/posting-branch";
+import {
+  postingBranchId,
+  postingStateCode,
+} from "@/server/company/posting-branch";
 
 /**
  * Sales invoices.
@@ -230,12 +233,20 @@ export async function createSale(params: {
         );
       }
 
+      // Where this invoice is supplied *from*: the branch it posts at, which
+      // is not always the head office. See `postingStateCode`.
+      const sellerStateCode = await postingStateCode(tx, {
+        companyId,
+        branchId,
+        companyStateCode: company.stateCode,
+      });
+
       const placeOfSupply =
-        input.placeOfSupply || customer?.stateCode || company.stateCode || null;
+        input.placeOfSupply || customer?.stateCode || sellerStateCode || null;
 
       const supplyType = resolveSupplyType({
         registration: company.gstRegistration,
-        sellerStateCode: company.stateCode,
+        sellerStateCode,
         placeOfSupplyStateCode: placeOfSupply,
       });
 
@@ -1086,7 +1097,7 @@ export async function getSale(params: { companyId: string; saleId: string }) {
           stateCode: true,
         },
       },
-      branch: { select: { name: true } },
+      branch: { select: { name: true, stateCode: true } },
       items: {
         select: {
           lineNumber: true,

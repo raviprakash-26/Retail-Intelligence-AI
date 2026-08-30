@@ -12,6 +12,7 @@ import {
   updateBranch,
 } from "@/server/company/branch-service";
 import { getOnboardingChecklist } from "@/server/company/onboarding-service";
+import { postingStateCode } from "@/server/company/posting-branch";
 import {
   describeAccountingLocks,
   isLocked,
@@ -457,4 +458,111 @@ describe("onboarding checklist", () => {
       checklist.items.filter((item) => !item.optional).length,
     );
   }, 60_000);
+});
+
+/**
+ * Which state a document posted at a branch is taxed from.
+ *
+ * `postingBranchId` decides where a document lands; this decides what that
+ * means for tax. The two questions are answered in one module so that the
+ * service which posts and the form which previews cannot answer them
+ * differently — the reason the module exists in the first place.
+ */
+describe("the state a branch posts in", () => {
+  it("is the branch's own, where it names one", async () => {
+    const company = await createCompany();
+    const branch = await createBranch({
+      companyId: company.companyId,
+      userId: company.userId,
+      actorEmail: company.email,
+      input: {
+        code: "CHN",
+        name: "Chennai",
+        addressLine1: "",
+        city: "Chennai",
+        stateCode: "33",
+        pincode: "",
+        phone: "",
+      },
+    });
+
+    await expect(
+      postingStateCode(prisma, {
+        companyId: company.companyId,
+        branchId: branch.id,
+        companyStateCode: "29",
+      }),
+    ).resolves.toBe("33");
+  }, 60_000);
+
+  it("falls back to the head office where the branch names none", async () => {
+    const company = await createCompany();
+    const branch = await createBranch({
+      companyId: company.companyId,
+      userId: company.userId,
+      actorEmail: company.email,
+      input: {
+        code: "BLR2",
+        name: "Jayanagar",
+        addressLine1: "",
+        city: "Bengaluru",
+        stateCode: "",
+        pincode: "",
+        phone: "",
+      },
+    });
+
+    await expect(
+      postingStateCode(prisma, {
+        companyId: company.companyId,
+        branchId: branch.id,
+        companyStateCode: "29",
+      }),
+    ).resolves.toBe("29");
+  }, 60_000);
+
+  it("falls back to the head office where nothing names a branch", async () => {
+    // `postingBranchId` returns null for a company with no primary branch, and
+    // the type permits it, so the answer has to be the company's own state
+    // rather than nothing at all — a null seller state makes every supply look
+    // local, whoever it was made to.
+    const company = await createCompany();
+
+    await expect(
+      postingStateCode(prisma, {
+        companyId: company.companyId,
+        branchId: null,
+        companyStateCode: "29",
+      }),
+    ).resolves.toBe("29");
+  }, 60_000);
+
+  it("will not read another company's branch", async () => {
+    const [mine, theirs] = await Promise.all([
+      createCompany(),
+      createCompany(),
+    ]);
+    const theirBranch = await createBranch({
+      companyId: theirs.companyId,
+      userId: theirs.userId,
+      actorEmail: theirs.email,
+      input: {
+        code: "CHN",
+        name: "Chennai",
+        addressLine1: "",
+        city: "Chennai",
+        stateCode: "33",
+        pincode: "",
+        phone: "",
+      },
+    });
+
+    await expect(
+      postingStateCode(prisma, {
+        companyId: mine.companyId,
+        branchId: theirBranch.id,
+        companyStateCode: "29",
+      }),
+    ).resolves.toBe("29");
+  }, 90_000);
 });

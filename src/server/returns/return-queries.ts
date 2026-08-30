@@ -291,6 +291,14 @@ export type ReturnDetail = {
   partyName: string;
   partyGstin: string | null;
   against: { id: string; number: string; date: Date } | null;
+  /**
+   * The state the original supply was made from, where its branch named one.
+   *
+   * A credit note reverses the tax the invoice charged, so it has to print the
+   * same supplier state — a Karnataka supplier block over a Chennai branch's
+   * CGST and SGST would contradict itself.
+   */
+  supplierStateCode: string | null;
   taxableAmount: string;
   cgstAmount: string;
   sgstAmount: string;
@@ -432,7 +440,14 @@ export async function getSalesReturn(params: {
       totalAmount: true,
       costOfGoodsReturned: true,
       journalEntryId: true,
-      sale: { select: { id: true, invoiceNumber: true, invoiceDate: true } },
+      sale: {
+        select: {
+          id: true,
+          invoiceNumber: true,
+          invoiceDate: true,
+          branch: { select: { stateCode: true } },
+        },
+      },
       customer: { select: { name: true, gstin: true } },
       items: { select: ITEM_FIELDS, orderBy: { lineNumber: "asc" } },
     },
@@ -462,6 +477,7 @@ export async function getSalesReturn(params: {
     reason: record.reason,
     partyName: record.customer?.name ?? "Counter sale",
     partyGstin: record.customer?.gstin ?? null,
+    supplierStateCode: record.sale?.branch?.stateCode ?? null,
     against: record.sale
       ? {
           id: record.sale.id,
@@ -532,6 +548,9 @@ export async function getPurchaseReturn(params: {
     reason: record.reason,
     partyName: record.supplier?.name ?? "Supplier",
     partyGstin: record.supplier?.gstin ?? null,
+    // A debit note is an inward document: the supplier block on it is the
+    // supplier's, not the shop's, so there is no branch state to carry.
+    supplierStateCode: null,
     against: record.purchase
       ? {
           id: record.purchase.id,

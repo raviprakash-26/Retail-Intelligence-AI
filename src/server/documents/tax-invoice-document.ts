@@ -113,8 +113,18 @@ export async function taxInvoiceDocument(params: {
       })
     : null;
 
-  const supplierState = company.stateCode
-    ? findStateByCode(company.stateCode)
+  // Where the supply was made *from*. A branch in another state is taxed from
+  // that state — see `postingStateCode` — so a document that named the head
+  // office would contradict the tax it is printing: CGST and SGST on a local
+  // Chennai sale, under a Karnataka supplier block.
+  //
+  // The GSTIN stays the company's, because there is only one. A place of
+  // business in another state needs its own registration and the product does
+  // not model that yet; naming the state honestly is not the same as claiming
+  // a registration in it.
+  const supplierStateCode = sale.branch?.stateCode ?? company.stateCode;
+  const supplierState = supplierStateCode
+    ? findStateByCode(supplierStateCode)
     : null;
   const placeCode = sale.placeOfSupply ?? customer?.stateCode ?? null;
   const place = placeCode ? findStateByCode(placeCode) : null;
@@ -131,7 +141,7 @@ export async function taxInvoiceDocument(params: {
       ]),
       gstin: company.gstin,
       stateName: supplierState?.name ?? null,
-      stateCode: company.stateCode,
+      stateCode: supplierStateCode,
     },
     recipient: customer
       ? {

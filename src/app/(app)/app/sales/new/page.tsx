@@ -9,6 +9,10 @@ import { findStateByCode } from "@/lib/constants/india";
 import type { GstRegistration } from "@/lib/tax/gst";
 import { requirePermission } from "@/server/auth/context";
 import { businessToday } from "@/lib/validation/date";
+import {
+  postingBranchId,
+  postingStateCode,
+} from "@/server/company/posting-branch";
 
 export const metadata: Metadata = {
   title: "New invoice",
@@ -17,6 +21,17 @@ export const metadata: Metadata = {
 
 export default async function NewSalePage() {
   const context = await requirePermission("sales.create");
+
+  // The state the form previews tax from is the state the service will post
+  // from: the branch this member lands on, which may not be the head office.
+  const postingState = await postingStateCode(prisma, {
+    companyId: context.company.id,
+    branchId: await postingBranchId(prisma, {
+      companyId: context.company.id,
+      memberBranchId: context.membership.branchId,
+    }),
+    companyStateCode: context.company.stateCode,
+  });
 
   const [customers, sellableCount] = await Promise.all([
     prisma.customer.findMany({
@@ -75,9 +90,9 @@ export default async function NewSalePage() {
           customers={customers}
           today={businessToday(context.company.timezone)}
           company={{
-            stateCode: context.company.stateCode,
-            stateName: context.company.stateCode
-              ? (findStateByCode(context.company.stateCode)?.name ?? null)
+            stateCode: postingState,
+            stateName: postingState
+              ? (findStateByCode(postingState)?.name ?? null)
               : null,
             gstRegistration: context.company.gstRegistration as GstRegistration,
           }}

@@ -7,6 +7,8 @@ import type { RegisterInput } from "@/lib/validation/auth";
 import type { CustomerInput, ProductInput } from "@/lib/validation/master-data";
 import type { SaleInput } from "@/lib/validation/sales";
 import { registerOwner } from "@/server/auth/registration";
+import { createBranch } from "@/server/company/branch-service";
+import { taxInvoiceDocument } from "@/server/documents/tax-invoice-document";
 import { createParty } from "@/server/master-data/party-service";
 import { createProduct } from "@/server/master-data/product-service";
 import { getProductTaxonomy } from "@/server/master-data/taxonomy-service";
@@ -1122,4 +1124,159 @@ describe("a customer's credit limit", () => {
     const sale = await invoice(shop, 10);
     expect(sale.id).toBeTruthy();
   }, 60_000);
+});
+
+/**
+ * A branch in another state.
+ *
+ * The branch form says, under the state field, that "a branch in another state
+ * changes how its supplies are taxed". Nothing read the column: `stateCode` was
+ * written by `createBranch` and by nothing else, and every posting path asked
+ * the head office instead. A Bengaluru company selling from its Chennai branch
+ * to a Chennai customer compared state 29 against state 33, called a local sale
+ * inter-state, and charged IGST where CGST and SGST were due.
+ */
+describe("where a supply is made from", () => {
+  async function shopWithBranchIn(stateCode: string) {
+    const fixture = await createCompany("29"); // Karnataka
+    const branch = await createBranch({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: {
+        code: "CHN",
+        name: "Chennai",
+        addressLine1: "",
+        city: "Chennai",
+        stateCode,
+        pincode: "",
+        phone: "",
+      },
+    });
+    // A service rather than goods: stock is held per branch, and the question
+    // here is which state the supply is taxed from, not what is on the shelf.
+    const product = await createProduct({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: productInput(fixture, {
+        sku: "DELIVERY",
+        name: "Delivery",
+        isStockTracked: false,
+        openingQuantity: 0,
+      }),
+    });
+    return { fixture, branchId: branch.id, productId: product.id };
+  }
+
+  /** A member posting at that branch, as a branch-restricted cashier would. */
+  async function sellFromBranch(
+    shop: Awaited<ReturnType<typeof shopWithBranchIn>>,
+    placeOfSupply: string,
+  ) {
+    return createSale({
+      companyId: shop.fixture.companyId,
+      userId: shop.fixture.userId,
+      actorEmail: shop.fixture.actorEmail,
+      branchId: shop.branchId,
+      input: saleInput(shop.productId, { placeOfSupply }),
+    });
+  }
+
+  it("taxes a Chennai branch's Chennai sale as a local one", async () => {
+    const shop = await shopWithBranchIn("33"); // Tamil Nadu
+    const sale = await sellFromBranch(shop, "33");
+
+    expect(sale.supplyType).toBe("INTRA_STATE");
+
+    const row = await prisma.sale.findUniqueOrThrow({
+      where: { id: sale.id },
+      select: { cgstAmount: true, sgstAmount: true, igstAmount: true },
+    });
+    // ₹1,000 at 18%: ₹90 CGST and ₹90 SGST, and nothing to the centre.
+    expect(Number(row.cgstAmount)).toBe(90);
+    expect(Number(row.sgstAmount)).toBe(90);
+    expect(Number(row.igstAmount)).toBe(0);
+  }, 90_000);
+
+  it("taxes the same branch's sale back to Karnataka as inter-state", async () => {
+    const shop = await shopWithBranchIn("33");
+    const sale = await sellFromBranch(shop, "29");
+
+    expect(sale.supplyType).toBe("INTER_STATE");
+
+    const row = await prisma.sale.findUniqueOrThrow({
+      where: { id: sale.id },
+      select: { cgstAmount: true, sgstAmount: true, igstAmount: true },
+    });
+    expect(Number(row.igstAmount)).toBe(180);
+    expect(Number(row.cgstAmount)).toBe(0);
+  }, 90_000);
+
+  it("writes the branch's state into the GST register, not the head office's", async () => {
+    // The register is what the return is built from, so a place of supply that
+    // disagrees with the invoice puts the supply in the wrong table of GSTR-1.
+    const shop = await shopWithBranchIn("33");
+    const sale = await sellFromBranch(shop, "33");
+
+    const rows = await prisma.gstTransaction.findMany({
+      where: { companyId: shop.fixture.companyId, documentId: sale.id },
+      select: { placeOfSupply: true, supplyType: true },
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.placeOfSupply).toBe("33");
+      expect(row.supplyType).toBe("INTRA_STATE");
+    }
+  }, 90_000);
+
+  it("prints the branch's state on the invoice it hands the customer", async () => {
+    // The document has to agree with the tax on it. A Karnataka supplier block
+    // over a Chennai branch's CGST and SGST contradicts itself, and the GSTIN
+    // stays the company's because there is only one — naming the state
+    // honestly is not the same as claiming a registration in it.
+    const shop = await shopWithBranchIn("33");
+    const sale = await sellFromBranch(shop, "33");
+
+    const document = await taxInvoiceDocument({
+      companyId: shop.fixture.companyId,
+      saleId: sale.id,
+    });
+    expect(document.supplier.stateCode).toBe("33");
+    expect(document.supplier.stateName).toMatch(/Tamil Nadu/i);
+    expect(document.interState).toBe(false);
+  }, 90_000);
+
+  it("falls back to the company's state for a branch that names none", async () => {
+    // The ordinary case: the field is optional, and a branch across town is in
+    // the same state as the shop that owns it.
+    const shop = await shopWithBranchIn("");
+    const sale = await sellFromBranch(shop, "33");
+
+    expect(sale.supplyType).toBe("INTER_STATE");
+  }, 90_000);
+
+  it("still taxes from the head office when nothing names a branch", async () => {
+    const fixture = await createCompany("29");
+    const product = await createProduct({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      input: productInput(fixture, {
+        sku: "DELIVERY",
+        name: "Delivery",
+        isStockTracked: false,
+        openingQuantity: 0,
+      }),
+    });
+
+    const sale = await createSale({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: saleInput(product.id, { placeOfSupply: "29" }),
+    });
+    expect(sale.supplyType).toBe("INTRA_STATE");
+  }, 90_000);
 });
