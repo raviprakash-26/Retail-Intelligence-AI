@@ -1,7 +1,11 @@
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { RegisterInput } from "@/lib/validation/auth";
 import { registerOwner } from "@/server/auth/registration";
-import { syncCompanySystemRoles } from "../../prisma/seed/permissions";
+import {
+  seedPermissionsAndRoles,
+  syncCompanySystemRoles,
+} from "../../prisma/seed/permissions";
 import {
   disconnectTestDb,
   ensurePlatformData,
@@ -209,5 +213,66 @@ describe("built-in roles in a company", () => {
 
     await syncCompanySystemRoles(prisma, companyId);
     expect(await keysOf(custom.id)).toEqual([permission!.key]);
+  }, 180_000);
+});
+
+/**
+ * What the seed does to companies it did not create.
+ *
+ * `syncExistingTenants` exists so a release that adds a permission reaches the
+ * tenants provisioned before it. It walks every company in the database and
+ * rewrites their system roles, and it runs outside `withPlatformSeedLock` by
+ * design — the lock protects the templates, and the sweep cannot be inside a
+ * transaction because a company can vanish mid-flight.
+ *
+ * That is right on a deployment and wrong in a test run. Vitest gives each
+ * worker its own module registry, so `ensurePlatformData` runs once per worker
+ * rather than once per suite, and a worker sweeping while the test above had
+ * dropped three permissions granted them back before the assertion that they
+ * were gone. It failed about once in every few full runs, always on a
+ * different key, and never on its own.
+ */
+describe("seeding the platform", () => {
+  it("leaves an existing company alone when asked for templates only", async () => {
+    const companyId = await newCompany();
+    const { mine } = await ownerRoles(companyId);
+
+    const dropped = (await keysOf(mine.id)).slice(0, 3);
+    await prisma.rolePermission.deleteMany({
+      where: { roleId: mine.id, permission: { key: { in: dropped } } },
+    });
+
+    // What another vitest worker does in its own `beforeAll`.
+    await seedPermissionsAndRoles(prisma, { existingTenants: "skip" });
+
+    const after = await keysOf(mine.id);
+    for (const key of dropped) expect(after).not.toContain(key);
+  }, 180_000);
+
+  it("is asked for templates only by the suite's own helper", () => {
+    // The failure this prevents is a race between workers, so no test can fail
+    // on it reliably — which is exactly why it is worth holding in place by
+    // reading the source. `ensurePlatformData` runs once per worker, and a
+    // worker that sweeps every tenant while another test perturbs one is the
+    // whole defect.
+    const helper = readFileSync("tests/helpers/test-db.ts", "utf8");
+    expect(helper).toMatch(
+      /seedPermissionsAndRoles\(\s*prisma,\s*\{\s*existingTenants:\s*"skip"\s*\}\s*\)/,
+    );
+  });
+
+  it("still repairs an existing company when asked to sync", async () => {
+    // The deployment case, which the skip must not have taken away.
+    const companyId = await newCompany();
+    const { mine, template } = await ownerRoles(companyId);
+
+    const dropped = (await keysOf(mine.id)).slice(0, 3);
+    await prisma.rolePermission.deleteMany({
+      where: { roleId: mine.id, permission: { key: { in: dropped } } },
+    });
+
+    await seedPermissionsAndRoles(prisma);
+
+    expect(await keysOf(mine.id)).toEqual(await keysOf(template.id));
   }, 180_000);
 });

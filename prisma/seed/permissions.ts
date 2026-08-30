@@ -31,7 +31,37 @@ import { withPlatformSeedLock } from "./lock";
  * difference from the template is drift rather than a choice somebody made,
  * and the sync below removes as well as adds.
  */
-export async function seedPermissionsAndRoles(prisma: PrismaClient) {
+export type SeedPermissionsOptions = {
+  /**
+   * Whether to bring companies that already exist up to date with the
+   * templates.
+   *
+   * `"sync"` on a deployment, which is the point of `syncExistingTenants` — a
+   * release that adds a permission has to reach the tenants provisioned before
+   * it. `"skip"` from the test suite, where it is both useless and harmful.
+   *
+   * Useless because every company a test uses was provisioned by `registerOwner`
+   * from the templates a moment earlier, so there is no drift to repair — and
+   * the sweep walks every company left in the database, so it grows with the
+   * suite.
+   *
+   * Harmful because the sweep rewrites the role permissions of companies it did
+   * not create. `withPlatformSeedLock` serialises the template half against
+   * another copy of itself, "and in CI there is always another copy of itself";
+   * the sweep runs outside that lock by design. Vitest gives each worker its
+   * own module registry, so each one runs this once — and a worker seeding
+   * while another test had deliberately dropped a permission put it straight
+   * back, three statements before the assertion that it was gone. That is what
+   * made `system-role-drift` fail about once in every few full runs, always on
+   * a different key, never on its own.
+   */
+  existingTenants?: "sync" | "skip";
+};
+
+export async function seedPermissionsAndRoles(
+  prisma: PrismaClient,
+  options: SeedPermissionsOptions = {},
+) {
   const entries = Object.entries(PERMISSIONS);
 
   // Serialised: read-then-write is not safe against another copy of itself,
@@ -96,6 +126,10 @@ export async function seedPermissionsAndRoles(prisma: PrismaClient) {
       roles: SYSTEM_ROLE_TEMPLATES.length,
     };
   });
+
+  if (options.existingTenants === "skip") {
+    return { ...templates, granted: 0, revoked: 0, groups: 0, accounts: 0 };
+  }
 
   const tenants = await syncExistingTenants(prisma);
   return { ...templates, ...tenants };
