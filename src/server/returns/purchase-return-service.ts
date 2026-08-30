@@ -28,6 +28,7 @@ import { resolveSystemAccounts } from "@/server/documents/accounts";
 import { writeGstRows } from "@/server/documents/gst-register";
 import { recordOutward } from "@/server/inventory/stock-service";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
+import { postingStateCode } from "@/server/company/posting-branch";
 import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 import { assertNoRepeatedLines, ReturnError } from "@/server/returns/errors";
 import type { ReturnableLine } from "@/server/returns/return-queries";
@@ -431,8 +432,13 @@ export async function createPurchaseReturn(params: {
         documentNumber: returnNumber,
         documentDate: returnDate,
         supplyType: purchase.supplyType,
-        // An inward supply lands in the buyer's own state.
-        placeOfSupply: company.stateCode,
+        // An inward supply lands in the buyer's own state — the branch the
+        // bill was received at, which is where the debit note reverses from.
+        placeOfSupply: await postingStateCode(tx, {
+          companyId,
+          branchId: purchase.branchId,
+          companyStateCode: company.stateCode,
+        }),
         partyName: purchase.supplier?.name ?? "Supplier",
         partyGstin: purchase.supplier?.gstin ?? null,
         // What the bill said, not what a debit note usually is. A negative row

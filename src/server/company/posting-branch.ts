@@ -51,3 +51,51 @@ export async function postingBranchId(
   // on the null one.
   return primary?.id ?? null;
 }
+
+/**
+ * The state a document posted at this branch is supplied from, or to.
+ *
+ * The branch form says, under the state field, that "a branch in another state
+ * changes how its supplies are taxed". Nothing read the column. `stateCode` was
+ * written by `createBranch` and `updateBranch` and by nothing else, and every
+ * posting path asked the head office instead — so a Bengaluru company selling
+ * from its Chennai branch to a Chennai customer compared state 29 against state
+ * 33, called a local sale inter-state, and charged IGST where CGST and SGST were
+ * due. The wrong tax head, on the invoice and in the wrong table of GSTR-1,
+ * which is the same failure `import-service` already warns about one level down.
+ *
+ * This is the rule the module was written for, applied to the other question a
+ * branch answers. `postingBranchId` decides where a document lands; this decides
+ * what that means for tax, and both the service that posts and the form that
+ * previews it now reach the same answer instead of guessing separately.
+ *
+ * Falls back to the company's own state, which is the ordinary case: the field
+ * is optional, and a branch across town is in the same state as the shop that
+ * owns it.
+ *
+ * **What this does not do** is give a branch its own GSTIN. A place of business
+ * in another state requires its own registration, and the product holds one
+ * GSTIN per company — so an invoice from that branch still prints the head
+ * office's number. That is a real limit, and it is a separate one: taxing a
+ * local supply locally is right whether or not the registration behind it has
+ * been modelled yet, and taxing it as inter-state was wrong either way.
+ */
+export async function postingStateCode(
+  client: DbClient,
+  params: {
+    companyId: string;
+    /** The branch the document lands on, as `postingBranchId` decided. */
+    branchId: string | null;
+    /** The head office's state, for a branch that names none. */
+    companyStateCode: string | null;
+  },
+): Promise<string | null> {
+  if (!params.branchId) return params.companyStateCode;
+
+  const branch = await client.branch.findFirst({
+    where: { id: params.branchId, companyId: params.companyId },
+    select: { stateCode: true },
+  });
+
+  return branch?.stateCode ?? params.companyStateCode;
+}

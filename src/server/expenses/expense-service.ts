@@ -26,7 +26,10 @@ import { reversePostedEntry } from "@/server/documents/reversal";
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 import { MasterDataError } from "@/server/master-data/errors";
-import { postingBranchId } from "@/server/company/posting-branch";
+import {
+  postingBranchId,
+  postingStateCode,
+} from "@/server/company/posting-branch";
 
 /**
  * Expenses.
@@ -163,12 +166,20 @@ export async function createExpense(params: {
       // The payee is the seller, so where they are decides the split. A payee
       // we have not set up as a supplier is assumed to be local, which is what
       // a shop receipt almost always is.
+      // Where the spending happens: the branch it posts at. A branch in
+      // another state buys locally there, not at the head office.
+      const spendingStateCode = await postingStateCode(tx, {
+        companyId,
+        branchId,
+        companyStateCode: company.stateCode,
+      });
+
       const supplyType: SupplyType =
         input.taxPercent > 0
           ? resolveSupplyType({
               registration: "REGULAR",
-              sellerStateCode: supplier?.stateCode ?? company.stateCode,
-              placeOfSupplyStateCode: company.stateCode,
+              sellerStateCode: supplier?.stateCode ?? spendingStateCode,
+              placeOfSupplyStateCode: spendingStateCode,
             })
           : "NON_GST";
 
@@ -347,7 +358,7 @@ export async function createExpense(params: {
           documentNumber: voucherNumber,
           documentDate: expenseDate,
           supplyType,
-          placeOfSupply: company.stateCode,
+          placeOfSupply: spendingStateCode,
           partyName: payeeName ?? category.name,
           partyGstin: supplier?.gstin ?? null,
           itcEligible,
@@ -498,7 +509,13 @@ export async function voidExpense(params: {
         documentNumber: expense.voucherNumber,
         documentDate: expense.expenseDate,
         supplyType: isZero(expense.igstAmount) ? "INTRA_STATE" : "INTER_STATE",
-        placeOfSupply: company.stateCode,
+        // The expense's own branch, so the reversing rows land where the
+        // original ones did.
+        placeOfSupply: await postingStateCode(tx, {
+          companyId: params.companyId,
+          branchId: expense.branchId,
+          companyStateCode: company.stateCode,
+        }),
         partyName: expense.payeeName ?? expense.category.name,
         partyGstin: null,
         itcEligible: expense.itcEligible,

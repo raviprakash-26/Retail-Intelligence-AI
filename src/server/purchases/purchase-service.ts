@@ -50,7 +50,10 @@ import {
 import { allocateDocumentNumber } from "@/server/sequences/document-sequence";
 import { ensureFiscalYearFor } from "@/server/fiscal/fiscal-calendar";
 import { MasterDataError } from "@/server/master-data/errors";
-import { postingBranchId } from "@/server/company/posting-branch";
+import {
+  postingBranchId,
+  postingStateCode,
+} from "@/server/company/posting-branch";
 
 /**
  * Supplier bills.
@@ -254,10 +257,18 @@ export async function createPurchase(params: {
       // The supplier is the seller here, so their registration and their state
       // are what decide the treatment. A supplier with no GSTIN charges none.
       const supplierRegistration = supplier.gstin ? "REGULAR" : "UNREGISTERED";
+      // Where the goods land: the branch receiving them. Stock is held per
+      // branch, and a branch in another state receives an inter-state supply
+      // even where the head office would not.
+      const receivingStateCode = await postingStateCode(tx, {
+        companyId,
+        branchId,
+        companyStateCode: company.stateCode,
+      });
       const supplyType = resolveSupplyType({
         registration: supplierRegistration,
-        sellerStateCode: supplier.stateCode ?? company.stateCode,
-        placeOfSupplyStateCode: company.stateCode,
+        sellerStateCode: supplier.stateCode ?? receivingStateCode,
+        placeOfSupplyStateCode: receivingStateCode,
       });
 
       // Only a regular-scheme buyer can set input tax against output tax. For
@@ -535,7 +546,7 @@ export async function createPurchase(params: {
         documentNumber: billNumber,
         documentDate: billDate,
         supplyType,
-        placeOfSupply: company.stateCode,
+        placeOfSupply: receivingStateCode,
         partyName: supplier.name,
         partyGstin: supplier.gstin,
         itcEligible,
@@ -782,7 +793,13 @@ export async function voidPurchase(params: {
         documentNumber: purchase.billNumber,
         documentDate: purchase.billDate,
         supplyType: purchase.supplyType,
-        placeOfSupply: company.stateCode,
+        // The bill's own branch, so the reversing rows land in the same state
+        // the original ones did rather than at the head office.
+        placeOfSupply: await postingStateCode(tx, {
+          companyId: params.companyId,
+          branchId: purchase.branchId,
+          companyStateCode: company.stateCode,
+        }),
         partyName: purchase.supplier?.name ?? "Supplier",
         partyGstin: purchase.supplier?.gstin ?? null,
         itcEligible: purchase.itcEligible,

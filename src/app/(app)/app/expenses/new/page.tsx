@@ -7,6 +7,10 @@ import type { GstRegistration } from "@/lib/tax/gst";
 import { requirePermission } from "@/server/auth/context";
 import { listExpenseCategories } from "@/server/expenses/expense-service";
 import { businessToday } from "@/lib/validation/date";
+import {
+  postingBranchId,
+  postingStateCode,
+} from "@/server/company/posting-branch";
 
 export const metadata: Metadata = {
   title: "Record expense",
@@ -15,6 +19,17 @@ export const metadata: Metadata = {
 
 export default async function NewExpensePage() {
   const context = await requirePermission("expenses.create");
+
+  // The state the form previews tax from is the state the service will post
+  // from: the branch this member lands on, which may not be the head office.
+  const postingState = await postingStateCode(prisma, {
+    companyId: context.company.id,
+    branchId: await postingBranchId(prisma, {
+      companyId: context.company.id,
+      memberBranchId: context.membership.branchId,
+    }),
+    companyStateCode: context.company.stateCode,
+  });
 
   const [categories, suppliers] = await Promise.all([
     listExpenseCategories(context.company.id),
@@ -51,7 +66,7 @@ export default async function NewExpensePage() {
         today={businessToday(context.company.timezone)}
         suppliers={suppliers}
         company={{
-          stateCode: context.company.stateCode,
+          stateCode: postingState,
           gstRegistration: context.company.gstRegistration as GstRegistration,
         }}
       />
