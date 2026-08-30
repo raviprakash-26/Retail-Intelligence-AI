@@ -72,10 +72,6 @@ export type SupplierOption = {
   creditDays: number;
 };
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function emptyLine() {
   return {
     productId: "",
@@ -94,6 +90,7 @@ async function searchProducts(query: string): Promise<PickerProduct[]> {
 export function BillForm({
   suppliers,
   company,
+  today,
 }: {
   suppliers: SupplierOption[];
   company: {
@@ -101,6 +98,8 @@ export function BillForm({
     stateName: string | null;
     gstRegistration: GstRegistration;
   };
+  /** The shop's own calendar day, worked out from its time zone. */
+  today: string;
 }) {
   const router = useRouter();
 
@@ -109,7 +108,7 @@ export function BillForm({
     defaultValues: {
       supplierId: "",
       supplierBillNo: "",
-      billDate: today(),
+      billDate: today,
       paymentMode: "CREDIT",
       priceIncludesTax: false,
       claimInputCredit: true,

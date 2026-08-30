@@ -24,6 +24,7 @@ import { voidPurchaseAction } from "@/server/purchases/actions";
 import { returnableBillLines } from "@/server/returns/purchase-return-service";
 import { purchaseReturnsAgainst } from "@/server/returns/return-queries";
 import { MasterDataError } from "@/server/master-data/errors";
+import { businessToday } from "@/lib/validation/date";
 
 export const metadata: Metadata = {
   title: "Bill",
@@ -116,6 +117,7 @@ export default async function PurchaseDetailPage({
               documentId={purchase.id}
               documentNumber={purchase.billNumber}
               documentDate={purchase.billDate.toISOString().slice(0, 10)}
+              today={businessToday(context.company.timezone)}
               hasParty={Boolean(purchase.supplier)}
               lines={returnable}
             />

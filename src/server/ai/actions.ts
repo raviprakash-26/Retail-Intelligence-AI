@@ -14,6 +14,7 @@ import { assertPermission } from "@/server/auth/context";
 import { selectedFiscalYear } from "@/server/fiscal/fiscal-service";
 import { requireSameOrigin } from "@/server/security/request-context";
 import { askAccountant } from "@/server/ai/accountant";
+import { businessToday } from "@/lib/validation/date";
 
 /**
  * Asking the accountant.
@@ -94,6 +95,7 @@ export async function askAccountantAction(
       fiscalYearLabel: fiscalYear?.label ?? null,
       fiscalYearFrom: fiscalYear ? isoDay(fiscalYear.startDate) : null,
       fiscalYearTo: fiscalYear ? isoDay(fiscalYear.endDate) : null,
+      today: businessToday(context.company.timezone),
     },
   });
 

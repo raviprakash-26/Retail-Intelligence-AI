@@ -196,6 +196,15 @@ export async function askAccountant(params: {
     fiscalYearLabel: string | null;
     fiscalYearFrom: string | null;
     fiscalYearTo: string | null;
+    /**
+     * The business's own calendar day.
+     *
+     * Told to the model rather than left to it, and worked out from the shop's
+     * time zone rather than UTC — a model asked about "this month" on the first
+     * of the month would otherwise be told it is still the last day of the one
+     * before, and answer for the wrong month.
+     */
+    today: string;
   };
   /**
    * Defaulted in production; supplied by the tests.
@@ -257,7 +266,7 @@ export async function askAccountant(params: {
 
   const system = systemPrompt({
     businessName: params.business.name,
-    today: new Date().toISOString().slice(0, 10),
+    today: params.business.today,
     fiscalYearLabel: params.business.fiscalYearLabel,
     fiscalYearFrom: params.business.fiscalYearFrom,
     fiscalYearTo: params.business.fiscalYearTo,

@@ -55,13 +55,20 @@ import { AccountPicker, type PickerAccount } from "./account-picker";
  * same engine every other module uses. Nothing about an entry typed by a person
  * is checked more loosely than one derived from an invoice.
  */
-export function JournalForm({ accounts }: { accounts: PickerAccount[] }) {
+export function JournalForm({
+  accounts,
+  today,
+}: {
+  accounts: PickerAccount[];
+  /** The shop's own calendar day, worked out from its time zone. */
+  today: string;
+}) {
   const router = useRouter();
 
   const form = useForm<JournalEntryInput>({
     resolver: zodResolver(journalEntrySchema),
     defaultValues: {
-      entryDate: new Date().toISOString().slice(0, 10),
+      entryDate: today,
       voucherType: "JOURNAL",
       narration: "",
       referenceNo: "",

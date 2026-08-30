@@ -8,6 +8,7 @@ import { prisma } from "@/lib/db";
 import { findStateByCode } from "@/lib/constants/india";
 import type { GstRegistration } from "@/lib/tax/gst";
 import { requirePermission } from "@/server/auth/context";
+import { businessToday } from "@/lib/validation/date";
 
 export const metadata: Metadata = {
   title: "New invoice",
@@ -72,6 +73,7 @@ export default async function NewSalePage() {
       ) : (
         <InvoiceForm
           customers={customers}
+          today={businessToday(context.company.timezone)}
           company={{
             stateCode: context.company.stateCode,
             stateName: context.company.stateCode

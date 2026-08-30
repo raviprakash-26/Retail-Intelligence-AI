@@ -129,6 +129,7 @@ async function ask(fixture: Fixture, question: string, client: MessagesClient) {
       fiscalYearLabel: null,
       fiscalYearFrom: null,
       fiscalYearTo: null,
+      today: "2026-08-30",
     },
   });
 }

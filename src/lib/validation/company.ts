@@ -97,6 +97,47 @@ export type CompanyProfileInput = z.infer<typeof companyProfileSchema>;
 // --- Accounting settings ----------------------------------------------------
 
 /**
+ * The time zones a business may keep its books in.
+ *
+ * A list rather than "any string up to 64 characters", which is what this was.
+ * The setting decides which calendar day a late-night sale belongs to, and the
+ * only way to answer that is to hand the value to `Intl.DateTimeFormat` — which
+ * throws a `RangeError` on a zone it does not know. An unchecked field was
+ * harmless for exactly as long as nothing read it.
+ *
+ * The settings form offers these same six, so the list lives here and the form
+ * imports it: one list, two readers, rather than a select that agrees with the
+ * schema by coincidence.
+ */
+export const BUSINESS_TIMEZONES = [
+  "Asia/Kolkata",
+  "Asia/Dubai",
+  "Asia/Singapore",
+  "Europe/London",
+  "America/New_York",
+  "UTC",
+] as const;
+
+export type BusinessTimezone = (typeof BUSINESS_TIMEZONES)[number];
+
+/**
+ * A stored time zone, narrowed to one the runtime can actually use.
+ *
+ * The column was written before the schema constrained it, so a row may hold
+ * anything. Normalising once, where the value leaves the database, means the
+ * settings form and the code that decides the business day are looking at the
+ * same answer — a form showing "Asia/Kolkata" while the books were dated in
+ * UTC would be the very disagreement this setting exists to remove.
+ */
+export function asBusinessTimezone(
+  value: string | null | undefined,
+): BusinessTimezone {
+  return BUSINESS_TIMEZONES.includes(value as BusinessTimezone)
+    ? (value as BusinessTimezone)
+    : "UTC";
+}
+
+/**
  * Which of these may change is decided at runtime by what has been posted, not
  * by the schema — the server checks and reports precisely why a field is
  * locked. See `describeAccountingLocks` in the settings service.
@@ -105,7 +146,9 @@ export const companyAccountingSchema = z.object({
   fiscalYearStartMonth: z.number().int().min(1).max(12),
   currency: z.string().length(3),
   inventoryMethod: z.enum(["FIFO", "WEIGHTED_AVERAGE"]),
-  timezone: z.string().trim().min(1).max(64),
+  timezone: z.enum(BUSINESS_TIMEZONES, {
+    error: "Choose one of the listed time zones.",
+  }),
 });
 
 export type CompanyAccountingInput = z.infer<typeof companyAccountingSchema>;

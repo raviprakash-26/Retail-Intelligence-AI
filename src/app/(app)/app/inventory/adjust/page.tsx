@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { AdjustmentForm } from "@/components/inventory/adjustment-form";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/server/auth/context";
+import { businessToday } from "@/lib/validation/date";
 
 export const metadata: Metadata = {
   title: "Correct a count",
@@ -53,6 +54,7 @@ export default async function AdjustStockPage() {
       </header>
 
       <AdjustmentForm
+        today={businessToday(context.company.timezone)}
         products={products.map((product) => ({
           id: product.id,
           sku: product.sku,

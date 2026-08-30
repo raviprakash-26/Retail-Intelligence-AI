@@ -30,3 +30,37 @@ export const isoDate = z
 export function toUtcDay(value: string): Date {
   return new Date(`${value}T00:00:00.000Z`);
 }
+
+/**
+ * What day it is where the business is.
+ *
+ * The settings screen asks a shop for its time zone and says the answer
+ * "decides which day a transaction recorded late at night belongs to". Nothing
+ * read it. Every form defaulted its date to `new Date().toISOString()`, which
+ * is the day in UTC — so for a shop in Asia/Kolkata, between midnight and half
+ * past five in the morning, the date offered was **yesterday**. A kirana open
+ * late bills the night's takings into the previous day, and on the first of a
+ * month into the previous month's GST return, which may already have been
+ * filed.
+ *
+ * `en-CA` is used only because it formats as `YYYY-MM-DD`; the locale is
+ * otherwise irrelevant. `formatToParts` would say the same thing in more
+ * lines.
+ *
+ * An unrecognised zone falls back to UTC rather than throwing. The stored value
+ * is constrained to a known list, so this should be unreachable — but a date
+ * helper that can throw is a date helper that can take down every form in the
+ * product, and it is on the path of a shop simply opening the sales page.
+ */
+export function businessToday(timezone: string, at: Date = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(at);
+  } catch {
+    return at.toISOString().slice(0, 10);
+  }
+}

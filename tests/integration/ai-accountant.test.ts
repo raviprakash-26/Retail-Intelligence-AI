@@ -139,6 +139,7 @@ describe("with no provider configured", () => {
         fiscalYearLabel: null,
         fiscalYearFrom: null,
         fiscalYearTo: null,
+        today: "2026-08-30",
       },
     });
 
@@ -163,6 +164,7 @@ describe("with no provider configured", () => {
         fiscalYearLabel: null,
         fiscalYearFrom: null,
         fiscalYearTo: null,
+        today: "2026-08-30",
       },
     });
 

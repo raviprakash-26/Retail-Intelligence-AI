@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { JournalForm } from "@/components/accounting/journal-form";
 import { requirePermission } from "@/server/auth/context";
 import { postableAccounts } from "@/server/accounting/journal-service";
+import { businessToday } from "@/lib/validation/date";
 
 export const metadata: Metadata = {
   title: "New journal entry",
@@ -46,6 +47,7 @@ export default async function NewJournalEntryPage() {
       </header>
 
       <JournalForm
+        today={businessToday(context.company.timezone)}
         accounts={accounts.map((account) => ({
           id: account.id,
           code: account.code,
