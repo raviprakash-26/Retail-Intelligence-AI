@@ -208,7 +208,10 @@ export async function listTenants(params: {
     prisma.company.count({ where }),
     prisma.company.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      // `createdAt` alone is not a total order — two companies provisioned
+      // in the same instant tie — and a tie under OFFSET paging repeats one
+      // row and drops another.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip: (page - 1) * TENANT_PAGE_SIZE,
       take: TENANT_PAGE_SIZE,
       select: {

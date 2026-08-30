@@ -503,7 +503,14 @@ export async function getProductStockCard(params: {
         branch: { select: { name: true } },
       },
       // Newest first: a stock card is read to answer "what happened lately".
-      orderBy: [{ movementDate: "desc" }, { createdAt: "desc" }],
+      // Movements written in one transaction share a `createdAt`, so the
+      // pair is not a total order. The id is a time-ordered uuid, which
+      // breaks the tie the same way round.
+      orderBy: [
+        { movementDate: "desc" },
+        { createdAt: "desc" },
+        { id: "desc" },
+      ],
       skip: (page - 1) * MOVEMENT_PAGE_SIZE,
       take: MOVEMENT_PAGE_SIZE,
     }),

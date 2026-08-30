@@ -129,7 +129,10 @@ export async function listEmployees(params: {
         bankAccountNo: true,
         ifsc: true,
       },
-      orderBy: [{ status: "asc" }, { name: "asc" }],
+      // Two people of the same name on the same status is not unusual, and
+      // a tie under OFFSET paging repeats one and hides the other. The
+      // employee code is unique per company.
+      orderBy: [{ status: "asc" }, { name: "asc" }, { employeeCode: "asc" }],
       skip: (page - 1) * EMPLOYEE_PAGE_SIZE,
       take: EMPLOYEE_PAGE_SIZE,
     }),
