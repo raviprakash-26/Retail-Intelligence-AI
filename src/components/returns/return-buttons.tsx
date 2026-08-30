@@ -19,6 +19,14 @@ type Props = {
   documentId: string;
   documentNumber: string;
   documentDate: string;
+  /**
+   * Whether the document names a customer or a supplier.
+   *
+   * A counter sale names nobody, and settling its return "to the customer's
+   * account" would credit receivables against no party at all — a balance the
+   * ageing report reads party by party and so cannot see.
+   */
+  hasParty: boolean;
   lines: readonly ReturnableLine[];
 };
 
@@ -26,6 +34,7 @@ export function SalesReturnButton({
   documentId,
   documentNumber,
   documentDate,
+  hasParty,
   lines,
 }: Props) {
   return (
@@ -33,6 +42,7 @@ export function SalesReturnButton({
       direction="sales"
       documentNumber={documentNumber}
       documentDate={documentDate}
+      hasParty={hasParty}
       lines={lines}
       onSubmit={(values) =>
         createSalesReturnAction({ saleId: documentId, ...values })
@@ -45,6 +55,7 @@ export function PurchaseReturnButton({
   documentId,
   documentNumber,
   documentDate,
+  hasParty,
   lines,
 }: Props) {
   return (
@@ -52,6 +63,7 @@ export function PurchaseReturnButton({
       direction="purchase"
       documentNumber={documentNumber}
       documentDate={documentDate}
+      hasParty={hasParty}
       lines={lines}
       onSubmit={(values) =>
         createPurchaseReturnAction({ purchaseId: documentId, ...values })

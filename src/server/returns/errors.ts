@@ -13,6 +13,7 @@ export type ReturnErrorCode =
   | "LINE_NOT_ON_INVOICE"
   | "OVER_RETURN"
   | "DUPLICATE_LINE"
+  | "NO_PARTY_TO_SETTLE"
   | "NOTHING_RETURNABLE";
 
 export class ReturnError extends Error {

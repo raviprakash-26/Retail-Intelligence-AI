@@ -122,6 +122,7 @@ export default async function SaleDetailPage({
               documentId={sale.id}
               documentNumber={sale.invoiceNumber}
               documentDate={sale.invoiceDate.toISOString().slice(0, 10)}
+              hasParty={Boolean(sale.customer)}
               lines={returnable}
             />
           )}

@@ -16,14 +16,25 @@ import { STATE, fill } from "./support";
  * make this pass or fail on the alphabet.
  */
 
-/** Raises an invoice through the form and returns its number. */
-async function raiseInvoice(page: Page, quantity: string): Promise<string> {
+/**
+ * Raises an invoice through the form and returns its number.
+ *
+ * `customer` false leaves the picker on "Walk-in — no customer record", which
+ * is what it opens on: a counter sale, naming nobody.
+ */
+async function raiseInvoice(
+  page: Page,
+  quantity: string,
+  options: { customer?: boolean } = {},
+): Promise<string> {
   await page.goto("/app/sales/new");
   await page.waitForSelector('button:has-text("Choose a product")');
 
   const selects = page.locator('button[role="combobox"]');
-  await selects.first().click();
-  await page.locator('[role="option"]:has-text("Sharma Provision")').click();
+  if (options.customer !== false) {
+    await selects.first().click();
+    await page.locator('[role="option"]:has-text("Sharma Provision")').click();
+  }
 
   await selects.nth(1).click();
   await page.locator('[role="option"]:has-text("Cash")').first().click();
@@ -98,6 +109,41 @@ test.describe("returning goods against an invoice", () => {
     // than posting a credit note for goods that never left the shop.
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(/left to return/i);
+  });
+
+  test("offers a counter sale no account to credit", async ({ page }) => {
+    // A walk-in names nobody, so "credit the customer's account" has no account
+    // to credit. The service refuses it; this is the half that stops somebody
+    // being offered the choice at all, and it is the dialog's default — so
+    // leaving it in the list would put a dead end in front of every counter
+    // refund.
+    const invoiceNumber = await raiseInvoice(page, "4", { customer: false });
+    expect(invoiceNumber).not.toBe("");
+
+    await page.getByRole("button", { name: "Record return" }).first().click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    const settlement = dialog.locator('button[role="combobox"]').last();
+    await expect(settlement).not.toContainText(/customer's account/i);
+    await settlement.click();
+    await expect(
+      page.locator('[role="option"]:has-text("customer\'s account")'),
+    ).toHaveCount(0);
+    await expect(
+      page.locator('[role="option"]:has-text("Refunded from cash")'),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    // And the refund it does allow posts, leaving the books balanced.
+    await fill(page, 'input[name="quantities.0"]', "1");
+    await dialog.getByRole("button", { name: /Post credit note/i }).click();
+    await expect(dialog).toBeHidden({ timeout: 20_000 });
+
+    await page.goto("/app/accounting/trial-balance");
+    await page.waitForLoadState("networkidle");
+    const trial = await page.locator("body").innerText();
+    expect(trial).not.toMatch(/out of balance|does not balance/i);
   });
 
   test("the returns list shows the note and the entry behind it", async ({

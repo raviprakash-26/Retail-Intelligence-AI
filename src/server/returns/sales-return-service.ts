@@ -152,6 +152,32 @@ export async function createSalesReturn(params: {
           "DATE_BEFORE_INVOICE",
         );
       }
+      // `saleSchema` states this rule from the other side: "a credit sale is a
+      // receivable, and a receivable has to be owed by somebody. Without a
+      // customer there is no sub-ledger to collect it from." A credit note is
+      // that same receivable running backwards, and it was never checked.
+      //
+      // A walk-in names nobody, and the return dialog offered "credit the
+      // customer's account" as its default settlement. Choosing it credited
+      // Accounts Receivable with no party on the line — and the ageing report
+      // reads that account party by party, so a line belonging to nobody
+      // belongs to none of them. A ₹420 counter refund left the balance sheet
+      // saying the shop owed its customers ₹420 while the receivables report
+      // said it was owed nothing: two readings of one account, disagreeing
+      // permanently, with no document to reconcile them against and nobody to
+      // ever apply the credit to. The customer standing at the counter with the
+      // damaged goods had been given nothing either — the money never left the
+      // till.
+      //
+      // Refused rather than quietly redirected to cash. Which way the money
+      // actually went is a fact about what happened at the counter, and a
+      // product that guesses it is how a till that balances stops balancing.
+      if (input.refundMode === "CREDIT" && !sale.customer) {
+        throw new ReturnError(
+          "That invoice names no customer, so there is no account to settle this return against. Record how the money actually moved — in cash, or by bank transfer.",
+          "NO_PARTY_TO_SETTLE",
+        );
+      }
 
       assertNoRepeatedLines(input.lines, "invoice");
 

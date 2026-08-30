@@ -15,6 +15,7 @@ import {
   returnableLines,
 } from "@/server/returns/sales-return-service";
 import { ReturnError } from "@/server/returns/errors";
+import { receivablesAgeing } from "@/server/settlements/outstanding";
 import {
   disconnectTestDb,
   ensurePlatformData,
@@ -165,6 +166,33 @@ async function sell(fixture: Fixture, quantity: number, rate = 100) {
           description: "",
           quantity,
           rate,
+          discountPercent: 0,
+        },
+      ],
+    } satisfies SaleInput,
+  });
+}
+
+/** A walk-in sale: nobody named, paid over the counter. */
+async function sellOverTheCounter(fixture: Fixture, quantity: number) {
+  return createSale({
+    companyId: fixture.companyId,
+    userId: fixture.userId,
+    actorEmail: fixture.actorEmail,
+    branchId: null,
+    input: {
+      customerId: "",
+      invoiceDate: today,
+      paymentMode: "CASH",
+      placeOfSupply: "",
+      priceIncludesTax: false,
+      notes: "",
+      lines: [
+        {
+          productId: fixture.productId,
+          description: "",
+          quantity,
+          rate: 100,
           discountPercent: 0,
         },
       ],
@@ -808,5 +836,116 @@ describe("what a return refuses to do", () => {
     });
     expect(after).toEqual(before);
     expect(after.status).toBe(DocumentStatus.POSTED);
+  }, 90_000);
+});
+
+/**
+ * Returning a counter sale.
+ *
+ * A walk-in names nobody, so there is no account to credit — and the receivable
+ * control account is read party by party, which means a line belonging to no
+ * party belongs to none of them and drops out of the ageing report entirely.
+ * The balance sheet would then say the shop owed its customers money while the
+ * receivables report said it was owed nothing, permanently, with no document to
+ * reconcile the two against and no party to apply the credit to.
+ */
+describe("a return against a counter sale", () => {
+  it("refuses to credit an account that does not exist", async () => {
+    const fixture = await createCompany();
+    const sale = await sellOverTheCounter(fixture, 10);
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+    });
+
+    await expect(
+      createSalesReturn({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        branchId: null,
+        input: {
+          saleId: sale.id,
+          returnDate: today,
+          reason: "Damaged in the bag",
+          // The dialog's default settlement, which is what made this reachable.
+          refundMode: "CREDIT",
+          lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+        },
+      }),
+    ).rejects.toThrow(/names no customer/i);
+  }, 90_000);
+
+  it("leaves nothing behind on the receivable when it is refused", async () => {
+    const fixture = await createCompany();
+    const sale = await sellOverTheCounter(fixture, 10);
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+    });
+
+    await expect(
+      createSalesReturn({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        branchId: null,
+        input: {
+          saleId: sale.id,
+          returnDate: today,
+          reason: "",
+          refundMode: "CREDIT",
+          lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+        },
+      }),
+    ).rejects.toThrow();
+
+    // The figure the ageing report cannot see: a movement on the receivable
+    // control account with no party against it. One is one too many.
+    const orphaned = await prisma.journalLine.count({
+      where: {
+        companyId: fixture.companyId,
+        partyId: null,
+        account: { systemKey: "ACCOUNTS_RECEIVABLE" },
+      },
+    });
+    expect(orphaned).toBe(0);
+  }, 90_000);
+
+  it("refunds it over the counter, and the two readings of receivables agree", async () => {
+    const fixture = await createCompany();
+    const sale = await sellOverTheCounter(fixture, 10);
+    const lines = await returnableLines({
+      companyId: fixture.companyId,
+      saleId: sale.id,
+    });
+
+    const note = await createSalesReturn({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      branchId: null,
+      input: {
+        saleId: sale.id,
+        returnDate: today,
+        reason: "Damaged in the bag",
+        refundMode: "CASH",
+        lines: [{ sourceLineId: lines[0]!.lineId, quantity: 4 }],
+      },
+    });
+    expect(note.totalAmount).toBe("420.0000");
+
+    // What the control account holds, and what the ageing report says is owed.
+    // The money went back over the counter, so both are nil — and they are the
+    // same nil rather than two that happen to match.
+    const receivable = await accountNamed(fixture.companyId, /receivable/i);
+    const control = receivable
+      ? Number(receivable.closingDebit) - Number(receivable.closingCredit)
+      : 0;
+    const ageing = await receivablesAgeing(fixture.companyId);
+
+    expect(control).toBe(0);
+    expect(Number(ageing.summary.total)).toBe(control);
+    expect(ageing.parties).toEqual([]);
   }, 90_000);
 });

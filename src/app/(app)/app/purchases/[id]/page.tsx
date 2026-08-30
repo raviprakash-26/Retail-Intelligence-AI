@@ -116,6 +116,7 @@ export default async function PurchaseDetailPage({
               documentId={purchase.id}
               documentNumber={purchase.billNumber}
               documentDate={purchase.billDate.toISOString().slice(0, 10)}
+              hasParty={Boolean(purchase.supplier)}
               lines={returnable}
             />
           )}
