@@ -58,6 +58,8 @@ import {
   settledByNotes,
   unappliedCreditByParty,
 } from "@/server/settlements/outstanding";
+import { asBusinessTimezone } from "@/lib/validation/company";
+import { businessToday } from "@/lib/validation/date";
 
 /**
  * The income tax working paper.
@@ -663,7 +665,7 @@ export async function getTaxWorkingPaper(params: {
 
   const company = await prisma.company.findUniqueOrThrow({
     where: { id: params.companyId },
-    select: { businessType: true },
+    select: { businessType: true, timezone: true },
   });
 
   const from = year.startDate;
@@ -932,7 +934,10 @@ export async function getTaxWorkingPaper(params: {
       advanceTaxSchedule({
         totalTax: advanceTaxBase,
         financialYearStart: startYear,
-        asOf: params.asOf,
+        // The shop's own calendar day. A deadline is a day, and which day it
+        // is where the business is standing is what decides whether one has
+        // passed.
+        today: businessToday(asBusinessTimezone(company.timezone), params.asOf),
       }),
     ),
     advanceTaxRequired: advanceTaxDue(advanceTaxBase),
