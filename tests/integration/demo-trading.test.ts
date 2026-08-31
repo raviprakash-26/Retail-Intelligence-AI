@@ -10,6 +10,7 @@ import {
   purgeTestUsers,
   testDb,
 } from "../helpers/test-db";
+import { coversDay } from "../helpers/calendar";
 
 /**
  * The demo shop is a shop.
@@ -178,11 +179,7 @@ describe("the demo tenant has actually traded", () => {
     ]);
 
     const covered = (date: Date) =>
-      periods.some(
-        (period) =>
-          period.startDate.getTime() <= date.getTime() &&
-          period.endDate.getTime() >= date.getTime(),
-      );
+      periods.some((period) => coversDay(period, date));
 
     expect(covered(firstPurchase.billDate)).toBe(true);
     expect(covered(firstSale.invoiceDate)).toBe(true);
@@ -225,11 +222,7 @@ describe("a demo seeded just after the year turns", () => {
       select: { startDate: true, endDate: true },
     });
     const covered = (date: Date) =>
-      periods.some(
-        (period) =>
-          period.startDate.getTime() <= date.getTime() &&
-          period.endDate.getTime() >= date.getTime(),
-      );
+      periods.some((period) => coversDay(period, date));
 
     const sales = await prisma.sale.findMany({
       where: { companyId },

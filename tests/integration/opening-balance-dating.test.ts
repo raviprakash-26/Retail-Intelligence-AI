@@ -15,6 +15,7 @@ import {
   testDb,
   uniqueSlug,
 } from "../helpers/test-db";
+import { coversDay } from "../helpers/calendar";
 
 /**
  * Where an opening balance is dated once the year's first month is shut.
@@ -282,10 +283,8 @@ describe("an opening balance when the year has begun to close", () => {
     });
 
     const dated = await openingEntryDate(it.companyId, "Sharma");
-    const holding = (await listPeriods(it.companyId)).find(
-      (period) =>
-        period.startDate.getTime() <= dated.getTime() &&
-        period.endDate.getTime() >= dated.getTime(),
+    const holding = (await listPeriods(it.companyId)).find((period) =>
+      coversDay(period, dated),
     );
 
     expect(holding).toBeDefined();

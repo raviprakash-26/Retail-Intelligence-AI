@@ -24,6 +24,7 @@ import {
   testDb,
   uniqueSlug,
 } from "../helpers/test-db";
+import { coversDay } from "../helpers/calendar";
 
 /**
  * Closing the books on a period.
@@ -178,11 +179,8 @@ async function sell(fixture: Fixture, on: Date) {
 /** The period containing today, which is where a new shop trades. */
 async function currentPeriod(fixture: Fixture) {
   const periods = await listPeriods(fixture.companyId);
-  const now = Date.now();
-  const found = periods.find(
-    (period) =>
-      period.startDate.getTime() <= now && period.endDate.getTime() >= now,
-  );
+  const now = new Date();
+  const found = periods.find((period) => coversDay(period, now));
   if (!found) throw new Error("No period covers today");
   return found;
 }
