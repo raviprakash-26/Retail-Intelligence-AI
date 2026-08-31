@@ -589,10 +589,27 @@ export function advanceTaxSchedule(params: {
   /** Calendar year the financial year starts in: 2025 for FY 2025-26. */
   financialYearStart: number;
   presumptive?: boolean;
-  asOf?: Date;
+  /**
+   * The business's own calendar day, as `YYYY-MM-DD`.
+   *
+   * A day rather than an instant, because that is what a statutory deadline
+   * is. Section 211 says advance tax is payable "on or before" the fifteenth,
+   * so the fifteenth is not a day on which it has been missed — and this was
+   * comparing the current instant against midnight on the due date, which made
+   * every instalment read as passed from the first second of the day it was
+   * due. In India that is half past five in the morning, so the working paper
+   * spent the whole of each of the four due days telling a shop it was too
+   * late to pay something it could still pay.
+   *
+   * Required rather than defaulted. The only default available here is the day
+   * in UTC, which is the thing being fixed — and for a shop in Asia/Kolkata it
+   * is yesterday until half past five each morning. The caller knows which
+   * business the paper is for; this does not.
+   */
+  today: string;
 }): AdvanceTaxInstalment[] {
   const tax = max(money(params.totalTax), 0);
-  const asOf = params.asOf ?? new Date();
+  const { today } = params;
   const rows = params.presumptive
     ? [{ month: 3, percent: 100 }]
     : ORDINARY_INSTALMENTS;
@@ -613,7 +630,8 @@ export function advanceTaxSchedule(params: {
       cumulativePercent: percent,
       cumulativeAmount,
       instalmentAmount,
-      elapsed: asOf.getTime() > dueDate.getTime(),
+      // Passed once the due day itself is over, not once it has begun.
+      elapsed: today > dueDate.toISOString().slice(0, 10),
     };
   });
 }

@@ -41,6 +41,7 @@ import {
   testDb,
   uniqueSlug,
 } from "../helpers/test-db";
+import { coversDay } from "../helpers/calendar";
 
 /**
  * Closing the year.
@@ -916,10 +917,9 @@ describe("months inside a closed year", () => {
       fiscalYearId: shop.yearId,
     });
 
-    const now = Date.now();
-    const trading = (await listPeriods(shop.companyId)).find(
-      (period) =>
-        period.startDate.getTime() <= now && period.endDate.getTime() >= now,
+    const now = new Date();
+    const trading = (await listPeriods(shop.companyId)).find((period) =>
+      coversDay(period, now),
     )!;
     return { shop, trading };
   }
@@ -1040,10 +1040,9 @@ describe("months inside a closed year", () => {
     const shop = await shopReadyToClose();
     await closeEveryMonth(shop);
 
-    const now = Date.now();
-    const trading = (await listPeriods(shop.companyId)).find(
-      (period) =>
-        period.startDate.getTime() <= now && period.endDate.getTime() >= now,
+    const now = new Date();
+    const trading = (await listPeriods(shop.companyId)).find((period) =>
+      coversDay(period, now),
     )!;
     expect(trading.reopenable).toBe(true);
 

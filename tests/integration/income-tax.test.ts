@@ -332,10 +332,11 @@ async function pay(fixture: Fixture, overrides: Partial<PaymentInput> = {}) {
   });
 }
 
-const paperFor = async (fixture: Fixture) => {
+const paperFor = async (fixture: Fixture, asOf?: Date) => {
   const paper = await getTaxWorkingPaper({
     companyId: fixture.companyId,
     fiscalYearId: fixture.fiscalYearId,
+    asOf,
   });
   if (!paper) throw new Error("No working paper was produced");
   return paper;
@@ -969,6 +970,48 @@ describe("advance tax", () => {
     const start = Number(paper.fiscalYear.from.slice(0, 4));
     expect(paper.advanceTax[0]?.dueDate).toBe(`${start}-06-15`);
     expect(paper.advanceTax[3]?.dueDate).toBe(`${start + 1}-03-15`);
+  });
+
+  it("reads a deadline against the shop's own day, not against UTC", async () => {
+    // Half past eight in the evening UTC on 15 June is two in the morning on
+    // the 16th in India, where the shop is. The fifteenth is over and the
+    // instalment has been missed — which the UTC day would still deny for
+    // another three and a half hours.
+    const fixture = await createCompany();
+    await sell(fixture, 20_000);
+    await prisma.company.update({
+      where: { id: fixture.companyId },
+      data: { timezone: "Asia/Kolkata" },
+    });
+
+    const start = Number((await paperFor(fixture)).fiscalYear.from.slice(0, 4));
+    const paper = await paperFor(
+      fixture,
+      new Date(`${start}-06-15T20:30:00.000Z`),
+    );
+
+    expect(paper.advanceTax[0]?.dueDate).toBe(`${start}-06-15`);
+    expect(paper.advanceTax[0]?.elapsed).toBe(true);
+    expect(paper.advanceTax[1]?.elapsed).toBe(false);
+  });
+
+  it("does not call an instalment passed on the morning it falls due", async () => {
+    // Four in the morning UTC on 15 June is half past nine in India, on the
+    // day the money is due. Nothing has been missed.
+    const fixture = await createCompany();
+    await sell(fixture, 20_000);
+    await prisma.company.update({
+      where: { id: fixture.companyId },
+      data: { timezone: "Asia/Kolkata" },
+    });
+
+    const start = Number((await paperFor(fixture)).fiscalYear.from.slice(0, 4));
+    const paper = await paperFor(
+      fixture,
+      new Date(`${start}-06-15T04:00:00.000Z`),
+    );
+
+    expect(paper.advanceTax[0]?.elapsed).toBe(false);
   });
 
   it("is not required where there is barely any profit", async () => {

@@ -426,7 +426,7 @@ describe("advance tax", () => {
     const schedule = advanceTaxSchedule({
       totalTax: 100_000,
       financialYearStart: 2025,
-      asOf: new Date("2025-07-01T00:00:00.000Z"),
+      today: "2025-07-01",
     });
 
     expect(schedule.map((row) => row.dueDate)).toEqual([
@@ -453,10 +453,60 @@ describe("advance tax", () => {
     ]);
   });
 
+  it("does not call an instalment passed on the day it falls due", () => {
+    // Section 211 says advance tax is payable "on or before" the fifteenth, so
+    // the fifteenth is not a day on which it has been missed. This compared the
+    // current instant against midnight on the due date, so from the first
+    // second of the fifteenth — half past five in the morning in India — the
+    // working paper badged the instalment "Passed" and went on saying so all
+    // day, about money the shop could still pay on time.
+    const onTheDay = advanceTaxSchedule({
+      totalTax: 100_000,
+      financialYearStart: 2025,
+      today: "2025-06-15",
+    });
+    expect(onTheDay.map((row) => row.elapsed)).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+
+    const dayAfter = advanceTaxSchedule({
+      totalTax: 100_000,
+      financialYearStart: 2025,
+      today: "2025-06-16",
+    });
+    expect(dayAfter.map((row) => row.elapsed)).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("carries the last instalment into the next calendar year", () => {
+    // March belongs to the year after the one the financial year starts in, so
+    // a day in March of that later year has passed the December date and not
+    // yet the March one.
+    const schedule = advanceTaxSchedule({
+      totalTax: 100_000,
+      financialYearStart: 2025,
+      today: "2026-03-15",
+    });
+    expect(schedule.map((row) => row.elapsed)).toEqual([
+      true,
+      true,
+      true,
+      false,
+    ]);
+  });
+
   it("adds up to the whole liability", () => {
     const schedule = advanceTaxSchedule({
       totalTax: 87_654,
       financialYearStart: 2025,
+      today: "2025-07-01",
     });
     const total = schedule.reduce(
       (sum, row) => sum + Number(row.instalmentAmount),
@@ -470,6 +520,7 @@ describe("advance tax", () => {
       totalTax: 50_000,
       financialYearStart: 2025,
       presumptive: true,
+      today: "2025-07-01",
     });
     expect(schedule).toHaveLength(1);
     expect(schedule[0]?.dueDate).toBe("2026-03-15");

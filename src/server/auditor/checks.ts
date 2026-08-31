@@ -27,6 +27,7 @@ import {
   unappliedCreditByParty,
 } from "@/server/settlements/outstanding";
 import { aggregateCashDays, cashOutflows } from "@/server/tax/cash-outflows";
+import { daysOverdue } from "@/lib/settlements/ageing";
 
 /**
  * The checks themselves.
@@ -578,9 +579,16 @@ const LONG_OVERDUE_DAYS = 90;
  * the ageing report and the payment reminder both do with it.
  */
 async function checkLongOverdue(context: CheckContext): Promise<Finding[]> {
-  const cutoff = new Date(
-    context.to.getTime() - LONG_OVERDUE_DAYS * 86_400_000,
-  );
+  // Counted the way the ageing report counts it. `daysOverdue` truncates both
+  // dates to the day before subtracting, and says why: "an invoice due today is
+  // not one second overdue at 4pm". Subtracting ninety days from the current
+  // *instant* left a cutoff carrying the time of day, so an invoice due at
+  // midnight exactly ninety days ago fell before it and was reported — as
+  // "more than ninety days past their due date", which it was not, and which
+  // the ageing report's own "Over 90 days" bucket starts at ninety-one.
+  //
+  // Two readers of one fact, and the module that owns it already had the
+  // answer. Strictly greater than, because the rule says "more than".
 
   // Every open invoice, not only the overdue ones. What is owed on the overdue
   // ones can only be known once the whole account is in view: money paid
@@ -654,7 +662,7 @@ async function checkLongOverdue(context: CheckContext): Promise<Finding[]> {
     .filter(
       (entry) =>
         compare(entry.outstanding, 0) > 0 &&
-        entry.dueDate.getTime() < cutoff.getTime(),
+        daysOverdue(entry.dueDate, context.to) > LONG_OVERDUE_DAYS,
     )
     .sort(
       (a, b) => a.sale.invoiceDate.getTime() - b.sale.invoiceDate.getTime(),

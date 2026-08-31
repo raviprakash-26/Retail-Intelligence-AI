@@ -28,6 +28,7 @@ import {
   testDb,
   uniqueSlug,
 } from "../helpers/test-db";
+import { coversDay } from "../helpers/calendar";
 
 /**
  * The calendar a tenant is given at signup, and what happens when it runs out.
@@ -223,11 +224,7 @@ function yearCovering<T extends { startDate: Date; endDate: Date }>(
   years: readonly T[],
   date: Date,
 ): T | undefined {
-  return years.find(
-    (year) =>
-      year.startDate.getTime() <= date.getTime() &&
-      year.endDate.getTime() >= date.getTime(),
-  );
+  return years.find((year) => coversDay(year, date));
 }
 
 /** Months back from today, as a day inside that month. */
