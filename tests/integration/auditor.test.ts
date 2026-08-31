@@ -58,6 +58,11 @@ const TODAY = new Date();
 const daysBefore = (days: number): string =>
   new Date(TODAY.getTime() - days * DAY).toISOString().slice(0, 10);
 
+/** Today at midday UTC, so a boundary cannot turn on when the suite runs. */
+const MIDDAY_TODAY = new Date(
+  Date.UTC(TODAY.getUTCFullYear(), TODAY.getUTCMonth(), TODAY.getUTCDate(), 12),
+);
+
 const WINDOW = {
   from: new Date(TODAY.getTime() - 365 * DAY),
   to: new Date(TODAY.getTime() + DAY),
@@ -758,6 +763,48 @@ describe("figures a person might act on", () => {
    * named as the oldest — the auditor telling a shop to chase a customer for
    * goods that customer had already sent back.
    */
+  /**
+   * The boundary the rule states.
+   *
+   * "Invoices are more than ninety days past their due date" — and the ageing
+   * report's own bucket for this is labelled "Over 90 days" and starts at
+   * ninety-one. The check subtracted ninety days from the current instant and
+   * compared that against a due date stored at midnight, so an invoice exactly
+   * ninety days past due fell before the cutoff by however many hours into the
+   * day the audit happened to run. Reported as more than ninety days when it
+   * was ninety, and counted differently from the ageing report looking at the
+   * same invoice.
+   */
+  it("does not call an invoice exactly ninety days past due more than ninety", async () => {
+    const fixture = await createCompany();
+    // Thirty days' credit, so an invoice raised 120 days ago fell due 90 ago.
+    await sell(fixture, { quantity: 10, rate: 100, date: daysBefore(120) });
+
+    // Midday rather than "now": the defect was that the hour of the run leaked
+    // into the boundary, so the hour is pinned and the answer must not depend
+    // on it.
+    const report = await runAudit({
+      companyId: fixture.companyId,
+      from: WINDOW.from,
+      to: MIDDAY_TODAY,
+    });
+
+    expect(keysOf(report)).not.toContain("LONG_OVERDUE_RECEIVABLE");
+  }, 90_000);
+
+  it("does call one that is ninety-one days past due", async () => {
+    const fixture = await createCompany();
+    await sell(fixture, { quantity: 10, rate: 100, date: daysBefore(121) });
+
+    const report = await runAudit({
+      companyId: fixture.companyId,
+      from: WINDOW.from,
+      to: MIDDAY_TODAY,
+    });
+
+    expect(keysOf(report)).toContain("LONG_OVERDUE_RECEIVABLE");
+  }, 90_000);
+
   it("does not chase an old invoice the goods came back on", async () => {
     const fixture = await createCompany();
     const invoice = await sell(fixture, {
