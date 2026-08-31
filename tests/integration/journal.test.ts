@@ -26,6 +26,10 @@ import {
   JournalError,
 } from "@/server/accounting/journal-service";
 import {
+  STATEMENT_POSTING_SOURCE,
+  STATEMENT_POSTING_REVERSAL_SOURCE,
+} from "@/server/banking/record-from-statement";
+import {
   disconnectTestDb,
   ensurePlatformData,
   purgeTestCompany,
@@ -855,6 +859,16 @@ describe("describing where an entry came from", () => {
     expect(describeSource("PURCHASE")).toBe("Bill");
     expect(describeSource("RECEIPT")).toBe("Receipt");
     expect(describeSource("OPENING_BALANCE")).toBe("Opening balance");
+  });
+
+  it("names the two the banking module posts, rather than printing a constant", () => {
+    // `describeSource` falls back to the source type itself, so a module that
+    // adds one and forgets the label shows a table name — "BankTransaction" —
+    // to somebody reading their own ledger.
+    expect(describeSource(STATEMENT_POSTING_SOURCE)).toBe("Bank statement");
+    expect(describeSource(STATEMENT_POSTING_REVERSAL_SOURCE)).toBe(
+      "Bank statement reversal",
+    );
   });
 
   it("says nothing for an entry somebody typed", () => {

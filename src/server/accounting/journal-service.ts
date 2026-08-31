@@ -13,6 +13,10 @@ import { add, compare, money, subtract, toStorageString } from "@/lib/money";
 import type { JournalEntryInput } from "@/lib/validation/journal";
 import { recordAuditLog } from "@/server/audit/audit-log";
 import { reversePostedEntry } from "@/server/documents/reversal";
+import {
+  STATEMENT_POSTING_SOURCE,
+  STATEMENT_POSTING_REVERSAL_SOURCE,
+} from "@/server/banking/record-from-statement";
 import { postJournalEntry } from "./post-journal-entry";
 
 /**
@@ -362,6 +366,10 @@ const SOURCE_LABELS: Record<string, string> = {
   PAYMENT_VOID: "Payment void",
   OPENING_BALANCE: "Opening balance",
   [MANUAL_REVERSAL_SOURCE]: "Reversal",
+  // Without these two the journal shows a table name and a shouted constant to
+  // somebody reading their own ledger.
+  [STATEMENT_POSTING_SOURCE]: "Bank statement",
+  [STATEMENT_POSTING_REVERSAL_SOURCE]: "Bank statement reversal",
 };
 
 export function describeSource(sourceType: string | null): string | null {

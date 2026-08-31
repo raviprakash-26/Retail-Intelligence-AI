@@ -11,6 +11,10 @@ import {
 import type { StatementDirection } from "@/lib/banking/statement-parser";
 import { recordAuditLog } from "@/server/audit/audit-log";
 import { BankAccountError } from "./bank-account-service";
+import {
+  isPostedFromStatementLine,
+  reverseStatementPosting,
+} from "./record-from-statement";
 
 /**
  * Reconciling a bank account.
@@ -23,6 +27,13 @@ import { BankAccountError } from "./bank-account-service";
  * Matching a statement line to a journal entry writes a link and nothing else.
  * It never posts, never adjusts, and never changes an amount. A reconciliation
  * that could quietly fix a difference would not be a reconciliation.
+ *
+ * Unmatching has one exception, and it is the opposite of that worry. A line
+ * the banking module itself posted from — a bank charge, interest — is linked
+ * to an entry that exists only because of it, so unmatching reverses that entry
+ * rather than stranding it. Nothing is adjusted and no difference is closed:
+ * the posting is taken back in full, through the same reversal every other undo
+ * in the system uses. See `unmatchTransaction`.
  */
 
 export type BookMovement = {
@@ -511,30 +522,110 @@ export async function matchTransaction(params: {
   return result;
 }
 
-/** Breaks a link. The statement line and the entry both stay exactly as they were. */
+/**
+ * Breaks a link.
+ *
+ * For a match somebody made, that is all it is: two records that already
+ * existed stop pointing at each other and both stay exactly as they were.
+ *
+ * A line recorded as a bank charge or as interest is not that. There the link
+ * is the entry's provenance — the entry exists *because* of the line — and
+ * breaking it alone leaves an entry in the ledger that nothing accounts for
+ * and a statement line the page will offer to record all over again.
+ * `recordFromStatement` says so where it writes the link: "leaving it
+ * unmatched would invite somebody to record it a second time."
+ *
+ * That is exactly what happened, and it was silent. Record a ₹236 charge,
+ * unmatch it because the wrong kind was chosen, record it again: bank charges
+ * held ₹472, the bank balance was ₹236 short — and the reconciliation still
+ * reported nothing unexplained, because the stranded entry sat in the
+ * outstanding book items where the difference cancels it. The one visible cue
+ * a business would have had was the figure it was least likely to check.
+ *
+ * There was also no other way out. An entry from a statement line has no
+ * document to void, and `reverseManualEntry` refuses it because its source is
+ * not manual, so unmatching was the only thing that looked like an undo. Now
+ * it is one: the posting is reversed in the same transaction that clears the
+ * link, and the line goes back to being genuinely unrecorded.
+ */
 export async function unmatchTransaction(params: {
   companyId: string;
   bankTransactionId: string;
   userId: string;
   actorEmail: string;
-}): Promise<{ bankTransactionId: string }> {
-  const transaction = await prisma.bankTransaction.findFirst({
-    where: { id: params.bankTransactionId, companyId: params.companyId },
-    select: { id: true, journalEntryId: true },
-  });
-  if (!transaction) {
-    throw new BankAccountError(
-      "That statement line does not belong to this business.",
-      "NOT_FOUND",
-    );
-  }
-  if (transaction.journalEntryId === null) {
-    throw new BankAccountError("That line is not matched.", "NOT_MATCHED");
-  }
+  /**
+   * Whether the caller may post. Reversing is posting, so unmatching a
+   * recorded line asks for the permission `recordFromStatement` asks for
+   * rather than the lighter one that matching two existing entries needs.
+   * A custom role can hold `banking.reconcile` without it.
+   */
+  mayPost: boolean;
+}): Promise<{ bankTransactionId: string; reversalEntryNumber: string | null }> {
+  const result = await prisma.$transaction(async (tx) => {
+    const transaction = await tx.bankTransaction.findFirst({
+      where: { id: params.bankTransactionId, companyId: params.companyId },
+      select: {
+        id: true,
+        journalEntryId: true,
+        journalEntry: {
+          select: {
+            id: true,
+            entryNumber: true,
+            entryDate: true,
+            branchId: true,
+            voucherType: true,
+            sourceType: true,
+            sourceId: true,
+          },
+        },
+      },
+    });
+    if (!transaction) {
+      throw new BankAccountError(
+        "That statement line does not belong to this business.",
+        "NOT_FOUND",
+      );
+    }
+    const entry = transaction.journalEntry;
+    if (transaction.journalEntryId === null || entry === null) {
+      throw new BankAccountError("That line is not matched.", "NOT_MATCHED");
+    }
 
-  await prisma.bankTransaction.update({
-    where: { id: transaction.id },
-    data: { journalEntryId: null, reconciledAt: null },
+    // Its own origin, not a judgement about it. A linked entry is always
+    // POSTED — `matchTransaction` will only link a posted one and this is the
+    // only thing that reverses a recorded one — so there is no reversed case
+    // to exclude here.
+    const recordedFromThisLine = isPostedFromStatementLine(
+      entry,
+      transaction.id,
+    );
+
+    let reversalEntryNumber: string | null = null;
+    if (recordedFromThisLine) {
+      if (!params.mayPost) {
+        throw new BankAccountError(
+          `${entry.entryNumber} was posted from this statement line, so unmatching it has to reverse it. That needs permission to create journal entries.`,
+          "NEEDS_POSTING_PERMISSION",
+        );
+      }
+      const reversal = await reverseStatementPosting(tx, {
+        companyId: params.companyId,
+        entry,
+        userId: params.userId,
+      });
+      reversalEntryNumber = reversal.entryNumber;
+    }
+
+    await tx.bankTransaction.update({
+      where: { id: transaction.id },
+      data: { journalEntryId: null, reconciledAt: null },
+    });
+
+    return {
+      bankTransactionId: transaction.id,
+      previousEntryId: transaction.journalEntryId,
+      reversalEntryNumber,
+    };
   });
 
   await recordAuditLog({
@@ -544,9 +635,15 @@ export async function unmatchTransaction(params: {
     userId: params.userId,
     actorEmail: params.actorEmail,
     entityType: "BankTransaction",
-    entityId: transaction.id,
-    metadata: { previousEntryId: transaction.journalEntryId },
+    entityId: result.bankTransactionId,
+    metadata: {
+      previousEntryId: result.previousEntryId,
+      reversalEntry: result.reversalEntryNumber,
+    },
   });
 
-  return { bankTransactionId: transaction.id };
+  return {
+    bankTransactionId: result.bankTransactionId,
+    reversalEntryNumber: result.reversalEntryNumber,
+  };
 }

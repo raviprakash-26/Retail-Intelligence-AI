@@ -190,6 +190,11 @@ export async function unmatchTransactionAction(
       bankTransactionId: parsed.data.bankTransactionId,
       userId: context.user.id,
       actorEmail: context.user.email,
+      // Unmatching a line the banking module posted from reverses that entry,
+      // and reversing is posting. Asked separately rather than folded into the
+      // permission above, so a reconciler who cannot post can still break a
+      // match somebody made by hand — which posts nothing.
+      mayPost: context.permissions.has("accounting.journal.create"),
     });
     revalidateBanking();
     return ok(result);

@@ -19,7 +19,12 @@ import {
   unmatchTransaction,
 } from "@/server/banking/reconciliation-service";
 import { recordFromStatement } from "@/server/banking/record-from-statement";
-import { postJournalEntry } from "@/server/accounting/post-journal-entry";
+import {
+  postJournalEntry,
+  PeriodClosedError,
+} from "@/server/accounting/post-journal-entry";
+import { closePeriod } from "@/server/accounting/period-service";
+import { subtract } from "@/lib/money";
 import {
   disconnectTestDb,
   ensurePlatformData,
@@ -173,6 +178,29 @@ const viewFor = (fixture: Fixture, from = "2026-04-01", to = "2026-04-30") =>
     from: new Date(`${from}T00:00:00.000Z`),
     to: new Date(`${to}T00:00:00.000Z`),
   });
+
+/**
+ * What the bank charges account actually holds, net.
+ *
+ * Debits alone would not answer it: a reversal is a credit, not a negative
+ * debit, so a charge recorded and taken back leaves 236 in each column and the
+ * question "how much did this business spend on bank charges" is the
+ * difference between them.
+ */
+async function bankChargesBalance(fixture: Fixture): Promise<string> {
+  const totals = await prisma.journalLine.aggregate({
+    where: {
+      companyId: fixture.companyId,
+      status: "POSTED",
+      account: { systemKey: SYSTEM_ACCOUNT.BANK_CHARGES },
+    },
+    _sum: { debit: true, credit: true },
+  });
+  return subtract(
+    totals._sum.debit?.toString() ?? 0,
+    totals._sum.credit?.toString() ?? 0,
+  ).toString();
+}
 
 /** Posts a payment out of the bank, the way a real entry would look. */
 async function postBankPayment(
@@ -694,12 +722,18 @@ describe("matching", () => {
       userId: fixture.userId,
       actorEmail: fixture.actorEmail,
     });
-    await unmatchTransaction({
+    const undone = await unmatchTransaction({
       companyId: fixture.companyId,
       bankTransactionId: transactionId,
       userId: fixture.userId,
       actorEmail: fixture.actorEmail,
+      mayPost: true,
     });
+
+    // Nothing was posted. The entry pre-existed the match, so breaking the
+    // link is the whole of the undo — the exception below is only for entries
+    // that exist *because* of a statement line.
+    expect(undone.reversalEntryNumber).toBeNull();
 
     const afterRow = await prisma.bankTransaction.findFirstOrThrow({
       where: { id: transactionId },
@@ -725,6 +759,12 @@ describe("matching", () => {
     });
     expect(stillPosted.status).toBe("POSTED");
     expect(stillPosted.totalDebit.toString()).toBe("18000");
+
+    // And no reversal was invented for it either.
+    const reversals = await prisma.journalEntry.count({
+      where: { companyId: fixture.companyId, reversesId: entry.id },
+    });
+    expect(reversals).toBe(0);
   }, 90_000);
 });
 
@@ -1223,6 +1263,231 @@ describe("recording what only the bank knew", () => {
       }),
     ).rejects.toThrow(/does not belong to this business/i);
   }, 120_000);
+
+  /**
+   * Taking one back.
+   *
+   * A statement posting is the only entry with no document behind it: there is
+   * nothing to void, and `reverseManualEntry` refuses it because its source is
+   * not manual. So unmatching is the only thing that looks like an undo, and
+   * for a long time it was not one — it broke the link and left the posting
+   * standing, which is what `recordFromStatement` warns about where it writes
+   * that link: "leaving it unmatched would invite somebody to record it a
+   * second time."
+   *
+   * These pin that unmatching a recorded line takes the posting back, and that
+   * it does not touch a match somebody made by hand — the case above.
+   */
+  it("takes the posting back when a recorded line is unmatched", async () => {
+    const fixture = await createCompanyWithBank();
+    await importFor(
+      fixture,
+      statementCsv([
+        { date: "10/04/2026", description: "Quarterly charges", out: "236.00" },
+      ]),
+    );
+    const view = await viewFor(fixture);
+    const lineId = view!.unmatchedStatement[0]!.id;
+
+    const posted = await recordFromStatement({
+      companyId: fixture.companyId,
+      bankTransactionId: lineId,
+      kind: "BANK_CHARGE",
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+
+    const undone = await unmatchTransaction({
+      companyId: fixture.companyId,
+      bankTransactionId: lineId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+      mayPost: true,
+    });
+    expect(undone.reversalEntryNumber).not.toBeNull();
+
+    // The original keeps its number and its place, as every undo in this
+    // system does — a charge that was recorded and taken back can still be
+    // shown to have been recorded.
+    const original = await prisma.journalEntry.findFirstOrThrow({
+      where: { id: posted.entryId },
+      select: { status: true, totalDebit: true },
+    });
+    expect(original.status).toBe("REVERSED");
+    expect(original.totalDebit.toString()).toBe("236");
+
+    const reversal = await prisma.journalEntry.findFirstOrThrow({
+      where: { companyId: fixture.companyId, reversesId: posted.entryId },
+      select: { entryNumber: true, entryDate: true },
+    });
+    expect(reversal.entryNumber).toBe(undone.reversalEntryNumber);
+    // Dated with the original, not with today: the charge is undone where it
+    // was recorded, which is also why a closed period refuses the whole thing.
+    expect(reversal.entryDate.toISOString().slice(0, 10)).toBe("2026-04-10");
+
+    // Nothing is left of the charge, and the line is genuinely unrecorded.
+    expect(await bankChargesBalance(fixture)).toBe("0");
+    const line = await prisma.bankTransaction.findFirstOrThrow({
+      where: { id: lineId },
+      select: { journalEntryId: true, reconciledAt: true },
+    });
+    expect(line.journalEntryId).toBeNull();
+    expect(line.reconciledAt).toBeNull();
+
+    const after = await viewFor(fixture);
+    expect(after?.unmatchedStatement).toHaveLength(1);
+    expect(after?.difference.unexplained.toString()).toBe("0");
+  }, 90_000);
+
+  it("does not double the charge when a line is unmatched and recorded again", async () => {
+    // The defect, end to end. Somebody records a charge, sees they chose the
+    // wrong kind, unmatches — the only undo the page offers — and records it
+    // again. Bank charges used to hold ₹472 for a ₹236 charge and the bank
+    // balance was ₹236 short, and the reconciliation reported nothing
+    // unexplained throughout: the stranded first entry sat in the outstanding
+    // book items, where the difference cancels it exactly.
+    const fixture = await createCompanyWithBank();
+    await importFor(
+      fixture,
+      statementCsv([
+        { date: "10/04/2026", description: "Quarterly charges", out: "236.00" },
+      ]),
+    );
+    const view = await viewFor(fixture);
+    const lineId = view!.unmatchedStatement[0]!.id;
+
+    const who = {
+      companyId: fixture.companyId,
+      bankTransactionId: lineId,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    };
+    await recordFromStatement({ ...who, kind: "BANK_CHARGE" });
+    await unmatchTransaction({ ...who, mayPost: true });
+    await recordFromStatement({ ...who, kind: "BANK_CHARGE" });
+
+    expect(await bankChargesBalance(fixture)).toBe("236");
+
+    // And the bank's own ledger fell by the charge once, not twice. The
+    // opening balance the fixture registers with is 200000.
+    const bank = await prisma.journalLine.aggregate({
+      where: {
+        companyId: fixture.companyId,
+        accountId: fixture.ledgerAccountId,
+        status: "POSTED",
+      },
+      _sum: { debit: true, credit: true },
+    });
+    expect(
+      subtract(
+        bank._sum.debit?.toString() ?? 0,
+        bank._sum.credit?.toString() ?? 0,
+      ).toString(),
+    ).toBe("199764");
+
+    const after = await viewFor(fixture);
+    expect(after?.difference.unexplained.toString()).toBe("0");
+  }, 90_000);
+
+  it("will not let somebody who cannot post unmatch a recorded line", async () => {
+    // Reversing is posting. A custom role can hold `banking.reconcile` without
+    // `accounting.journal.create`, and that reconciler can still break a match
+    // somebody made by hand — which posts nothing — but not this.
+    const fixture = await createCompanyWithBank();
+    await importFor(
+      fixture,
+      statementCsv([
+        { date: "10/04/2026", description: "Quarterly charges", out: "236.00" },
+      ]),
+    );
+    const view = await viewFor(fixture);
+    const lineId = view!.unmatchedStatement[0]!.id;
+    const posted = await recordFromStatement({
+      companyId: fixture.companyId,
+      bankTransactionId: lineId,
+      kind: "BANK_CHARGE",
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+
+    await expect(
+      unmatchTransaction({
+        companyId: fixture.companyId,
+        bankTransactionId: lineId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        mayPost: false,
+      }),
+    ).rejects.toThrow(/permission to create journal entries/i);
+
+    // Refused means nothing happened, not half of it.
+    const line = await prisma.bankTransaction.findFirstOrThrow({
+      where: { id: lineId },
+      select: { journalEntryId: true },
+    });
+    expect(line.journalEntryId).toBe(posted.entryId);
+    expect(await bankChargesBalance(fixture)).toBe("236");
+  }, 90_000);
+
+  it("refuses to take a posting back out of a closed period", async () => {
+    // The reversal carries the original's date, so this is the ordinary period
+    // guard doing its job. What it also pins is that a refusal leaves both
+    // sides as they were — the entry still posted, the line still matched —
+    // rather than the link going and the charge being left standing, which is
+    // the state this whole fix exists to prevent.
+    const fixture = await createCompanyWithBank();
+    await importFor(
+      fixture,
+      statementCsv([
+        { date: "10/04/2026", description: "Quarterly charges", out: "236.00" },
+      ]),
+    );
+    const view = await viewFor(fixture);
+    const lineId = view!.unmatchedStatement[0]!.id;
+    const posted = await recordFromStatement({
+      companyId: fixture.companyId,
+      bankTransactionId: lineId,
+      kind: "BANK_CHARGE",
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+
+    const april = await prisma.fiscalPeriod.findFirstOrThrow({
+      where: {
+        companyId: fixture.companyId,
+        startDate: { lte: new Date("2026-04-10T00:00:00.000Z") },
+        endDate: { gte: new Date("2026-04-10T00:00:00.000Z") },
+      },
+      select: { id: true },
+    });
+    await closePeriod({
+      companyId: fixture.companyId,
+      periodId: april.id,
+      userId: fixture.userId,
+      actorEmail: fixture.actorEmail,
+    });
+
+    await expect(
+      unmatchTransaction({
+        companyId: fixture.companyId,
+        bankTransactionId: lineId,
+        userId: fixture.userId,
+        actorEmail: fixture.actorEmail,
+        mayPost: true,
+      }),
+    ).rejects.toThrow(PeriodClosedError);
+
+    const line = await prisma.bankTransaction.findFirstOrThrow({
+      where: { id: lineId },
+      select: { journalEntryId: true },
+    });
+    expect(line.journalEntryId).toBe(posted.entryId);
+    const original = await prisma.journalEntry.findFirstOrThrow({
+      where: { id: posted.entryId },
+      select: { status: true },
+    });
+    expect(original.status).toBe("POSTED");
+  }, 90_000);
 
   it("leaves the books balanced after everything above", async () => {
     const fixture = await createCompanyWithBank();
