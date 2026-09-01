@@ -260,6 +260,13 @@ export async function updatePartyAction(
   if (originError) return originError;
 
   const context = await assertPermission(PARTY_PERMISSION[kind].manage);
+
+  // Editing a party can post. Changing the opening balance puts an "Opening
+  // balance correction" into the books through the same `postOpeningDelta`
+  // that `createParty` uses for the original — so the two routes to one entry
+  // have to ask the same question, and only one of them was.
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
   const schema = kind === "CUSTOMER" ? customerSchema : supplierSchema;
   const parsed = schema.safeParse(input);
   if (!parsed.success) {

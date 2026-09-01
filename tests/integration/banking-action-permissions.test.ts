@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { SYSTEM_ACCOUNT } from "@/lib/accounting/system-accounts";
 import type { PermissionKey } from "@/lib/rbac/permissions";
+import { ACTION_ERROR } from "@/server/auth/action-result";
 import type { RegisterInput } from "@/lib/validation/auth";
 import { registerOwner } from "@/server/auth/registration";
 import { createBankAccount } from "@/server/banking/bank-account-service";
@@ -30,6 +31,11 @@ import {
  * while a role holding `banking.reconcile` alone quietly gains the ability to
  * post. Those roles exist — `updateRole` takes any subset of the permission
  * keys, so a company can build exactly that one.
+ *
+ * The subscription is the other gate, and it is asked the same way. Reversing
+ * is posting, and a business whose subscription has lapsed may not post — every
+ * other undo in the codebase asks before it does anything, and this one was
+ * taught to reverse without the guard following it across.
  *
  * Only the auth boundary is stubbed. The action itself is the real one.
  */
@@ -199,5 +205,43 @@ describe("unmatching a recorded line through the action", () => {
       select: { status: true },
     });
     expect(entry.status).toBe("REVERSED");
+  }, 90_000);
+});
+
+describe("unmatching a recorded line on a lapsed subscription", () => {
+  it("posts nothing for a business with no plan", async () => {
+    const { lineId, entryId } = await shopWithRecordedCharge();
+    permissions = new Set<PermissionKey>([
+      "banking.view",
+      "banking.reconcile",
+      "accounting.journal.create",
+    ]);
+    // No subscription row at all is the read-only state `unsubscribed()`
+    // describes: "Everything already recorded stays readable and exportable;
+    // posting new entries needs one."
+    await prisma.subscription.deleteMany({
+      where: { companyId: actor.companyId },
+    });
+
+    const result = await unmatchTransactionAction({
+      bankTransactionId: lineId,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.code).toBe(
+      ACTION_ERROR.SUBSCRIPTION_READ_ONLY,
+    );
+
+    // The charge is still in the books and the line is still matched to it.
+    const entry = await prisma.journalEntry.findFirstOrThrow({
+      where: { id: entryId },
+      select: { status: true },
+    });
+    expect(entry.status).toBe("POSTED");
+    const line = await prisma.bankTransaction.findFirstOrThrow({
+      where: { id: lineId },
+      select: { journalEntryId: true },
+    });
+    expect(line.journalEntryId).toBe(entryId);
   }, 90_000);
 });

@@ -177,6 +177,22 @@ export async function unmatchTransactionAction(
   if (originError) return originError;
 
   const context = await assertPermission("banking.reconcile");
+
+  // Unmatching a line this module posted from reverses that entry, which is
+  // posting, and every other undo in the codebase asks first — `voidSale`,
+  // `voidPurchase`, `voidExpense`, `reverseJournalEntry`, all of them.
+  //
+  // Asked for every unmatch rather than only the ones that will post. Breaking
+  // a match somebody made by hand posts nothing and a lapsed subscription
+  // could in principle be left free to do it, the way `matchTransaction` is.
+  // But the rule worth holding is the simple one — an action that can post
+  // asks before it does anything — and refusing a bookkeeping edit to a
+  // business that has stopped paying costs it nothing it cannot get back by
+  // paying. Reading, printing and exporting stay open either way, which is
+  // what the guard promises.
+  const refusal = await billingRefusal(context.company.id, {});
+  if (refusal) return refusal;
+
   const parsed = unmatchSchema.safeParse(input);
   if (!parsed.success) {
     return fail("That is not something this page can unmatch.", {
