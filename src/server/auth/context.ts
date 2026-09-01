@@ -275,19 +275,26 @@ export async function requirePermission(
   return context;
 }
 
-/** Raised by service code when a permission check fails outside a route. */
-export class PermissionDeniedError extends Error {
-  constructor(readonly permission: PermissionKey) {
-    super(`Missing permission: ${permission}`);
-    this.name = "PermissionDeniedError";
-  }
-}
-
 /**
  * Permission assertion for server actions.
  *
- * Actions return a result object rather than throwing a navigation signal, so
- * this throws a plain error the action can convert into a form-level message.
+ * The same question `requirePermission` answers for a page, answered the same
+ * way: `forbidden()`, which renders `forbidden.tsx`.
+ *
+ * It used to throw a plain `PermissionDeniedError` instead, and said why —
+ * "Actions return a result object rather than throwing a navigation signal, so
+ * this throws a plain error the action can convert into a form-level message."
+ * No action converted it. All ninety-two call this as their first or second
+ * statement, outside the `try` that wraps the service call, so the error left
+ * the action as a rejected promise; and the client helpers are written for the
+ * contract that comment describes, awaiting a result and testing `ok` with no
+ * `catch` around it. The rejection went nowhere. A member who had lost a
+ * permission clicked the button, the spinner stopped, and nothing happened —
+ * no message, no page, no clue.
+ *
+ * The branch above was already the counter-example: a missing session calls
+ * `unauthorized()`, a navigation signal, in the function whose comment said it
+ * avoided them. Both fallbacks ship, and `authInterrupts` is on to serve them.
  */
 export async function assertPermission(
   permission: PermissionKey,
@@ -295,7 +302,7 @@ export async function assertPermission(
   const context = await getCompanyContext();
   if (!context) unauthorized();
   if (!context.permissions.has(permission)) {
-    throw new PermissionDeniedError(permission);
+    forbidden();
   }
   return context;
 }
