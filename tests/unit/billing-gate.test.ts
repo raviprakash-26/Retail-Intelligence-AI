@@ -1,9 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { globSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /**
- * An action that can post to the ledger asks billing first.
+ * Every server action that can post has to ask billing first.
  *
  * A lapsed subscription closes exactly one door. `guards.ts` says so: reading,
  * printing and exporting what is already there stay open, because those books
@@ -14,255 +14,208 @@ import { describe, expect, it } from "vitest";
  *   > navigation marks locked items and the pages render an explanation, but
  *   > both are presentation. A control that is merely hidden is not a lock.
  *
- * Across the codebase that rule was kept with one shape: every action that can
- * reach `postJournalEntry` consults `billingRefusal`, and every action that
- * only edits master data does not. Sales, purchases, returns, receipts and
- * payments, expenses, payroll, stock adjustments, bank postings and the
- * importer all sit on the first side of that line.
+ * This rule has now been broken three times, and each break taught the sweep
+ * that holds it something.
  *
- * The accounting module did not. A shop whose subscription had lapsed could
- * not raise an invoice, and could open the journal and post the debits and
- * credits that invoice would have made — or close its year, which writes a
- * closing entry of its own. The lock was on the front door and the side door
- * was open, which is the exact failure the paragraph above was written about.
+ * **The accounting module, caught by a file-level rule.** A shop whose
+ * subscription had lapsed could not raise an invoice, and could open the
+ * journal and post the debits and credits that invoice would have made — or
+ * close its year, which writes a closing entry of its own. The lock was on the
+ * front door and the side door was open. Asking whether each *file* that can
+ * reach the ledger mentions `billingRefusal` caught that, because the module
+ * mentioned it nowhere.
  *
- * So this is a tripwire rather than a list of the four that were missing. The
- * next module to post something will be caught here rather than shipped.
+ * **Two more that a file-level rule cannot see**, and the older sweep said so
+ * itself: "a file with two writers and one gate still contains the call". It
+ * answered that with a hand-written list of the actions that must ask — and a
+ * hand-written list is only as complete as the day it was written.
+ *
+ *   • **`unmatchTransactionAction`.** Unmatching used to break a link and
+ *     nothing else, so it needed no billing question. Then it was taught to
+ *     reverse the entry a statement line had posted — and became a posting
+ *     action without anybody moving the guard to match. Its file already
+ *     called `billingRefusal` for `recordFromStatementAction`, so the file
+ *     rule was satisfied, and it was not on the list. Every sibling undo asks:
+ *     `voidSale`, `voidPurchase`, `voidExpense`, `voidPayroll`, `voidReceipt`,
+ *     `voidPayment`, `reverseJournalEntry`.
+ *
+ *   • **`updatePartyAction`.** Editing a customer looks like master data and
+ *     mostly is, but changing the opening balance posts an "Opening balance
+ *     correction" through the same `postOpeningDelta` that `createParty` uses
+ *     for the original entry. `createPartyAction` asks, in the same file, so
+ *     again the file rule was satisfied — and master data was not on a list of
+ *     modules anybody thought of as posting.
+ *
+ * So the question is asked per action, and answered by following what that
+ * action can actually call: no list of writers to keep current, only the one
+ * exemption below. Neither of the two was visible by reading the action — one
+ * is a change of behaviour three files away, the other a branch inside a
+ * service that mostly writes a phone number.
+ *
+ * The converse is deliberately not asserted. Plenty of actions ask about a
+ * feature or a numeric allowance without ever touching the ledger —
+ * `askAccountant`, `createBranch`, `inviteMember` — and that is the guard's
+ * other job.
  */
 
-/** The one funnel every posting goes through. */
-const LEDGER = "postJournalEntry";
-
-/** What an action calls to ask. */
-const GATE = "billingRefusal";
+/** Reaching one of these is what makes an action a posting action. */
+const LEDGER = new Set(["postJournalEntry", "reversePostedEntry"]);
 
 /**
- * Deliberately outside the rule, with the reason.
+ * Actions that reach the ledger and are right not to ask, with the reason.
  *
- * Registration posts a company's opening entries, so it reaches the ledger like
- * any other writer — but it is how a business becomes a subscriber in the first
- * place. Asking billing whether an account that does not exist yet may be
- * created would mean nobody could ever sign up.
+ * Named rather than pattern-matched, for the reason the other sweeps in this
+ * suite give: an omission and a decision look identical in a codebase, and
+ * only one of them should pass.
  */
-const EXEMPT: ReadonlyMap<string, string> = new Map([
-  [
-    "src/server/auth/actions.ts",
-    "registration creates the subscription it would otherwise be checked against",
-  ],
-]);
+const DELIBERATE: Record<string, string> = {
+  registerAction:
+    "Registration posts the opening balances of a company that does not exist yet, and it is how a business becomes a subscriber in the first place. Asking billing whether an account that does not exist may be created would mean nobody could ever sign up.",
+};
+
+const DECLARATION =
+  /^(?:export )?(?:async )?function ([a-zA-Z_$][\w$]*)\s*[(<]/gm;
+const CALL = /\b([a-zA-Z_$][\w$]*)\s*\(/g;
 
 /**
- * The individual actions that must ask, named rather than counted.
+ * Every top-level function in the server and library trees, by name.
  *
- * The file-level rule below catches a whole module that forgets. It cannot
- * catch one action inside a module that remembers, because a file with two
- * writers and one gate still contains the call — a gap found by removing a
- * single guard and watching the rule stay green.
- *
- * So the posting actions are named. A count would be satisfied by deleting one;
- * each of these is somewhere a shopkeeper puts a figure into the ledger.
+ * A name can be declared in more than one file, so each maps to a list and a
+ * reach is a reach through any of them. That errs towards flagging, which is
+ * the right direction: a false positive is one line in `DELIBERATE` with a
+ * reason attached, and a false negative is an ungated posting action.
  */
-const MUST_ASK: ReadonlyArray<{ file: string; actions: readonly string[] }> = [
-  {
-    file: "src/server/accounting/journal-actions.ts",
-    actions: ["createJournalEntryAction", "reverseJournalEntryAction"],
-  },
-  {
-    file: "src/server/accounting/period-actions.ts",
-    // Not the two period actions beside them: closing and reopening a month
-    // moves a status and posts nothing.
-    actions: ["closeFiscalYearAction", "reopenFiscalYearAction"],
-  },
-  {
-    file: "src/server/sales/actions.ts",
-    actions: ["createSaleAction", "voidSaleAction"],
-  },
-  {
-    file: "src/server/purchases/actions.ts",
-    actions: ["createPurchaseAction", "voidPurchaseAction"],
-  },
-  {
-    file: "src/server/returns/actions.ts",
-    actions: ["createSalesReturnAction", "createPurchaseReturnAction"],
-  },
-  {
-    file: "src/server/settlements/actions.ts",
-    actions: [
-      "createReceiptAction",
-      "createPaymentAction",
-      "voidReceiptAction",
-      "voidPaymentAction",
-    ],
-  },
-  {
-    file: "src/server/expenses/actions.ts",
-    actions: ["createExpenseAction", "voidExpenseAction"],
-  },
-  {
-    file: "src/server/inventory/actions.ts",
-    actions: ["createStockAdjustmentAction"],
-  },
-  { file: "src/server/payroll/actions.ts", actions: ["runPayrollAction"] },
-  {
-    file: "src/server/banking/actions.ts",
-    actions: ["recordFromStatementAction"],
-  },
-];
+function functionBodies(): Map<string, string[]> {
+  const bodies = new Map<string, string[]>();
+  const files = [
+    ...globSync("src/server/**/*.ts", { cwd: process.cwd() }),
+    ...globSync("src/lib/**/*.ts", { cwd: process.cwd() }),
+  ];
 
-/** One exported action's source, from its signature to the next one. */
-function bodyOf(file: string, action: string): string | null {
-  const text = readFileSync(file, "utf8");
-  const start = text.indexOf(`export async function ${action}(`);
-  if (start === -1) return null;
-  const rest = text.slice(start + 1);
-  const next = rest.indexOf("\nexport async function ");
-  return next === -1 ? rest : rest.slice(0, next);
-}
-
-function resolveImport(spec: string, from: string): string | null {
-  let base: string;
-  if (spec.startsWith("@/")) base = `src/${spec.slice(2)}`;
-  else if (spec.startsWith(".")) {
-    base = `${from.split("/").slice(0, -1).join("/")}/${spec}`;
-  } else return null;
-
-  const normalised = base
-    .split("/")
-    .reduce<string[]>((parts, part) => {
-      if (part === "." || part === "") return parts;
-      if (part === "..") {
-        parts.pop();
-        return parts;
-      }
-      parts.push(part);
-      return parts;
-    }, [])
-    .join("/");
-
-  for (const candidate of [`${normalised}.ts`, `${normalised}/index.ts`]) {
-    if (existsSync(candidate)) return candidate;
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    const marks = [...text.matchAll(DECLARATION)].map((match) => ({
+      at: match.index,
+      name: match[1]!,
+    }));
+    marks.forEach((mark, index) => {
+      const end = marks[index + 1]?.at ?? text.length;
+      const body = text.slice(mark.at, end);
+      const existing = bodies.get(mark.name);
+      if (existing) existing.push(body);
+      else bodies.set(mark.name, [body]);
+    });
   }
-  return null;
+  return bodies;
 }
 
-function importsOf(file: string): string[] {
-  return [...readFileSync(file, "utf8").matchAll(/from\s+"([^"]+)"/g)]
-    .map((match) => resolveImport(match[1]!, file))
-    .filter((resolved): resolved is string => resolved !== null);
-}
+/** Can this function reach the ledger, through anything it calls? */
+function reachesLedger(
+  name: string,
+  bodies: Map<string, string[]>,
+  seen: Set<string>,
+): boolean {
+  if (LEDGER.has(name)) return true;
+  if (seen.has(name)) return false;
+  seen.add(name);
 
-/** Server actions: the entry points a browser can reach directly. */
-function actionFiles(): string[] {
-  return globSync("src/server/**/*.ts").filter((file) =>
-    readFileSync(file, "utf8").startsWith('"use server"'),
-  );
+  for (const body of bodies.get(name) ?? []) {
+    for (const call of new Set([...body.matchAll(CALL)].map((m) => m[1]!))) {
+      if (call !== name && reachesLedger(call, bodies, seen)) return true;
+    }
+  }
+  return false;
 }
 
 /**
- * Whether an action file can reach a posting.
+ * The actions that reach the ledger without asking, given a set of exemptions.
  *
- * One hop, not the whole graph. An action calls its own module's service and
- * that service posts, which is the shape every one of these has; following the
- * graph further would drag in `db.ts` and report the whole codebase.
+ * Extracted so the detector can be run against inputs that are known to be
+ * wrong. `expect(offenders).toEqual([])` on its own cannot tell a clean
+ * codebase from a broken sweep — weaken any filter in it and it still passes,
+ * because a detector that flags nothing and a codebase with nothing to flag
+ * look exactly the same from the outside.
  */
-function postingImports(file: string): string[] {
-  return importsOf(file).filter((imported) =>
-    new RegExp(`${LEDGER}\\s*\\(`).test(readFileSync(imported, "utf8")),
-  );
+function offendersIn(
+  bodies: Map<string, string[]>,
+  deliberate: Readonly<Record<string, string>>,
+): string[] {
+  return [...bodies.keys()]
+    .filter((name) => name.endsWith("Action"))
+    .filter((name) => reachesLedger(name, bodies, new Set()))
+    .filter(
+      (name) =>
+        !(bodies.get(name) ?? []).some((body) =>
+          body.includes("billingRefusal"),
+        ),
+    )
+    .filter((name) => !(name in deliberate))
+    .sort();
 }
 
-describe("the gate in front of the ledger", () => {
-  it("finds the writers it is meant to be checking", () => {
-    // The detector's own test. A rule that matched nothing would pass the case
-    // below by finding nothing to complain about, which is the same green a
-    // correct codebase gives and worth telling apart.
-    const writers = actionFiles().filter(
-      (file) => postingImports(file).length > 0,
-    );
+describe("an action that can post asks billing before it does", () => {
+  const bodies = functionBodies();
+  const actions = [...bodies.keys()].filter((name) => name.endsWith("Action"));
 
-    expect(
-      writers.length,
-      "no action file appears to reach the ledger",
-    ).toBeGreaterThan(5);
-    expect(writers.map((file) => file.replace(/\\/g, "/"))).toEqual(
+  it("finds the actions in the first place", () => {
+    // A sweep that matched nothing would pass in silence for ever. These four
+    // are the shape it has to keep seeing: two that post and ask, one that
+    // posts and is exempt, one that never goes near the ledger.
+    expect(actions).toEqual(
       expect.arrayContaining([
-        "src/server/sales/actions.ts",
-        "src/server/purchases/actions.ts",
-        "src/server/accounting/journal-actions.ts",
+        "createSaleAction",
+        "voidSaleAction",
+        "registerAction",
+        "globalSearchAction",
       ]),
     );
+    expect(actions.length).toBeGreaterThan(50);
   });
 
-  it("is asked by every action that can post", () => {
-    const unguarded: string[] = [];
-
-    for (const file of actionFiles()) {
-      const path = file.replace(/\\/g, "/");
-      if (EXEMPT.has(path)) continue;
-
-      const posting = postingImports(file);
-      if (posting.length === 0) continue;
-
-      if (!readFileSync(file, "utf8").includes(`${GATE}(`)) {
-        unguarded.push(
-          `${path} — reaches the ledger through ${posting
-            .map((imported) => imported.split("/").pop())
-            .join(", ")} — and never asks ${GATE}`,
-        );
-      }
-    }
-
-    expect(
-      unguarded,
-      `these can post to the ledger without asking whether the subscription allows it:\n${unguarded.join(
-        "\n",
-      )}`,
-    ).toEqual([]);
+  it("still sees a path to the ledger where one exists", () => {
+    // The reachability is the whole test, so it is worth pinning that it works
+    // in both directions rather than trusting a sweep that could be finding
+    // nothing because it resolves nothing.
+    expect(reachesLedger("voidSaleAction", bodies, new Set())).toBe(true);
+    expect(reachesLedger("createPartyAction", bodies, new Set())).toBe(true);
+    expect(reachesLedger("globalSearchAction", bodies, new Set())).toBe(false);
   });
 
-  it("is asked inside each posting action, not merely somewhere in its file", () => {
-    const missing: string[] = [];
+  it("flags a posting action that does not ask", () => {
+    // The detector, run against something that is definitely wrong: an action
+    // that calls the posting funnel and asks nothing first. Without this the
+    // filters below could all be inverted and the suite would stay green.
+    const planted = new Map(bodies);
+    planted.set("plantedAction", [
+      "export async function plantedAction() { await postJournalEntry(tx, {}); }",
+    ]);
+    expect(offendersIn(planted, DELIBERATE)).toEqual(["plantedAction"]);
 
-    for (const { file, actions } of MUST_ASK) {
-      for (const action of actions) {
-        const body = bodyOf(file, action);
-        if (body === null) {
-          missing.push(`${file} — ${action} no longer exists under that name`);
-          continue;
-        }
-        if (!body.includes(`${GATE}(`)) {
-          missing.push(`${file} — ${action} posts without asking ${GATE}`);
-        }
-      }
-    }
-
-    expect(
-      missing,
-      `these put a figure into the ledger without asking whether the subscription allows it:\n${missing.join(
-        "\n",
-      )}`,
-    ).toEqual([]);
+    // And one that does ask is not flagged, so the guard is what clears it
+    // rather than the name.
+    const guarded = new Map(bodies);
+    guarded.set("plantedAction", [
+      "export async function plantedAction() { await billingRefusal(id, {}); await postJournalEntry(tx, {}); }",
+    ]);
+    expect(offendersIn(guarded, DELIBERATE)).toEqual([]);
   });
 
-  it("keeps a reason beside anything held out of the rule", () => {
-    // An exemption is a decision somebody made. Without a sentence saying why,
-    // the next reader cannot tell it from an oversight — which is what the
-    // accounting module looked like.
-    for (const [path, reason] of EXEMPT) {
-      expect(existsSync(path), `${path} is exempted but no longer exists`).toBe(
-        true,
-      );
-      expect(
-        reason.length,
-        `${path} is exempted without a reason`,
-      ).toBeGreaterThan(20);
+  it("exempts only what is named", () => {
+    // With nothing exempt, the one deliberate case is the only thing standing.
+    // This is what makes `DELIBERATE` load-bearing: empty the table and the
+    // sweep must notice, rather than the table being decoration.
+    expect(offendersIn(bodies, {})).toEqual(Object.keys(DELIBERATE).sort());
+  });
 
-      // And it must still be a writer; an exemption for something that cannot
-      // post is dead weight that hides the next real one.
-      expect(
-        postingImports(path).length,
-        `${path} no longer reaches the ledger, so its exemption should go`,
-      ).toBeGreaterThan(0);
+  it("has no posting action left that does not ask", () => {
+    expect(offendersIn(bodies, DELIBERATE)).toEqual([]);
+  });
+
+  it("keeps a reason beside every exemption", () => {
+    for (const [name, reason] of Object.entries(DELIBERATE)) {
+      expect(actions).toContain(name);
+      expect(reachesLedger(name, bodies, new Set())).toBe(true);
+      expect(reason.length).toBeGreaterThan(40);
     }
   });
 });
