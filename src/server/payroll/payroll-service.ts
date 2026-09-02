@@ -64,6 +64,7 @@ export class PayrollError extends Error {
       | "NOT_FOUND"
       | "NOT_POSTED"
       | "NOTHING_TO_PAY"
+      | "WITHHOLDING_EXCEEDS_PAY"
       | "ALREADY_CANCELLED"
       | "NO_ENTRY"
       | "ALREADY_SETTLED",
@@ -373,6 +374,7 @@ export async function createPayrollRun(params: {
         },
         select: {
           id: true,
+          name: true,
           basicSalary: true,
           allowances: true,
         },
@@ -402,6 +404,47 @@ export async function createPayrollRun(params: {
         throw new PayrollError(
           "Every active employee is on nil pay, so there is nothing to post.",
           "NOTHING_TO_PAY",
+        );
+      }
+
+      // Nobody can be paid less than nothing.
+      //
+      // TDS is the one figure on this form a person types, and a slipped digit
+      // — 50,000 where 5,000 was meant — is inside the schema's ceiling and
+      // looks like every other number on the page. What it produces is a
+      // payslip whose net is below zero, which is not a small pay packet but a
+      // debt owed the other way, and payroll has no way to say that.
+      //
+      // **Per employee, not on the run's total**, and that is the whole point.
+      // A negative payslip only reaches the ledger when the rest of the payroll
+      // hides it: one employee over-withheld by 20,000 beside another owed
+      // 89,000 nets to a perfectly ordinary 69,000, the entry balances, and
+      // Salary Payable is credited with the sum of a real debt and a fictitious
+      // one. It posts, and nothing anywhere says so.
+      //
+      // Alone, it did not post — `condenseLines` hands the funnel a negative
+      // credit and `validateDraft` refuses it. But it refuses in the language
+      // of journal lines, "Line 2 has a negative amount", wrapped in an
+      // `UnbalancedEntryError` that no payroll error mapping knows; the shop
+      // saw "Something went wrong, please try again", trying again did the same
+      // thing, and it was logged as an unexpected failure rather than the data
+      // entry mistake it is. The run guards above have the same shape and the
+      // first of them says why: the constraint below already refuses this, and
+      // this turns it into a sentence somebody can act on.
+      const overWithheld = employees
+        .map((employee, index) => ({ employee, result: results[index]! }))
+        .filter(({ result }) => compare(result.net, 0) < 0);
+
+      if (overWithheld.length > 0) {
+        const named = overWithheld
+          .map(
+            ({ employee, result }) =>
+              `${employee.name} (${result.taxDeductedAtSource.toFixed(2)} withheld from ${result.gross.toFixed(2)})`,
+          )
+          .join("; ");
+        throw new PayrollError(
+          `More tax is being withheld than there is pay to withhold it from: ${named}. Check the TDS column for ${overWithheld.length === 1 ? "that employee" : "those employees"}.`,
+          "WITHHOLDING_EXCEEDS_PAY",
         );
       }
 

@@ -382,6 +382,122 @@ describe("what payroll refuses to do", () => {
     await expect(run(fixture)).rejects.toThrow(PayrollError);
   }, 90_000);
 
+  /**
+   * A payslip cannot be negative.
+   *
+   * TDS is the one figure on the run form a person types — the platform will
+   * not compute it and says so — and a slipped digit puts 50,000 where 5,000
+   * was meant. That is inside the schema's ceiling and looks like every other
+   * number on the page.
+   *
+   * The second of these is the one that mattered. Alone, an over-withheld
+   * employee never reached the ledger: the funnel refused a negative credit.
+   * Beside a colleague whose pay covered it, the run's total came out
+   * positive, the entry balanced, and it posted — a payslip reading net
+   * -20,000, and Salary Payable credited with the sum of a real debt and a
+   * fiction. So the check is per employee, because the total is exactly what
+   * hides it.
+   */
+  it("will not withhold more tax than an employee is paid", async () => {
+    const fixture = await createCompany();
+    const employee = await hire(fixture, "Meena Kumari", 30_000, 0);
+
+    await expect(
+      createPayrollRun({
+        ...fixture,
+        branchId: null,
+        year: 2026,
+        month: 6,
+        payDate: today,
+        taxDeducted: { [employee.id]: 50_000 },
+      }),
+    ).rejects.toThrow(
+      /More tax is being withheld than there is pay.*Meena Kumari \(50000\.00 withheld from 30000\.00\)/,
+    );
+
+    // Refused before anything was written, not rolled back from halfway.
+    expect(await listPayrollRuns(fixture.companyId)).toHaveLength(0);
+  }, 90_000);
+
+  it("will not let one employee's pay cover another's over-withholding", async () => {
+    const fixture = await createCompany();
+    const [manager, assistant] = await Promise.all([
+      hire(fixture, "Anand Rao", 90_000, 0),
+      hire(fixture, "Meena Kumari", 30_000, 0),
+    ]);
+
+    await expect(
+      createPayrollRun({
+        ...fixture,
+        branchId: null,
+        year: 2026,
+        month: 6,
+        payDate: today,
+        // 69,000 in total, which is an ordinary month's net for these two and
+        // balances perfectly. It used to post.
+        taxDeducted: { [manager.id]: 1_000, [assistant.id]: 50_000 },
+      }),
+    ).rejects.toThrow(/Meena Kumari/);
+
+    expect(await listPayrollRuns(fixture.companyId)).toHaveLength(0);
+    const slips = await prisma.payrollItem.count({
+      where: { companyId: fixture.companyId },
+    });
+    expect(slips).toBe(0);
+  }, 120_000);
+
+  it("names every employee that is wrong, not just the first", async () => {
+    // A pasted column is wrong in more than one row, and fixing them one run
+    // at a time is a worse afternoon than being told all of them at once.
+    const fixture = await createCompany();
+    const [one, two] = await Promise.all([
+      hire(fixture, "Anand Rao", 90_000, 0),
+      hire(fixture, "Meena Kumari", 30_000, 0),
+    ]);
+
+    const refusal = await createPayrollRun({
+      ...fixture,
+      branchId: null,
+      year: 2026,
+      month: 6,
+      payDate: today,
+      taxDeducted: { [one.id]: 95_000, [two.id]: 50_000 },
+    }).then(
+      () => null,
+      (error: unknown) => error as PayrollError,
+    );
+
+    expect(refusal?.code).toBe("WITHHOLDING_EXCEEDS_PAY");
+    expect(refusal?.message).toMatch(/Anand Rao/);
+    expect(refusal?.message).toMatch(/Meena Kumari/);
+    expect(refusal?.message).toMatch(/those employees/);
+  }, 120_000);
+
+  it("pays a whole month's wage over as tax, which is odd but not wrong", async () => {
+    // The boundary the check has to leave alone. Withholding exactly the pay
+    // leaves nothing to hand over and no debt either way, and the entry simply
+    // has no salary payable line — `condenseLines` drops it.
+    const fixture = await createCompany();
+    const employee = await hire(fixture, "Meena Kumari", 30_000, 0);
+
+    const posted = await createPayrollRun({
+      ...fixture,
+      branchId: null,
+      year: 2026,
+      month: 6,
+      payDate: today,
+      taxDeducted: { [employee.id]: 30_000 },
+    });
+
+    expect(posted.netAmount).toBe(toStorageString(0));
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.SALARY_PAYABLE),
+    ).toBe(toStorageString(0));
+    expect(
+      await accountBalance(fixture.companyId, SYSTEM_ACCOUNT.TDS_PAYABLE),
+    ).toBe(toStorageString(-30_000));
+  }, 90_000);
+
   it("will not touch another company's run", async () => {
     const [mine, theirs] = await Promise.all([
       createCompany(),
